@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0
+
+- SIP→Baichuan-Talkback erhält einen füllstands- und trendabhängigen elastischen Block-Playout: maximal 2 % Zeitdehnung bei knapper Versorgung und maximal 3 % Zeitstauchung zum Abbau eines Rückstands oder einer vorübergehend erhaltenen Reserve.
+- Restunterläufe werden nicht kaschiert oder verzögert: fehlende Samples bleiben Stille, der gültige Signalrand und die spätere Rückkehr werden jedoch kausal über 5 ms mit einer Half-Hann-Fensterfunktion aus- beziehungsweise eingeblendet.
+- Nach unvermeidbarem Drop-oldest-Überlauf verbindet ein kausaler 5-ms-Splice den letzten ausgegebenen Samplewert mit dem neuen FIFO-Anfang und reduziert dadurch harte Sprünge.
+- Keine neue Signalwartezeit: kein Lookahead, kein zusätzlicher Startpuffer, kein größerer FIFO, keine zusätzliche Timerperiode und keine Änderung an ausgehandelter Blockgröße oder Baichuan-Schreibkadenz. Der bestehende FIFO bleibt auf vier Reolink-Blöcke begrenzt.
+- Debug-Abschlussstatistik unterscheidet rohe Fehlmenge von verbleibender Stille und ergänzt FIFO-Füllstandsbereich/-mittel, Stretch-/Compress-Zähler und -Verhältnisse, Versorgungstrend, Blenden und Überlauf-Splices.
+- AEC-Renderreferenz bleibt nach der IMA-ADPCM-Kodierung am tatsächlichen Reolink-Write. Kamera→SIP-Playout-PLL, Startup-Kalibrierungsmarker, fester Coarse-Delay, AEC3, deaktivierter Go-Live-Tracker und native WebRTC-Verarbeitung bleiben unverändert.
+- Synthetische Regressionstests decken kleine und harte Unterläufe, vollständigen Leerlauf, Trendreaktion und Reserveabbau, Hochwasser-Kompression, Überlauf-Splice, Verhältnisgrenzen, Fensterkanten, FIFO-Statistik und bestehende ADPCM/AEC-Write-Semantik ab.
+- Home-Assistant-Optionen, Gruppierung, Defaults und Migration bleiben unverändert; App-, Gateway-, SIP-/RTSP-User-Agent- und Container-Buildversion werden auf 0.6.0 angehoben.
+
 ## 0.5.14
 
 - Konfigurationsseite logisch neu sortiert: SIP-Zugang und Rufparameter zuerst, anschließend Codec sowie die als „erweitert“ gekennzeichneten SIP-Ports; Klingelentprellung direkt nach dem Besucher-Sensor; Passivmodus vor Protokollstufe.

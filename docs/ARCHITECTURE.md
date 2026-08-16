@@ -69,10 +69,13 @@ telephone
         v
 PCM
         |
-        +--> AEC render reference at actual Reolink playout
+        v
+16 kHz conversion / bounded elastic FIFO playout
         |
         v
-16 kHz conversion / Reolink IMA-ADPCM
+Reolink IMA-ADPCM
+        |
+        +--> AEC render reference at actual Reolink write
         |
         v
 Baichuan Live Talk -> NVR/doorbell speaker
@@ -102,4 +105,13 @@ Hardware testing found that the former live correlation tracker could report a s
 
 ## Buffering
 
-The camera receive path includes a smoother/PLL to turn bursty decoder output into a stable media clock. SIP-to-Baichuan talkback uses a bounded FIFO so latency cannot grow without limit. Current 0.5.x behavior keeps that transport unchanged; more advanced concealment or cross-fading is intentionally deferred to a later functional release.
+The camera receive path includes a smoother/PLL to turn bursty decoder output into a stable media clock. This camera-to-SIP controller is independent of talkback and remains unchanged in v0.6.0.
+
+SIP-to-Baichuan talkback retains its four-Reolink-block FIFO and drop-oldest overflow rule so latency cannot grow without limit. When a block is due, v0.6.0 consumes adaptively from that FIFO and maps the result onto exactly one negotiated block:
+
+- up to 2% time expansion when the queue is short or its supply trend predicts a shortage,
+- up to 3% time compression while draining a backlog or repaying a temporary reserve,
+- a causal 5 ms half-Hann fade at residual silence boundaries,
+- a causal 5 ms boundary splice after samples had to be dropped on overflow.
+
+There is no lookahead, startup prebuffer, extra timer tick or larger FIFO. Every block is still written on the existing Baichuan cadence. The AEC render reference is reconstructed from the encoded ADPCM block after this processing and observed at the actual transport write, so it continues to describe what the doorbell really received.

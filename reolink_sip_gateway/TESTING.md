@@ -1,8 +1,8 @@
-# Prüfprotokoll 0.5.14
+# Prüfprotokoll 0.6.0
 
 ## Ziel
 
-0.5.0 automatisiert die in 0.4.3 hardwarebestätigte native WebRTC-AEC und reduziert die Benutzerkonfiguration. Zu prüfen sind daher vor allem Migration, Startkalibrierung, vollständige Profilwahl und die korrigierte Statistikdiagnose.
+0.6.0 glättet ausschließlich den SIP→Baichuan-Talkback-FIFO. Zu prüfen sind die Grenzen der elastischen Zeitkorrektur, kausale Übergänge bei Restfehlern, unveränderte Echtzeitkadenz und AEC-Referenz sowie alle bisherigen Migrations-, Kalibrierungs-, Medien- und Konfigurationsregressionen.
 
 ## Softwareprüfungen vor Release
 
@@ -17,9 +17,23 @@
 - YAML-/JSON-Prüfung von App-Konfiguration und Übersetzungen
 - identische fünf Gruppen und Feldmengen in `options`, `schema`, DE, EN und Testkonfiguration
 - Bash-Syntaxprüfung des s6-Startskripts
-- Versionsprüfung 0.5.14 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
+- Versionsprüfung 0.6.0 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
 - Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
 - expliziter Test der nativen Statistikbits 0…7
+
+## Ergänzungen 0.6.0
+
+- Exakt fälliger FIFO-Block bleibt samplegenau und verbraucht weder mehr noch weniger Samples.
+- Kleine Unterdeckung wird ohne Stille auf volle Blocklänge gedehnt; das Verhältnis bleibt bei mindestens 0,98.
+- Größere Unterdeckung nutzt höchstens 2 % Dehnung, weist die verbleibende Stille separat aus und endet über eine 5-ms-Half-Hann-Kante exakt bei null.
+- Vollständiger Leerlauf nach Nutzsignal erzeugt ausschließlich einen kausalen, höchstens 5 ms langen abklingenden Rand und anschließend null.
+- Wiederkehrendes Signal wird über 5 ms eingeblendet; der Playout wartet dafür nicht auf künftige Samples.
+- Hochwasser wird mit höchstens 3 % Stauchung abgebaut. Ein negativer Zulauftrend löst eine begrenzte vorbeugende Dehnung aus; die dabei erhaltene Reserve wird nach normalisiertem Zulauf wieder abgebaut.
+- Drop-oldest-Überlauf plant genau einen kausalen 5-ms-Grenz-Splice ein, ohne Blocklänge, Verbrauchszeitpunkt oder Schreibkadenz zu verändern.
+- Rohfehlmenge (`fifo_raw_shortage_samples`) und nach Korrektur verbleibende Stille (`fifo_underrun_samples`) werden getrennt gezählt; FIFO-Tiefe, Verhältnisse, Korrekturen und Übergänge sind im Abschlusslog sichtbar.
+- Reolink-FIFO bleibt auf vier Blöcke begrenzt. Es gibt keine neue Konfigurationsoption und keinen zusätzlichen Vorpuffer oder Lookahead.
+- ADPCM wird weiterhin vor dem AEC-Referenzabgriff erzeugt; `ObserveBaichuanPlayout` bleibt unmittelbar nach dem tatsächlichen Write. Kamera-PLL, Startkalibrierung, fester Coarse-Delay, AEC3 und deaktivierter Live-Tracker bleiben unverändert.
+
 ## Ergänzungen 0.5.14
 
 - Exakte UI-Reihenfolge ist in `options`, `schema`, DE, EN und `options.valid.json` identisch: SIP-Ports am Blockende, Entprellung direkt nach Visitor, Passivmodus vor Log-Level.
@@ -99,9 +113,9 @@ Zusätzlich zu den 0.5.0-Regressionsprüfungen:
 - `icon.png` als 128×128-PNG und `logo.png` als PNG prüfen.
 - eingebettetes Ingress-Logo per Go-Test auf PNG-Signatur prüfen.
 - sicherstellen, dass `internal/media`, `native/aec-helper/main.cc`, `internal/calibration`, `internal/startup` und `Dockerfile` gegenüber 0.5.0 bytegleich bleiben.
-- Historischer 0.5.1-Patchtest; für 0.5.14 gilt die aktuelle gruppierte 24-Feld-Konfiguration aus `config.yaml`.
+- Historischer 0.5.1-Patchtest; für 0.6.0 gilt weiterhin die gruppierte 24-Feld-Konfiguration aus `config.yaml`.
 
-## Erster Hardwaretest 0.5.x
+## Erster Hardwaretest 0.6.0
 
 Empfohlen:
 
@@ -131,6 +145,8 @@ Für einen ersten Call 60–120 s sprechen und im Debug-Log prüfen:
 - `missing_render_frames` wächst nach der initialen Long-Delay-Füllphase nicht weiter.
 - Kamera-Smoother: keine Hard-Drops/Underruns/Timeline-Rebases im Normalfall.
 - SIP→Baichuan: keine Sequence Gaps/Reorder/Late-Duplicates.
+- SIP→Baichuan: `elastic_ratio_min` nicht kleiner als 0,98 und `elastic_ratio_max` nicht größer als 1,03; `fifo_underrun_samples` darf nur die nach der Korrektur tatsächlich verbleibende Stille zählen.
+- Bei einem bekannten kurzen Zulaufloch soll `fifo_raw_shortage_samples` steigen, während `fifo_underrun_samples` kleiner bleibt oder null ist. Fades/Splices dürfen nur an den zugehörigen Unter-/Überlaufgrenzen zählen.
 - `native_stats_mask` und einzelne `native_*`-Felder sind jetzt konsistent.
 - `recent_erle_db` bleibt über den Gesprächsverlauf stabil und korrespondiert mit dem Höreindruck.
 

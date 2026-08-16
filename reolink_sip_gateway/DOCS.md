@@ -1,12 +1,14 @@
-# Reolink SIP Gateway 0.5.14 – Dokumentation
+# Reolink SIP Gateway 0.6.0 – Dokumentation
 
 ## Zweck
 
-**0.5.14** übernimmt den Visitor-Hotfix aus 0.5.13 unverändert und verbessert ausschließlich Reihenfolge und sichtbare Beschriftungen der Home-Assistant-Konfiguration. Die fünf internen Konfigurationsgruppen bleiben unverändert; der letzte Block heißt sichtbar **Betrieb & Diagnose**. Schlüssel, Defaults, Schematypen, Gruppenpfade, Migration und Runtime-Vertrag bleiben unverändert.
+**0.6.0** ergänzt einen elastischen SIP→Baichuan-Talkback-Playout. Kurze Abweichungen zwischen SIP-Zulauf und ausgehandeltem Reolink-Blocktakt werden innerhalb des bereits fälligen Blocks begrenzt ausgeglichen; unvermeidbare Unter- und Überlaufkanten werden weich verbunden.
 
-Das Branding verwendet jetzt PNG-Transparenz für den Außenbereich von `icon.png`, `logo.png` und dem eingebetteten Ingress-Logo. Der Go-Modulpfad entspricht dem öffentlichen Repository `github.com/vothmarkus/reolink-sip-gateway`.
+Die fünf internen Konfigurationsgruppen, alle Schlüssel, Defaults, Schematypen, Gruppenpfade, Migration und der Runtime-Vertrag aus 0.5.14 bleiben unverändert.
 
-Audio-/AEC-/Baichuan-/Kalibrierungslogik wird in 0.5.14 nicht funktional verändert.
+Das bestehende Branding verwendet PNG-Transparenz für den Außenbereich von `icon.png`, `logo.png` und dem eingebetteten Ingress-Logo. Der Go-Modulpfad entspricht dem öffentlichen Repository `github.com/vothmarkus/reolink-sip-gateway`.
+
+Kamera→SIP-Smoother/PLL, Startup-Kalibrierung, fester AEC-Coarse-Delay, AEC3, der deaktivierte Go-Live-Tracker und der native Helper werden in 0.6.0 nicht funktional verändert.
 
 Die Home-Assistant-App überwacht einen Reolink-Besucher-Binärsensor. Bei Klingeln wird ein SIP-Ziel angerufen und nach Annahme bidirektionales Audio zwischen SIP und Reolink Doorbell hergestellt.
 
@@ -41,6 +43,19 @@ Die App erkennt beim Start genau ein Profil. Zuerst wird geprüft, ob der konfig
 - Telefon → Doorbell: SIP G.711 → PCM → Reolink IMA-ADPCM → Baichuan Live Talk.
 
 Der Baichuan-Empfang verwendet fest das `sub`-Profil. Die bisherigen unabhängigen Optionen `connection_mode`, `receive_mode` und `baichuan_receive_stream` existieren nicht mehr.
+
+## Elastischer SIP→Baichuan-Talkback-Puffer
+
+Der Talkback-FIFO bleibt auf vier ausgehandelte Reolink-Blöcke begrenzt und verwirft bei Überlauf weiterhin die ältesten Samples. 0.6.0 ändert ausschließlich, wie der jeweils fällige Block aus den aktuell vorhandenen Samples erzeugt wird:
+
+- Bei knapper beziehungsweise fallender Versorgung werden höchstens 2 % weniger Samples verbraucht und auf die volle Blocklänge gedehnt.
+- Bei wachsendem Rückstand oder einer nach Dehnung verbliebenen Reserve werden höchstens 3 % mehr Samples verbraucht und auf die Blocklänge gestaucht.
+- Eine darüber hinausgehende Unterdeckung bleibt echte Stille. Der letzte gültige Signalrand und die spätere Rückkehr erhalten je eine kausale 5-ms-Half-Hann-Blende.
+- Nach einem unvermeidbaren Drop-oldest-Überlauf verbindet ein kausaler 5-ms-Splice die letzte Ausgabe mit dem neuen FIFO-Anfang.
+
+Der Regler arbeitet ohne Lookahead. Er wartet nicht auf das nächste RTP-Paket, führt keinen zusätzlichen Startpuffer ein, vergrößert den FIFO nicht und verändert weder Blockgröße noch Baichuan-Schreibtakt. Eine kleine durch Dehnung gerettete Reserve wird bei normalisiertem Zulauf per sanfter Stauchung wieder abgebaut und kann daher keine dauerhafte Zusatzlatenz erzeugen.
+
+Die AEC-Referenz bleibt playout-synchron: Erst nach der elastischen Verarbeitung wird der Block als IMA-ADPCM kodiert und geschrieben; aus genau diesem kodierten Block wird zum tatsächlichen Schreibzeitpunkt die Renderreferenz rekonstruiert. Der AEC sieht somit dasselbe Signal wie der Reolink-Lautsprecherpfad.
 
 ## Automatische akustische Kalibrierung
 
@@ -138,6 +153,13 @@ FFmpeg ist Bestandteil des Containerimages und wird fest über `/usr/bin/ffmpeg`
 - `info`: Start, Moduserkennung, Kalibrierungsergebnis, SIP-Registrierung, Call-Auf-/Abbau und relevante Warnungen/Fehler.
 - `debug`: zusätzlich SIP-Pakete, RTSP/Baichuan-Diagnose, RTP/Jitter, Puffer/Smoother, AEC-Tracker, eigene ERLE und native WebRTC-Statistik.
 
+Das Debug-Abschlusslog `Baichuan live audio bridge stopped` enthält für den elastischen Talkback unter anderem:
+
+- `fifo_raw_shortage_samples` vor und `fifo_underrun_samples` nach der elastischen Korrektur,
+- `fifo_playout_min_ms`, `fifo_playout_avg_ms` und `fifo_playout_max_ms`,
+- Stretch-/Compress-Blöcke und -Samples sowie minimales, aktuelles und maximales Verhältnis,
+- `elastic_supply_trend_samples`, Fade-in/-out-Zähler und `elastic_overflow_splices`.
+
 Die bisherigen Schalter `debug_sip`, `debug_rtsp`, `debug_baichuan` sind entfernt.
 
 ## Entfernte manuelle Selbsttests
@@ -158,7 +180,7 @@ Die Statusseite zeigt den konfigurierten und aktiven Modus, Medienprofil, Kalibr
 
 ## Update von älteren Versionen
 
-0.5.14 übernimmt den in 0.5.10 abgeschlossenen Migrationszustand und den Visitor-Hotfix aus 0.5.13 unverändert. Bereits gespeicherte `sip_registrar`-, `reolink_username`- und manuelle `visitor_entity`-Werte bleiben bestehen; Defaults gelten nur, wenn die jeweilige Option noch nicht vorhanden ist.
+0.6.0 übernimmt den in 0.5.10 abgeschlossenen Migrationszustand, den Visitor-Hotfix aus 0.5.13 und die Darstellung aus 0.5.14 unverändert. Bereits gespeicherte `sip_registrar`-, `reolink_username`- und manuelle `visitor_entity`-Werte bleiben bestehen; Defaults gelten nur, wenn die jeweilige Option noch nicht vorhanden ist. Es gibt keine neue oder geänderte Option für den elastischen Talkback-Puffer.
 
 0.5.10 übernimmt bei einem direkten Upgrade von älteren 0.5.x-Ständen bestehende flache Optionen sowie frühere Kanal-Aliase einmalig in die fünf gruppierten UI-Blöcke. Solange der persistente Migrationsmarker noch fehlt, gewinnen die alten flachen Werte bewusst gegen eventuell bereits vom Supervisor materialisierte Gruppen-Defaults. Nach erfolgreicher Migration bzw. sobald bereits eine reine gruppierte Konfiguration erkannt wurde, wird der Marker gesetzt. Ab dann sind ausschließlich die gruppierten Werte maßgeblich und normale Starts führen keinen Supervisor-Options-Write mehr aus. `nvr_channel_number` bleibt in der UI 1-basiert; der private Runtime-Snapshot wird vor Programmstart wieder im bewährten flachen Format erzeugt. Das nicht mehr wirksame `echo_cancellation_search_window_ms` bleibt aus den gespeicherten Home-Assistant-Optionen entfernt.
 

@@ -32,7 +32,7 @@ jobs:
       - name: Static amd64 build
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/reolink-sip-gateway ./cmd/gateway
       - name: Configuration adapter regression
-        run: ../scripts/test-config-adapter.sh
+        run: bash ../scripts/test-config-adapter.sh
 
   container:
     runs-on: ubuntu-latest
@@ -41,7 +41,7 @@ jobs:
       - name: Build Home Assistant image
         run: >-
           docker build
-          --build-arg BUILD_VERSION=0.5.14
+          --build-arg BUILD_VERSION=0.6.0
           --build-arg BUILD_ARCH=amd64
           -t reolink-sip-gateway:ci
           reolink_sip_gateway

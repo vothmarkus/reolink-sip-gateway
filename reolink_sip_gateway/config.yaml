@@ -1,5 +1,5 @@
 name: Reolink SIP Gateway
-version: "0.5.14"
+version: "0.6.0"
 slug: reolink_sip_gateway
 description: Ruft bei einem Reolink-Klingelereignis ein SIP-Ziel an und überträgt Zwei-Wege-Audio.
 url: https://github.com/vothmarkus/reolink-sip-gateway

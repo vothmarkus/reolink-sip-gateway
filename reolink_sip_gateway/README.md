@@ -1,8 +1,18 @@
-# Reolink SIP Gateway 0.5.14
+# Reolink SIP Gateway 0.6.0
 
 Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis löst einen SIP-Anruf aus; Audio läuft bidirektional zwischen SIP-Endgerät und Doorbell.
 
 > Community-Projekt. Nicht offiziell von Reolink oder Home Assistant bereitgestellt oder unterstützt.
+
+## 0.6.0: elastischer Talkback-Puffer ohne zusätzlichen Vorpuffer
+
+0.6.0 glättet kurze Takt- und Füllstandsschwankungen im SIP→Baichuan-Talkback. Für den gerade fälligen Reolink-Block werden vorhandene PCM-Samples abhängig von Füllstand und Versorgungstrend um höchstens 2 % gedehnt oder 3 % gestaucht. Reicht das nicht aus, werden die verbleibende Unterlaufkante und die Rückkehr des Signals mit einer kausalen 5-ms-Half-Hann-Blende geglättet. Nach einem unvermeidbaren Drop-oldest-Überlauf verbindet eine ebenso kurze kausale Überblendung den letzten ausgegebenen mit dem neuen Signalrand.
+
+Dabei wartet der Playout-Pfad nie auf künftige Samples: Es gibt keinen zusätzlichen Vorpuffer, keinen Lookahead, keinen größeren FIFO und keinen späteren Reolink-Schreibtermin. Der bestehende Puffer bleibt auf vier ausgehandelte Reolink-Blöcke begrenzt. Die adaptive Stauchung baut einen angewachsenen Rückstand beziehungsweise eine vorübergehend durch Dehnung erhaltene Reserve wieder ab.
+
+Die Änderung betrifft ausschließlich Telefon→Doorbell über Baichuan Live Talk. Kamera→SIP-Smoother/PLL, Startup-Kalibrierungsmarker, fester AEC-Coarse-Delay, AEC3 und der deaktivierte Go-Live-Tracker bleiben unverändert. Die AEC-Renderreferenz wird weiterhin nach der ADPCM-Kodierung zum tatsächlichen Reolink-Schreibzeitpunkt abgegriffen und enthält damit genau die hörbar gemachte Dehnung, Stauchung, Blende oder Stille.
+
+Bei `log_level: debug` zeigt das Abschlusslog Rohfehlmenge und verbleibende Stille getrennt, FIFO-Minimum/-Mittel/-Maximum, Dehnungs-/Stauchungszähler und -verhältnisse, Versorgungstrend sowie Blenden und Überlauf-Splices. Neue Optionen gibt es nicht.
 
 ## 0.5.14: übersichtlichere Konfigurationsseite
 

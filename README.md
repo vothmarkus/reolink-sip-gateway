@@ -6,7 +6,9 @@ Community Home Assistant app that turns a Reolink Video Doorbell event into a SI
 
 ## Current release
 
-**v0.5.14** is a presentation-only update on top of the v0.5.13 visitor hotfix. It improves the Home Assistant configuration order and advanced-field labels while keeping all option keys, defaults, migration behavior and runtime paths unchanged. The hardware-proven audio/AEC path remains untouched.
+**v0.6.0** makes SIP-to-Baichuan talkback more tolerant of short RTP/FIFO timing fluctuations. Each already-due Reolink block may be stretched by at most 2% or compressed by at most 3%; unavoidable underruns and overflow discontinuities receive causal 5 ms half-Hann transitions. The playout does not wait, add a prebuffer, enlarge the bounded FIFO, or change the Reolink write cadence.
+
+The Home Assistant option set stays unchanged. Camera-to-SIP smoothing, startup calibration, the fixed coarse AEC delay, AEC3 and the actual-write render reference remain unchanged as well.
 
 Highlights:
 
@@ -17,6 +19,7 @@ Highlights:
 - Native WebRTC AudioProcessing echo cancellation.
 - Automatic acoustic startup-delay calibration.
 - Fixed calibrated coarse AEC delay during calls; no competing live Go delay-control loop.
+- Zero-lookahead elastic SIP-to-Baichuan talkback playout with bounded ± correction and soft residual discontinuities.
 - Five grouped Home Assistant configuration sections: Reolink, SIP, Audio, Call, Operation & diagnostics.
 - Transparent PNG icon/logo without the former white outer canvas.
 - `sip_registrar: auto` resolves the Home Assistant host's IPv4 default gateway at startup; a manual IP/DNS registrar remains supported.

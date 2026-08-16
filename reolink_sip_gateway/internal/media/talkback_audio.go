@@ -27,20 +27,36 @@ type talkBlockWriter interface {
 }
 
 type audioBridgeStats struct {
-	PacketsAccepted      uint64
-	PacketsDuplicateLate uint64
-	PacketsReordered     uint64
-	SequenceGaps         uint64
-	TimelineResets       uint64
-	SilenceInsertedInput uint64
-	FIFOOverflowSamples  uint64
-	FIFOUnderrunSamples  uint64
-	FIFOMaxSamples       uint64
-	SSRCChanges          uint64
-	RTPJitterMaxUS       uint64
-	BaichuanBlocks       uint64
-	BaichuanWriteTotalUS uint64
-	BaichuanWriteMaxUS   uint64
+	PacketsAccepted          uint64
+	PacketsDuplicateLate     uint64
+	PacketsReordered         uint64
+	SequenceGaps             uint64
+	TimelineResets           uint64
+	SilenceInsertedInput     uint64
+	FIFORawShortage          uint64
+	FIFOOverflowSamples      uint64
+	FIFOUnderrunSamples      uint64
+	FIFOMaxSamples           uint64
+	FIFOPlayoutMin           uint64
+	FIFOPlayoutMax           uint64
+	FIFOPlayoutTotal         uint64
+	FIFOPlayoutBlocks        uint64
+	ElasticStretchBlocks     uint64
+	ElasticCompressBlocks    uint64
+	ElasticStretchedSamples  uint64
+	ElasticCompressedSamples uint64
+	ElasticRatioMinPPM       uint64
+	ElasticRatioMaxPPM       uint64
+	ElasticCurrentRatioPPM   uint64
+	ElasticFadeOuts          uint64
+	ElasticFadeIns           uint64
+	ElasticOverflowSplices   uint64
+	ElasticSupplyTrend       float64
+	SSRCChanges              uint64
+	RTPJitterMaxUS           uint64
+	BaichuanBlocks           uint64
+	BaichuanWriteTotalUS     uint64
+	BaichuanWriteMaxUS       uint64
 }
 
 type sampleFIFO struct {
@@ -58,6 +74,19 @@ func newSampleFIFO(max int) *sampleFIFO {
 func (f *sampleFIFO) Reset()   { f.buf = f.buf[:0] }
 func (f *sampleFIFO) Len() int { return len(f.buf) }
 
+func (f *sampleFIFO) Pop(n int) []int16 {
+	if n <= 0 || len(f.buf) == 0 {
+		return nil
+	}
+	if n > len(f.buf) {
+		n = len(f.buf)
+	}
+	out := append([]int16(nil), f.buf[:n]...)
+	copy(f.buf, f.buf[n:])
+	f.buf = f.buf[:len(f.buf)-n]
+	return out
+}
+
 func (f *sampleFIFO) Push(samples []int16) (dropped int) {
 	if len(samples) == 0 {
 		return 0
@@ -74,23 +103,6 @@ func (f *sampleFIFO) Push(samples []int16) (dropped int) {
 	}
 	f.buf = append(f.buf, samples...)
 	return dropped
-}
-
-func (f *sampleFIFO) PopPadded(n int) (out []int16, missing int) {
-	if n <= 0 {
-		return nil, 0
-	}
-	out = make([]int16, n)
-	avail := len(f.buf)
-	if avail > n {
-		avail = n
-	}
-	copy(out, f.buf[:avail])
-	if avail > 0 {
-		copy(f.buf, f.buf[avail:])
-		f.buf = f.buf[:len(f.buf)-avail]
-	}
-	return out, n - avail
 }
 
 // linearResampler performs streaming linear interpolation from 8 kHz G.711
@@ -282,6 +294,7 @@ type phoneAudioBuffer struct {
 	codecName     string
 	resampler     *linearResampler
 	fifo          *sampleFIFO
+	elastic       *elasticTalkbackPlayout
 	stats         audioBridgeStats
 	haveTimeline  bool
 	nextTimestamp uint32
@@ -300,7 +313,12 @@ func newPhoneAudioBuffer(codecName string, outputRate, blockSamples int) (*phone
 	// talkback latency to about 256 ms for the observed 16 kHz / 1024-sample
 	// Reolink profile. On overflow the oldest samples are dropped deliberately
 	// so latency cannot grow without bound.
-	return &phoneAudioBuffer{codecName: codecName, resampler: r, fifo: newSampleFIFO(blockSamples * 4)}, nil
+	return &phoneAudioBuffer{
+		codecName: codecName,
+		resampler: r,
+		fifo:      newSampleFIFO(blockSamples * 4),
+		elastic:   newElasticTalkbackPlayout(outputRate),
+	}, nil
 }
 
 func (b *phoneAudioBuffer) resetLocked() {
@@ -308,6 +326,7 @@ func (b *phoneAudioBuffer) resetLocked() {
 	b.nextTimestamp = 0
 	b.resampler.Reset()
 	b.fifo.Reset()
+	b.elastic.ResetTimeline()
 }
 
 func (b *phoneAudioBuffer) Push(frame sequencedPacket) {
@@ -356,6 +375,7 @@ func (b *phoneAudioBuffer) pushPCM8Locked(pcm []int16) {
 	resampled := b.resampler.Push(pcm)
 	if dropped := b.fifo.Push(resampled); dropped > 0 {
 		b.stats.FIFOOverflowSamples += uint64(dropped)
+		b.elastic.MarkOverflow()
 	}
 	if n := uint64(b.fifo.Len()); n > b.stats.FIFOMaxSamples {
 		b.stats.FIFOMaxSamples = n
@@ -365,11 +385,48 @@ func (b *phoneAudioBuffer) pushPCM8Locked(pcm []int16) {
 func (b *phoneAudioBuffer) PopBlock(n int) []int16 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	block, missing := b.fifo.PopPadded(n)
-	if b.receivedAudio && missing > 0 {
-		b.stats.FIFOUnderrunSamples += uint64(missing)
+	result := b.elastic.Pop(b.fifo, n)
+	if b.receivedAudio {
+		b.stats.FIFORawShortage += uint64(result.rawShortage)
+		b.stats.FIFOUnderrunSamples += uint64(result.missing)
+		b.stats.FIFOPlayoutBlocks++
+		b.stats.FIFOPlayoutTotal += uint64(result.depthBefore)
+		if b.stats.FIFOPlayoutBlocks == 1 || uint64(result.depthBefore) < b.stats.FIFOPlayoutMin {
+			b.stats.FIFOPlayoutMin = uint64(result.depthBefore)
+		}
+		if uint64(result.depthBefore) > b.stats.FIFOPlayoutMax {
+			b.stats.FIFOPlayoutMax = uint64(result.depthBefore)
+		}
+		if result.stretched > 0 {
+			b.stats.ElasticStretchBlocks++
+			b.stats.ElasticStretchedSamples += uint64(result.stretched)
+		}
+		if result.compressed > 0 {
+			b.stats.ElasticCompressBlocks++
+			b.stats.ElasticCompressedSamples += uint64(result.compressed)
+		}
+		if result.consumed > 0 && result.validOutput > 0 {
+			ratio := uint64(result.ratioPPM)
+			b.stats.ElasticCurrentRatioPPM = ratio
+			if b.stats.ElasticRatioMinPPM == 0 || ratio < b.stats.ElasticRatioMinPPM {
+				b.stats.ElasticRatioMinPPM = ratio
+			}
+			if ratio > b.stats.ElasticRatioMaxPPM {
+				b.stats.ElasticRatioMaxPPM = ratio
+			}
+		}
+		if result.fadeOut {
+			b.stats.ElasticFadeOuts++
+		}
+		if result.fadeIn {
+			b.stats.ElasticFadeIns++
+		}
+		if result.overflowSplice {
+			b.stats.ElasticOverflowSplices++
+		}
+		b.stats.ElasticSupplyTrend = result.supplyTrend
 	}
-	return block
+	return result.block
 }
 
 func (b *phoneAudioBuffer) Stats() audioBridgeStats {
@@ -455,6 +512,22 @@ func runBaichuanAudioBridge(ctx context.Context, conn *net.UDPConn, call *sip.Ca
 			if st.BaichuanBlocks > 0 {
 				avgWriteMS = float64(st.BaichuanWriteTotalUS) / float64(st.BaichuanBlocks) / 1000.0
 			}
+			avgFIFOPlayoutMS := 0.0
+			if st.FIFOPlayoutBlocks > 0 {
+				avgFIFOPlayoutMS = float64(st.FIFOPlayoutTotal) / float64(st.FIFOPlayoutBlocks) * 1000.0 / float64(outputRate)
+			}
+			minimumRatio := st.ElasticRatioMinPPM
+			maximumRatio := st.ElasticRatioMaxPPM
+			currentRatio := st.ElasticCurrentRatioPPM
+			if minimumRatio == 0 {
+				minimumRatio = elasticRatioScale
+			}
+			if maximumRatio == 0 {
+				maximumRatio = elasticRatioScale
+			}
+			if currentRatio == 0 {
+				currentRatio = elasticRatioScale
+			}
 			logger.Debug("Baichuan live audio bridge stopped",
 				"packets", st.PacketsAccepted,
 				"late_or_duplicate", st.PacketsDuplicateLate,
@@ -463,9 +536,24 @@ func runBaichuanAudioBridge(ctx context.Context, conn *net.UDPConn, call *sip.Ca
 				"ssrc_changes", st.SSRCChanges,
 				"timeline_resets", st.TimelineResets,
 				"silence_input_samples", st.SilenceInsertedInput,
+				"fifo_raw_shortage_samples", st.FIFORawShortage,
 				"fifo_overflow_samples", st.FIFOOverflowSamples,
 				"fifo_underrun_samples", st.FIFOUnderrunSamples,
 				"fifo_max_ms", float64(st.FIFOMaxSamples)*1000.0/float64(outputRate),
+				"fifo_playout_min_ms", float64(st.FIFOPlayoutMin)*1000.0/float64(outputRate),
+				"fifo_playout_avg_ms", avgFIFOPlayoutMS,
+				"fifo_playout_max_ms", float64(st.FIFOPlayoutMax)*1000.0/float64(outputRate),
+				"elastic_stretch_blocks", st.ElasticStretchBlocks,
+				"elastic_compress_blocks", st.ElasticCompressBlocks,
+				"elastic_stretched_samples", st.ElasticStretchedSamples,
+				"elastic_compressed_samples", st.ElasticCompressedSamples,
+				"elastic_ratio_min", float64(minimumRatio)/elasticRatioScale,
+				"elastic_ratio_current", float64(currentRatio)/elasticRatioScale,
+				"elastic_ratio_max", float64(maximumRatio)/elasticRatioScale,
+				"elastic_supply_trend_samples", st.ElasticSupplyTrend,
+				"elastic_fade_outs", st.ElasticFadeOuts,
+				"elastic_fade_ins", st.ElasticFadeIns,
+				"elastic_overflow_splices", st.ElasticOverflowSplices,
 				"rtp_jitter_max_ms", float64(st.RTPJitterMaxUS)/1000.0,
 				"baichuan_blocks", st.BaichuanBlocks,
 				"baichuan_write_avg_ms", avgWriteMS,

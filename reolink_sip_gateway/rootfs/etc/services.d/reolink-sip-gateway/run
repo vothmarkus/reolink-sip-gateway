@@ -1,7 +1,8 @@
 #!/usr/bin/with-contenv bashio
 set -euo pipefail
 
-# v0.5.14 keeps the v0.5.13 visitor hotfix and improves the grouped Home Assistant option presentation.
+# v0.6.0 retains the grouped Home Assistant configuration and adds only a
+# runtime improvement to the SIP-to-Baichuan talkback playout.
 # The Go gateway still receives the same flat runtime configuration used by
 # v0.5.7-v0.5.9. Grouped UI values are flattened immediately before exec.
 #
@@ -244,7 +245,7 @@ complete_grouping_migration() {
     # state without writing anything to Supervisor.
     if [[ "${original_canonical}" == "${normalized_canonical}" ]]; then
         : > "${GROUPED_OPTIONS_MARKER}"
-        bashio::log.info "Reolink SIP Gateway v0.5.14 grouped option layout confirmed"
+        bashio::log.info "Reolink SIP Gateway v0.6.0 grouped option layout confirmed"
         return 0
     fi
 
@@ -260,7 +261,7 @@ complete_grouping_migration() {
 
     if supervisor_options_write "${normalized}"; then
         : > "${GROUPED_OPTIONS_MARKER}"
-        bashio::log.info "Reolink SIP Gateway v0.5.14 one-time option grouping migration completed"
+        bashio::log.info "Reolink SIP Gateway v0.6.0 one-time option grouping migration completed"
     else
         bashio::log.warning "Could not persist grouped options; runtime translation remains active and migration will be retried on the next start"
     fi
