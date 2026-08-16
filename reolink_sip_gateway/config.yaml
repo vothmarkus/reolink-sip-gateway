@@ -5,7 +5,7 @@ description: Ruft bei einem Reolink-Klingelereignis ein SIP-Ziel an und √ºbertr√
 url: https://github.com/vothmarkus/reolink-sip-gateway
 arch:
   - amd64
-stage: experimental
+stage: stable
 startup: application
 boot: auto
 init: false
