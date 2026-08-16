@@ -1,0 +1,36 @@
+{
+  "reolink": {
+    "reolink_host": "192.168.177.50",
+    "reolink_username": "test-user",
+    "reolink_password": "test-password",
+    "reolink_mode": "auto",
+    "nvr_channel_number": 2,
+    "reolink_rtsp_port": 554,
+    "baichuan_port": 9000
+  },
+  "sip": {
+    "sip_registrar": "192.168.177.9",
+    "sip_username": "621",
+    "sip_password": "test-password",
+    "sip_destination": "**610",
+    "sip_display_name": "Haustür",
+    "sip_codec_preference": "pcma",
+    "sip_registrar_port": 5060,
+    "sip_local_port": 5070
+  },
+  "audio": {
+    "echo_cancellation_enabled": true,
+    "webrtc_high_pass_filter_enabled": true,
+    "webrtc_noise_suppression_enabled": true
+  },
+  "call": {
+    "visitor_entity": "binary_sensor.reolink_video_doorbell_visitor",
+    "debounce_seconds": 3,
+    "ring_timeout_seconds": 30,
+    "max_call_duration_seconds": 300
+  },
+  "diagnostics": {
+    "dry_run": true,
+    "log_level": "info"
+  }
+}

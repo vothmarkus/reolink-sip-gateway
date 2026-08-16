@@ -1,0 +1,10 @@
+# Local build/test output
+*.log
+*.tmp
+*.swp
+.DS_Store
+coverage.out
+
+# Editors
+.vscode/
+.idea/

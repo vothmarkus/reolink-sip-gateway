@@ -1,0 +1,93 @@
+configuration:
+  reolink:
+    name: Reolink
+    description: Verbindung zur Doorbell bzw. zum NVR und Auswahl des Reolink-Medienwegs.
+    fields:
+      reolink_host:
+        name: Reolink-Adresse
+        description: IP-Adresse oder DNS-Name der direkt erreichbaren Doorbell oder des NVR.
+      reolink_username:
+        name: Reolink-Benutzername
+        description: Benutzer auf Kamera oder NVR mit Livebild- und Gegensprechberechtigung; Standard ist „admin“.
+      reolink_password:
+        name: Reolink-Passwort
+        description: Passwort des Reolink-/NVR-Benutzers.
+      reolink_mode:
+        name: Reolink-Modus
+        description: „auto“ erkennt beim Start das passende vollständige Audioprofil. „standalone“ nutzt RTSP für Hin- und Rückkanal einer direkt erreichbaren Doorbell; „nvr“ nutzt Baichuan für Hin- und Rückkanal über den NVR.
+      nvr_channel_number:
+        name: NVR-Kanal
+        description: Nummer des Doorbell-Kanals am Reolink-NVR, so wie sie in der NVR-Oberfläche angezeigt wird (beginnend bei 1). Nur relevant, wenn ein NVR verwendet wird; im Standalone-Modus wird dieser Wert ignoriert.
+      reolink_rtsp_port:
+        name: RTSP-Port (erweitert)
+        description: RTSP-Port der Doorbell oder des NVR; normalerweise 554.
+      baichuan_port:
+        name: Baichuan-Port (erweitert)
+        description: TCP-Port des Reolink Basic Service für den NVR-Modus; normalerweise 9000.
+  sip:
+    name: SIP-Telefonie
+    description: SIP-Konto, Zielrufnummer und Signalisierungsparameter.
+    fields:
+      sip_registrar:
+        name: SIP-Registrar
+        description: „auto“ verwendet die IPv4-Gateway-Adresse des Home-Assistant-Hosts (häufig die FRITZ!Box). Alternativ kann die IP-Adresse oder der DNS-Name des SIP-Registrars manuell eingetragen werden.
+      sip_username:
+        name: SIP-Benutzername
+        description: Benutzername des in der FRITZ!Box angelegten IP-Telefons.
+      sip_password:
+        name: SIP-Passwort
+        description: Passwort des SIP-Kontos.
+      sip_destination:
+        name: SIP-Ziel
+        description: Zu wählende interne Nummer oder SIP-URI, beispielsweise **610.
+      sip_display_name:
+        name: Anzeigename
+        description: Name, der beim angerufenen SIP-Endgerät erscheinen soll.
+      sip_codec_preference:
+        name: Bevorzugter Audiocodec
+        description: PCMA wird für deutsche Telefonanlagen empfohlen; „auto“ bietet PCMA und PCMU an.
+      sip_registrar_port:
+        name: SIP-Port (erweitert)
+        description: UDP-Port des SIP-Registrars; normalerweise 5060.
+      sip_local_port:
+        name: Lokaler SIP-Port (erweitert)
+        description: UDP-Port für die SIP-Signalisierung. RTP-Ports werden automatisch gewählt.
+  audio:
+    name: Audio
+    description: Echounterdrückung und WebRTC-Audiofilter. Die Reolink-Latenz wird beim Start automatisch kalibriert.
+    fields:
+      echo_cancellation_enabled:
+        name: WebRTC-Echounterdrückung
+        description: Aktiviert die native WebRTC-AEC. Beim Start wird die akustische Reolink-Latenz automatisch gemessen und als fester Coarse-Delay für den gesamten Anruf verwendet.
+      webrtc_high_pass_filter_enabled:
+        name: WebRTC-Hochpassfilter
+        description: Entfernt tieffrequentes Rumpeln und Windanteile aus dem Doorbell-Mikrofonsignal.
+      webrtc_noise_suppression_enabled:
+        name: WebRTC-Rauschunterdrückung
+        description: Aktiviert die WebRTC-Rauschunterdrückung mit festem, bewährtem Profil „moderate“.
+  call:
+    name: Anruf
+    description: Klingelauslöser und zeitliche Begrenzungen für ausgehende Anrufe.
+    fields:
+      visitor_entity:
+        name: Reolink-Besucher-Sensor
+        description: „auto“ verwendet automatisch den aktivierten Besucher-/Klingelsensor der Reolink-Integration. Bei mehreren Reolink-Türklingeln muss die gewünschte binary_sensor-Entity manuell eingetragen werden.
+      debounce_seconds:
+        name: Klingelentprellung
+        description: Weitere Klingelereignisse innerhalb dieser Zeit werden ignoriert.
+      ring_timeout_seconds:
+        name: Klingeldauer
+        description: Zeit bis zum Abbruch eines nicht angenommenen Anrufs.
+      max_call_duration_seconds:
+        name: Maximale Gesprächsdauer
+        description: Sicherheitsbegrenzung für ein Gespräch.
+  diagnostics:
+    name: Betrieb & Diagnose
+    description: Betriebsmodus und Protokollierung.
+    fields:
+      dry_run:
+        name: Passivmodus
+        description: Überwacht Klingelereignisse, ohne SIP zu registrieren, Anrufe zu starten oder den akustischen Kalibrierungsmarker auszugeben.
+      log_level:
+        name: Protokollstufe
+        description: „info“ zeigt den normalen Betrieb. „debug“ aktiviert zusätzlich SIP-, RTSP-, Baichuan-, AEC-, RTP- und Pufferdiagnosen.
