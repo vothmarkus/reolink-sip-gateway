@@ -1,0 +1,143 @@
+# Prüfprotokoll 0.5.14
+
+## Ziel
+
+0.5.0 automatisiert die in 0.4.3 hardwarebestätigte native WebRTC-AEC und reduziert die Benutzerkonfiguration. Zu prüfen sind daher vor allem Migration, Startkalibrierung, vollständige Profilwahl und die korrigierte Statistikdiagnose.
+
+## Softwareprüfungen vor Release
+
+- `gofmt -l cmd internal`
+- `go vet ./...`
+- `go test ./...`
+- `go test -shuffle=on ./...`
+- `go test -race ./...`
+- wiederholte Media/AEC-/Kalibrierungstests
+- statischer amd64-Go-Releasebuild
+- UI-Adaptertest: gruppierte `testdata/options.valid.json` → flache `testdata/options.runtime.valid.json`; anschließend `-check-config` gegen die Runtime-Datei
+- YAML-/JSON-Prüfung von App-Konfiguration und Übersetzungen
+- identische fünf Gruppen und Feldmengen in `options`, `schema`, DE, EN und Testkonfiguration
+- Bash-Syntaxprüfung des s6-Startskripts
+- Versionsprüfung 0.5.14 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
+- Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
+- expliziter Test der nativen Statistikbits 0…7
+## Ergänzungen 0.5.14
+
+- Exakte UI-Reihenfolge ist in `options`, `schema`, DE, EN und `options.valid.json` identisch: SIP-Ports am Blockende, Entprellung direkt nach Visitor, Passivmodus vor Log-Level.
+- Sichtbare Namen lauten `Betrieb & Diagnose` / `Operation & diagnostics`; beide SIP-Portfelder tragen den Zusatz `(erweitert)` / `(advanced)`. Interner Gruppenpfad bleibt `diagnostics`.
+- Semantischer Vergleich gegen 0.5.13 bestätigt identische Optionswerte, Defaults, Schematypen, Gruppenpfade und Runtime-Abbildung.
+- Sämtliche Visitor-/WebSocket-, Audio-/AEC-, Kalibrierungs-, Baichuan-, Media-, RTP-, Startup-, Config- und Migrationstests bleiben unverändert grün.
+- SIP und RTSP unterscheiden sich von 0.5.13 ausschließlich durch den User-Agent-Versionsstring.
+
+## Ergänzungen 0.5.13
+
+- Entity-Registry-Resolver fordert ausschließlich `config/entity_registry/list_for_display` an und dekodiert die kompakten Felder `ei`, `pl` und `tk` aus `result.entities`.
+- Genau ein aktivierter Reolink-Visitor wird ausgewählt; null oder mehrere Treffer schlagen weiterhin kontrolliert fehl.
+- Eine einzelne Registry-Antwort von mehr als 3 MiB wird vollständig gelesen und korrekt ausgewertet.
+- Ein angekündigter Frame von mehr als 16 MiB wird vor der Payload-Allokation mit `websocket frame too large` abgewiesen.
+- Manueller `visitor_entity` und bestehende 0.5.12-Konfigurationen bleiben unverändert.
+- Audio-/AEC-/Kalibrierungs-/Baichuan-/Media-/RTP-/Startup-/Config-Dateien sowie `native/` und `Dockerfile` bleiben gegenüber 0.5.12 bytegleich. SIP und RTSP ändern ausschließlich den User-Agent-Versionsstring.
+
+## Ergänzungen 0.5.12
+
+- Fresh-Install-Normalisierung ergibt `visitor_entity: auto`.
+- Entity-Registry-Resolver authentifiziert sich über den vorhandenen Supervisor-/Home-Assistant-WebSocket und fordert `config/entity_registry/list` an.
+- Genau ein aktivierter Eintrag `binary_sensor.*` mit `platform=reolink` und `translation_key=visitor` wird ausgewählt.
+- Nicht-Reolink-, Nicht-Visitor- und deaktivierte Einträge werden nicht ausgewählt.
+- Bei mehreren aktivierten Visitor-Sensoren muss der Resolver kontrolliert fehlschlagen und alle Kandidaten nennen; es darf nicht geraten werden.
+- Ein manueller `visitor_entity`-Wert überspringt den Resolver vollständig und bleibt beim Upgrade aus 0.5.11 bestehen.
+- UI-Übersetzungen zeigen `Passivmodus` / `Passive mode`; der öffentliche Schlüssel bleibt aus Kompatibilitätsgründen `dry_run`.
+- AEC-/Kalibrierungs-/Baichuan-/Media-/RTP-/Startup-/Config-Dateien bleiben gegenüber 0.5.11 bytegleich. SIP und RTSP ändern ausschließlich den User-Agent-Versionsstring.
+
+## Ergänzungen 0.5.11
+
+- Fresh-Install-Normalisierung ergibt `reolink_username: admin` und `sip_registrar: auto`.
+- Synthetische `/proc/net/route`-Tabelle mit mehreren Default-Routen: `auto` wählt die aktive Gateway-Route mit der niedrigsten Metrik und dekodiert das Little-Endian-IPv4-Gateway korrekt.
+- Manueller SIP-Registrar (DNS/IP) bleibt unverändert und benötigt keine Gateway-Erkennung.
+- `auto` ohne nutzbares IPv4-Gateway muss kontrolliert fehlschlagen.
+- Bestehende gruppierte Werte aus 0.5.10 dürfen durch die neuen Defaults nicht überschrieben werden.
+- AEC-/Kalibrierungs-/Baichuan-/Media-/RTP-Dateien bleiben gegenüber 0.5.10 bytegleich; `internal/config/config.go` ändert ausschließlich den Reolink-Benutzer-Default auf `admin`.
+
+## Finalisierung 0.5.10
+
+- Frische bzw. bereits gruppierte 0.5.8/0.5.9-Konfiguration: Migrationsmarker wird ohne Supervisor-Write gesetzt.
+- Direktupgrade mit alten flachen Werten und gleichzeitig materialisierten Gruppen-Defaults: solange der Marker fehlt, gewinnen die Legacy-Werte genau einmal.
+- Nach gesetztem Marker: gruppierte Werte gewinnen selbst dann, wenn testweise widersprüchliche flache Altwerte vorhanden sind.
+- Nach gesetztem Marker: normaler Start führt keinen `bashio::app.options`-/`bashio::addon.options`-Write aus.
+- Einmaliger Migrations-Write bleibt synchron und compare-before-write-geschützt.
+- `icon.png` ist 128×128 RGBA; `logo.png` und `internal/status/logo.png` sind RGBA, besitzen transparente Außenpixel und behalten deckende weiße Logo-Elemente.
+- Go-Modul-/Importpfad ist konsistent `github.com/vothmarkus/reolink-sip-gateway`.
+- Gegen 0.5.9 bleiben die Audio-/AEC-/Baichuan-/Kalibrierungsdateien inhaltlich unverändert, abgesehen von der mechanischen Modulpfad-Umschreibung in Go-Imports.
+
+## Persistenz-Race 0.5.10
+
+- Optionsmigration läuft synchron; kein `cleanup_public_options ... &` im Produktionsskript.
+- Vor dem Supervisor-Write wird `/data/options.json` erneut gelesen. Nur wenn der kanonische Inhalt noch exakt dem ursprünglichen Snapshot entspricht, darf die Migration schreiben.
+- Testfall unverändert: genau ein Persistenz-Write mit normalisierten Gruppen.
+- Testfall konkurrierende Benutzeränderung: null Persistenz-Writes; der stale Snapshot wird verworfen.
+- Bereits normalisierte Gruppen: null Persistenz-Writes.
+
+## UI-/Boundary-Regression 0.5.10
+
+- Gegen 0.5.9 müssen `internal/config`, `internal/startup`, `internal/calibration`, `internal/media`, `internal/baichuan`, `internal/baichuanaudio`, `native/aec-helper/main.cc` und `Dockerfile` nach Normalisierung des rein mechanisch geänderten Go-Modulpfads bytegleich bleiben; funktionale Audio-/AEC-/Transportlogik darf sich nicht ändern.
+- UI `nvr_channel_number: 2` muss vor Gatewaystart exakt `nvr_channel: 1` und `reolink_stream_path: /Preview_02_sub` erzeugen.
+- `auto` und `nvr` verwenden die gewählte NVR-Kanalnummer; explizites `standalone` erzeugt unabhängig vom UI-Wert intern Kanal 0 und `/Preview_01_sub`.
+- Upgrade von 0.5.1 `nvr_channel: 1` muss einmalig zu UI-Kanal 2 migriert werden.
+- Öffentliche Optionen/Schema/DE/EN/Testkonfiguration enthalten keinen `reolink_stream_path` und keinen `nvr_channel`.
+- Bashio-Kompatibilitätsfallback `app.options` → `addon.options` bleibt erhalten.
+
+- Öffentliche Konfiguration besteht exakt aus fünf Gruppen: `reolink`, `sip`, `audio`, `call`, `diagnostics`.
+- `visitor_entity` liegt im Block `call`.
+- `echo_cancellation_search_window_ms` ist weder in `options` noch `schema` noch den Übersetzungen vorhanden und wird bei Upgrade aus gespeicherten Optionen entfernt.
+- Der Runtime-Adapter injiziert intern weiterhin `echo_cancellation_search_window_ms: 300`, damit der unveränderte Go-Konfigurationsparser denselben Runtimevertrag erhält.
+
+## Patch-Regression 0.5.1
+
+Zusätzlich zu den 0.5.0-Regressionsprüfungen:
+
+- Bash-Syntax des s6-Startskripts.
+- Kompatibilitätswrapper separat mit nur `bashio::app.options` sowie nur `bashio::addon.options` simulieren.
+- `icon.png` als 128×128-PNG und `logo.png` als PNG prüfen.
+- eingebettetes Ingress-Logo per Go-Test auf PNG-Signatur prüfen.
+- sicherstellen, dass `internal/media`, `native/aec-helper/main.cc`, `internal/calibration`, `internal/startup` und `Dockerfile` gegenüber 0.5.0 bytegleich bleiben.
+- Historischer 0.5.1-Patchtest; für 0.5.14 gilt die aktuelle gruppierte 24-Feld-Konfiguration aus `config.yaml`.
+
+## Erster Hardwaretest 0.5.x
+
+Empfohlen:
+
+```yaml
+echo_cancellation_enabled: true
+webrtc_high_pass_filter_enabled: true
+webrtc_noise_suppression_enabled: true
+log_level: debug
+dry_run: false
+```
+
+### Erwarteter Start
+
+1. `automatic Reolink mode detection selected ...` bei `reolink_mode: auto`.
+2. Warnung, dass der akustische Marker gleich hörbar wird.
+3. Marker wird ungefähr eine Sekunde über die Doorbell abgespielt.
+4. `automatic acoustic latency calibration accepted` mit `delay_ms`, `search_min_ms`, `search_max_ms`.
+5. SIP-Registrierung und HA-Subscription werden aktiv.
+
+Bei fehlgeschlagener Messung muss explizit `cached fallback` oder `safe fallback` geloggt werden; die App darf allein deshalb nicht abstürzen.
+
+### Gespräch
+
+Für einen ersten Call 60–120 s sprechen und im Debug-Log prüfen:
+
+- Es erscheinen **keine** `AEC delay tracker updated`-Meldungen; `delay_ms` bleibt über den gesamten Call auf dem kalibrierten Startwert. `native_delay_ms`, ERLE und Residual-Echo-Likelihood dienen weiterhin zur Diagnose der AEC3-Feinausrichtung.
+- `missing_render_frames` wächst nach der initialen Long-Delay-Füllphase nicht weiter.
+- Kamera-Smoother: keine Hard-Drops/Underruns/Timeline-Rebases im Normalfall.
+- SIP→Baichuan: keine Sequence Gaps/Reorder/Late-Duplicates.
+- `native_stats_mask` und einzelne `native_*`-Felder sind jetzt konsistent.
+- `recent_erle_db` bleibt über den Gesprächsverlauf stabil und korrespondiert mit dem Höreindruck.
+
+### Statistikfix gezielt
+
+Im 0.4.3-Hardwarelog war `native_stats_mask=0x3b`, aber Go zeigte nur einen Teil der gesetzten Felder. In 0.5.0 muss dieselbe Maske die Bits 0,1,3,4,5 als ERL, ERLE, Residual, Residual-Recent-Max und Delay sichtbar machen, sofern die WebRTC-Runtime diese Maske liefert.
+
+## Noch offen
+
+Double-Talk auf der Zielhardware wird später separat getestet. Der stabile 53-s-0.4.3-Einsprechtest bleibt bis dahin die Referenz für Single-Talk-Echoreduktion.

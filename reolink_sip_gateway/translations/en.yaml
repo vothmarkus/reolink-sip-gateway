@@ -1,0 +1,93 @@
+configuration:
+  reolink:
+    name: Reolink
+    description: Connection to the doorbell or NVR and selection of the Reolink media path.
+    fields:
+      reolink_host:
+        name: Reolink address
+        description: IP address or DNS name of the directly reachable doorbell or NVR.
+      reolink_username:
+        name: Reolink username
+        description: Camera or NVR user with live-view and talk permissions; the default is “admin”.
+      reolink_password:
+        name: Reolink password
+        description: Password of the Reolink/NVR user.
+      reolink_mode:
+        name: Reolink mode
+        description: '"auto" detects one complete audio profile at startup. "standalone" uses RTSP in both directions for a directly reachable doorbell; "nvr" uses Baichuan in both directions through the NVR.'
+      nvr_channel_number:
+        name: NVR channel
+        description: Doorbell channel number as shown in the Reolink NVR interface (starting at 1). Only relevant when an NVR is used; this value is ignored in standalone mode.
+      reolink_rtsp_port:
+        name: RTSP port (advanced)
+        description: RTSP port of the doorbell or NVR, usually 554.
+      baichuan_port:
+        name: Baichuan port (advanced)
+        description: TCP port of Reolink Basic Service used in NVR mode, usually 9000.
+  sip:
+    name: SIP telephony
+    description: SIP account, dial destination and signalling parameters.
+    fields:
+      sip_registrar:
+        name: SIP registrar
+        description: “auto” uses the IPv4 default-gateway address of the Home Assistant host (often the FRITZ!Box). Alternatively, enter the SIP registrar IP address or DNS name manually.
+      sip_username:
+        name: SIP username
+        description: Username of the IP telephone account configured in the PBX.
+      sip_password:
+        name: SIP password
+        description: Password of the SIP account.
+      sip_destination:
+        name: SIP destination
+        description: Internal number or SIP URI to dial, for example **610.
+      sip_display_name:
+        name: Display name
+        description: Caller name shown on the SIP endpoint.
+      sip_codec_preference:
+        name: Preferred audio codec
+        description: PCMA is recommended for European telephony; auto offers PCMA and PCMU.
+      sip_registrar_port:
+        name: SIP port (advanced)
+        description: UDP port of the SIP registrar, usually 5060.
+      sip_local_port:
+        name: Local SIP port (advanced)
+        description: UDP port used for SIP signalling. RTP ports are selected automatically.
+  audio:
+    name: Audio
+    description: Echo cancellation and WebRTC audio filters. Reolink latency is calibrated automatically at startup.
+    fields:
+      echo_cancellation_enabled:
+        name: WebRTC echo cancellation
+        description: Enables native WebRTC AEC. Acoustic Reolink latency is measured at startup and kept as a fixed coarse delay for the whole call.
+      webrtc_high_pass_filter_enabled:
+        name: WebRTC high-pass filter
+        description: Removes low-frequency rumble and wind components from the doorbell microphone signal.
+      webrtc_noise_suppression_enabled:
+        name: WebRTC noise suppression
+        description: Enables WebRTC noise suppression using the fixed, proven moderate profile.
+  call:
+    name: Call
+    description: Doorbell trigger and time limits for outgoing calls.
+    fields:
+      visitor_entity:
+        name: Reolink visitor sensor
+        description: “auto” automatically uses the enabled visitor/doorbell sensor from the Reolink integration. If multiple Reolink doorbells are present, enter the desired binary_sensor entity manually.
+      debounce_seconds:
+        name: Doorbell debounce
+        description: Additional visitor events within this interval are ignored.
+      ring_timeout_seconds:
+        name: Ring timeout
+        description: Time before an unanswered call is cancelled.
+      max_call_duration_seconds:
+        name: Maximum call duration
+        description: Safety limit for one call.
+  diagnostics:
+    name: Operation & diagnostics
+    description: Operating mode and logging.
+    fields:
+      dry_run:
+        name: Passive mode
+        description: Monitors visitor events without registering SIP, placing calls, or sending the audible startup calibration marker.
+      log_level:
+        name: Log level
+        description: '"info" shows normal operation. "debug" additionally enables SIP, RTSP, Baichuan, AEC, RTP and buffer diagnostics.'

@@ -1,0 +1,146 @@
+// Portions adapted from Shareed2k/reolinkproxy (MIT License).
+// Copyright (c) 2026 Roman Kredentser. See THIRD-PARTY-NOTICES.md.
+package baichuan
+
+import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+	"time"
+)
+
+const (
+	bcmediaInfoV1    = 0x31303031
+	bcmediaInfoV2    = 0x32303031
+	bcmediaIFrameMin = 0x63643030
+	bcmediaIFrameMax = 0x63643039
+	bcmediaPFrameMin = 0x63643130
+	bcmediaPFrameMax = 0x63643139
+	bcmediaAAC       = 0x62773530
+	bcmediaAACV2     = 0x62773531
+)
+
+// MediaParser incrementally parses the bcmedia byte stream carried by msg_id=3.
+type MediaParser struct {
+	buf       bytes.Buffer
+	AudioOnly bool
+}
+
+func (p *MediaParser) Append(data []byte) ([]MediaPacket, error) {
+	if len(data) > 0 {
+		_, _ = p.buf.Write(data)
+	}
+	var out []MediaPacket
+	for {
+		packet, consumed, ok, err := parseMediaPacket(p.buf.Bytes(), !p.AudioOnly)
+		if err != nil {
+			return out, err
+		}
+		if !ok {
+			return out, nil
+		}
+		p.buf.Next(consumed)
+		if p.AudioOnly {
+			switch packet.Kind {
+			case MediaPacketAAC, MediaPacketADPCM:
+			default:
+				continue
+			}
+		}
+		out = append(out, packet)
+	}
+}
+
+func parseMediaPacket(buf []byte, copyVideo bool) (MediaPacket, int, bool, error) {
+	if len(buf) < 4 {
+		return MediaPacket{}, 0, false, nil
+	}
+	magic := binary.LittleEndian.Uint32(buf[0:4])
+	switch {
+	case magic == bcmediaInfoV1 || magic == bcmediaInfoV2:
+		if len(buf) < 32 {
+			return MediaPacket{}, 0, false, nil
+		}
+		headerSize := binary.LittleEndian.Uint32(buf[4:8])
+		if headerSize != 32 {
+			return MediaPacket{}, 0, false, fmt.Errorf("unexpected bcmedia info header size %d", headerSize)
+		}
+		packet := MediaPacket{Kind: MediaPacketInfoV1, Width: binary.LittleEndian.Uint32(buf[8:12]), Height: binary.LittleEndian.Uint32(buf[12:16]), FPS: buf[17]}
+		if magic == bcmediaInfoV2 {
+			packet.Kind = MediaPacketInfoV2
+		}
+		return packet, 32, true, nil
+	case magic >= bcmediaIFrameMin && magic <= bcmediaIFrameMax:
+		return parseVideoFrame(buf, true, copyVideo)
+	case magic >= bcmediaPFrameMin && magic <= bcmediaPFrameMax:
+		return parseVideoFrame(buf, false, copyVideo)
+	case magic == bcmediaAAC || magic == bcmediaAACV2:
+		if len(buf) < 8 {
+			return MediaPacket{}, 0, false, nil
+		}
+		payloadSize := int(binary.LittleEndian.Uint16(buf[4:6]))
+		if payloadSize < 0 || payloadSize > 1024*1024 {
+			return MediaPacket{}, 0, false, fmt.Errorf("implausible AAC payload size %d", payloadSize)
+		}
+		total := 8 + payloadSize + padLen(payloadSize)
+		if len(buf) < total {
+			return MediaPacket{}, 0, false, nil
+		}
+		return MediaPacket{Kind: MediaPacketAAC, Data: append([]byte(nil), buf[8:8+payloadSize]...)}, total, true, nil
+	case magic == bcmediaADPCM:
+		if len(buf) < 12 {
+			return MediaPacket{}, 0, false, nil
+		}
+		payloadSize := int(binary.LittleEndian.Uint16(buf[4:6]))
+		if payloadSize < 4 || payloadSize > 1024*1024 {
+			return MediaPacket{}, 0, false, fmt.Errorf("implausible ADPCM payload size %d", payloadSize)
+		}
+		total := 8 + payloadSize + padLen(payloadSize)
+		if len(buf) < total {
+			return MediaPacket{}, 0, false, nil
+		}
+		if binary.LittleEndian.Uint16(buf[8:10]) != bcmediaADPCMHeader {
+			return MediaPacket{}, 0, false, fmt.Errorf("unexpected adpcm marker %#x", binary.LittleEndian.Uint16(buf[8:10]))
+		}
+		blockSize := payloadSize - 4
+		return MediaPacket{Kind: MediaPacketADPCM, Data: append([]byte(nil), buf[12:12+blockSize]...)}, total, true, nil
+	default:
+		return MediaPacket{}, 0, false, fmt.Errorf("unknown bcmedia magic %#x", magic)
+	}
+}
+
+func parseVideoFrame(buf []byte, iframe bool, copyPayload bool) (MediaPacket, int, bool, error) {
+	if len(buf) < 24 {
+		return MediaPacket{}, 0, false, nil
+	}
+	codec := string(buf[4:8])
+	if codec != "H264" && codec != "H265" {
+		return MediaPacket{}, 0, false, fmt.Errorf("unsupported video codec %q", codec)
+	}
+	payloadSize := int(binary.LittleEndian.Uint32(buf[8:12]))
+	additionalHeaderSize := int(binary.LittleEndian.Uint32(buf[12:16]))
+	microseconds := binary.LittleEndian.Uint32(buf[16:20])
+	if payloadSize > 50*1024*1024 || additionalHeaderSize > 1024*1024 {
+		return MediaPacket{}, 0, false, fmt.Errorf("implausible video frame sizes: payload=%d header=%d", payloadSize, additionalHeaderSize)
+	}
+	total := 24 + additionalHeaderSize + payloadSize + padLen(payloadSize)
+	if len(buf) < total {
+		return MediaPacket{}, 0, false, nil
+	}
+	pos := 24
+	var unixTime *time.Time
+	if iframe && additionalHeaderSize >= 4 {
+		ts := int64(binary.LittleEndian.Uint32(buf[pos : pos+4]))
+		t := time.Unix(ts, 0).UTC()
+		unixTime = &t
+	}
+	pos += additionalHeaderSize
+	packet := MediaPacket{Kind: MediaPacketPFrame, Codec: codec, TimestampMicrosecs: microseconds, HasTimestamp: true, UnixTime: unixTime}
+	if copyPayload {
+		packet.Data = append([]byte(nil), buf[pos:pos+payloadSize]...)
+	}
+	if iframe {
+		packet.Kind = MediaPacketIFrame
+	}
+	return packet, total, true, nil
+}
