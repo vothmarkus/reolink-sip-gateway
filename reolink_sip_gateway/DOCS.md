@@ -1,10 +1,10 @@
-# Reolink SIP Gateway 0.8.0 – Dokumentation
+# Reolink SIP Gateway 0.9.0 – Dokumentation
 
 ## Zweck
 
-**0.8.0** sichert und überwacht die in 0.7.0 ergänzten eingehenden SIP-Anrufe. Eine Rufnummern-/SIP-Benutzer-Whitelist entscheidet vor dem Kameraaufbau über die Annahme, ein kurzer vorhandener Akustikmarker weist an der Doorbell auf die Verbindung hin und ein RTP-Wächter räumt abgebrochene Gespräche ohne SIP-`BYE` auf.
+**0.9.0** ergänzt die lokale, authentifizierte Schnittstelle für die separate Home-Assistant-Integration. Status und anrufende Nummer stehen als vollständiger Snapshot und Ereignisstrom bereit; Testanruf und Auflegen werden als kontrollierte Befehle an denselben Gesprächsablauf übergeben, den Besucherereignisse und eingehende SIP-Anrufe verwenden.
 
-Die fünf internen Konfigurationsgruppen und der flache Runtime-Vertrag bleiben bestehen. Die neuen Einstellungen liegen vollständig im Block **Anruf**; es gibt weiterhin nur eine konfigurierte Kamera und höchstens ein aktives Gespräch. 0.8 benötigt keine zusätzliche Home-Assistant-Integration und erzeugt noch keine HA-Entities.
+Die fünf internen Konfigurationsgruppen und der flache Runtime-Vertrag bleiben bestehen. 0.9 fügt keine neue Benutzeroption hinzu; es gibt weiterhin nur eine konfigurierte Kamera und höchstens ein aktives Gespräch. Die App bleibt ohne Companion-Integration vollständig funktionsfähig und erzeugt selbst keine HA-Entities.
 
 Das bestehende Branding verwendet PNG-Transparenz für den Außenbereich von `icon.png`, `logo.png` und dem eingebetteten Ingress-Logo. Der Go-Modulpfad entspricht dem öffentlichen Repository `github.com/vothmarkus/reolink-sip-gateway`.
 
@@ -17,12 +17,13 @@ Die Home-Assistant-App überwacht einen Reolink-Besucher-Binärsensor. Bei Kling
 Bei einem normalen Start führt das Gateway die folgenden Schritte aus:
 
 1. Konfiguration lesen und validieren.
-2. Status-/Ingress-Seite starten.
-3. Bei `reolink_mode: auto` ein vollständiges Reolink-Medienprofil erkennen.
-4. Bei aktivierter AEC die akustische Reolink-Latenz automatisch messen.
-5. Erfolgreiche Kalibrierung persistent speichern bzw. bei Messfehler einen passenden Cache oder 1450 ms verwenden.
-6. SIP registrieren und bei aktivierter Option eingehende Anrufe mit der konfigurierten Anruferregel bereitstellen.
-7. Home-Assistant-Klingelereignisse primär per WebSocket überwachen; REST bleibt interner Fallback.
+2. Persistente API-Instanz-ID und API-Token laden beziehungsweise beim ersten Start sicher erzeugen.
+3. Status-/Ingress-Seite, Healthcheck und Integrations-API starten; Steuerbefehle bleiben bis zum fertigen Runtimeaufbau gesperrt.
+4. Bei `reolink_mode: auto` ein vollständiges Reolink-Medienprofil erkennen.
+5. Bei aktivierter AEC die akustische Reolink-Latenz automatisch messen.
+6. Erfolgreiche Kalibrierung persistent speichern bzw. bei Messfehler einen passenden Cache oder 1450 ms verwenden.
+7. SIP registrieren und bei aktivierter Option eingehende Anrufe mit der konfigurierten Anruferregel bereitstellen.
+8. Home-Assistant-Klingelereignisse primär per WebSocket überwachen; REST bleibt interner Fallback.
 
 `dry_run: true` verhindert SIP-Anrufe und den hörbaren Kalibrierungsmarker. Bei explizitem `standalone` oder `nvr` kann die Statusseite trotzdem den vorgesehenen Medienweg anzeigen.
 
@@ -204,9 +205,25 @@ Die bisherigen Schalter `debug_sip`, `debug_rtsp`, `debug_baichuan` sind entfern
 
 ## Ingress-Status
 
-Die Statusseite zeigt den konfigurierten und aktiven Modus, Medienprofil, Kalibrierungsstatus, kalibrierten Startwert, aktuellen Trackerwert, Suchfenster/-grenzen, WebRTC-Filter, SIP-/HA-Status, die letzte Anrufrichtung und aktive Call-Medien. Zeitangaben werden kompakt formatiert; noch nicht vorhandene Zeitpunkte erscheinen als Gedankenstrich.
+Die Statusseite zeigt den konfigurierten und aktiven Modus, Medienprofil, Kalibrierungsstatus, kalibrierten Startwert, aktuellen Trackerwert, Suchfenster/-grenzen, WebRTC-Filter, SIP-/HA-Status, aktuelle/letzte Anrufrichtung, aktuelle/letzte anrufende Nummer und aktive Call-Medien. Zeitangaben werden kompakt formatiert; noch nicht vorhandene Zeitpunkte erscheinen als Gedankenstrich. Ein eigener administrativer Abschnitt zeigt API-Adresse und Token für die Einrichtung der Companion-Integration.
+
+## Home-Assistant-Integrations-API v1
+
+Die API läuft zusammen mit Statusseite und Healthcheck auf Port `18099`. Der vollständige OpenAPI-3.1-Vertrag liegt unter `docs/api-v1.openapi.yaml`. Die API-Versionsnummer ist unabhängig von der App-Version; 0.9.0 stellt API-Version 1 bereit.
+
+- `GET /api/v1/info`: API-/Gateway-Version, stabile Installations-UUID und Fähigkeiten.
+- `GET /api/v1/status`: vollständiger Gateway-, SIP-, Call-, Medien- und Befehlsstatus.
+- `GET /api/v1/events`: Server-Sent Events vom Typ `status`; das erste Ereignis ist immer der aktuelle vollständige Snapshot. Weitere Ereignisse entstehen nur bei tatsächlichen Änderungen, 15-Sekunden-Kommentare dienen als Keepalive.
+- `POST /api/v1/calls/test`: normaler ausgehender Anruf zum vorhandenen `sip_destination`; `202` bei Annahme, `409` bei belegtem Call-Slot und `503` bei nicht registriertem SIP beziehungsweise noch nicht bereiter Runtime.
+- `POST /api/v1/calls/hangup`: beendet Wähl-, Vorbereitungs- oder Gesprächsphase beider Richtungen; im Leerlauf bestätigt `204` die idempotente Wirkung.
+
+Beim ersten normalen Start entstehen `/data/integration-api-instance-id` und `/data/integration-api-token`. Beide Dateien werden mit Rechten `0600` angelegt und über App-Updates sowie Backups erhalten. Das Token besteht aus 256 Zufallsbits und wird nicht protokolliert. Jeder `/api/v1`-Aufruf benötigt `Authorization: Bearer <token>`; zusätzlich sind nur Loopback-, private und Link-Local-Quelladressen zugelassen. Healthcheck und bestehende Ingress-Routen behalten ihre bisherigen Zugriffseigenschaften.
+
+Der Status unterscheidet aktuelle und letzte Werte: `call.direction` und `call.caller_number` werden nach dem Gespräch geleert, während `call.last_direction` und `call.last_caller_number` erhalten bleiben. Die letzte anrufende Nummer wird nur durch einen zugelassenen eingehenden Anruf aktualisiert. Diagnosen und Fehlerantworten enthalten niemals Token oder Zugangsdaten.
 
 ## Update von älteren Versionen
+
+0.9.0 ergänzt ausschließlich automatisch verwaltete Dateien unter `/data` und die API auf dem bereits verwendeten Statusport. Es gibt keine neue Option und keine Migration bestehender Einstellungen. Die Identität wird einmal erzeugt und bleibt danach stabil; eine ungültig veränderte Identitätsdatei führt aus Sicherheitsgründen zu einem klaren Startfehler statt zu stiller Tokenrotation.
 
 0.8.0 ergänzt `call.incoming_allowed_callers`, `call.incoming_connection_tone_enabled` und `call.rtp_inactivity_timeout_seconds`. Für bestehende 0.7-Installationen wird `incoming_allowed_callers: ["*"]` verwendet, sodass die bereits bewusst aktivierte Anrufannahme beim Update funktional erhalten bleibt. Der Hinweiston ist standardmäßig aktiv, der RTP-Wächter verwendet 15 Sekunden. Vorhandene Werte und der abgeschlossene Gruppierungsmigrationsmarker bleiben unangetastet.
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0
+
+- Versionierte lokale Integrations-API unter `/api/v1` ergänzt. `info` liefert stabile Instanz-ID, Gateway-/API-Version und Fähigkeiten; `status` liefert einen vollständigen strukturierten Snapshot.
+- Server-Sent-Events unter `/api/v1/events` übertragen bei jeder tatsächlichen Zustandsänderung sofort einen vollständigen Status. Revisionen sind monoton, langsame Clients erhalten stets den neuesten Snapshot und ein periodischer Keepalive hält die Verbindung erkennbar offen.
+- `POST /api/v1/calls/test` startet einen ausgehenden Anruf zum bereits konfigurierten SIP-Ziel. `POST /api/v1/calls/hangup` beendet ein- oder ausgehende Gespräche und ist im Leerlauf idempotent.
+- Besucherereignisse, eingehende SIP-Anrufe und API-Testanrufe verwenden nun einen gemeinsamen threadsicheren Call-Controller. Genau ein Gespräch bleibt erlaubt; Auflegen bricht auch Wähl- und Medienvorbereitungsphasen über denselben Call-Kontext sauber ab.
+- Statusmodell um aktuelle/letzte Anrufrichtung, aktuelle und letzte normalisierte eingehende Nummer, Verfügbarkeit der beiden Befehle sowie Änderungszeit/Revision erweitert. Die letzte eingehende Nummer bleibt nach Gesprächsende für die geplante HA-Entity erhalten.
+- Pro Installation werden eine nicht geheime UUID und ein zufälliges 256-Bit-API-Token unter `/data` angelegt und mit `0600` geschützt. Die Ingress-Seite zeigt Adresse und Token für den Config Flow; API-Aufrufe benötigen Bearer-Authentifizierung und werden zusätzlich auf lokale/private Quellnetze begrenzt.
+- Maschinenlesbarer OpenAPI-3.1-Vertrag unter `docs/api-v1.openapi.yaml`. Die API-Version bleibt unabhängig von der App-Version, damit DTMF in 1.0 additiv ergänzt werden kann.
+- Keine neue Home-Assistant-Option und keine Änderung an Audio, AEC, Kalibrierung, Baichuan, RTSP oder RTP-Playout. App-, Gateway-, SIP-/RTSP-User-Agent- und CI-Buildversion sind 0.9.0.
+
 ## 0.8.0
 
 - Neue Whitelist `call.incoming_allowed_callers` für eingehende SIP-Anrufe. Sie wird nach der Registrar-Vertrauensprüfung, aber vor SDP-Auswertung, Dialogreservierung und Kameraaufbau geprüft; nicht zugelassene Anrufer erhalten `403 Forbidden`.

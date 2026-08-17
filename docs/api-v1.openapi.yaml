@@ -1,0 +1,309 @@
+openapi: 3.1.0
+info:
+  title: Reolink SIP Gateway Integration API
+  version: 1.0.0
+  description: >-
+    Local API exposed by Reolink SIP Gateway 0.9.0 and newer. The API is
+    versioned independently from the gateway release and is intended for the
+    companion Home Assistant integration.
+servers:
+  - url: http://homeassistant.local:18099/api/v1
+    description: Home Assistant host running the app
+security:
+  - bearerAuth: []
+paths:
+  /info:
+    get:
+      operationId: getInfo
+      summary: Read API identity and capabilities
+      responses:
+        "200":
+          description: Gateway identity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Info"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /status:
+    get:
+      operationId: getStatus
+      summary: Read the latest complete gateway snapshot
+      responses:
+        "200":
+          description: Complete status snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /events:
+    get:
+      operationId: streamEvents
+      summary: Stream complete status snapshots as Server-Sent Events
+      description: >-
+        Each event uses event type `status`, the snapshot revision as its ID
+        and a complete Status object as its single-line JSON data value. The
+        first event always contains the current snapshot. Comment keepalives
+        may be sent between changes.
+      responses:
+        "200":
+          description: Server-Sent Event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /calls/test:
+    post:
+      operationId: startTestCall
+      summary: Start an outgoing call to the configured SIP destination
+      responses:
+        "202":
+          $ref: "#/components/responses/Accepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: Another call owns the single call slot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: SIP is not registered or commands are not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /calls/hangup:
+    post:
+      operationId: hangup
+      summary: End the active incoming or outgoing call
+      responses:
+        "202":
+          $ref: "#/components/responses/Accepted"
+        "204":
+          description: No call was active; the idempotent request is complete
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          description: Commands are not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: 256-bit opaque token
+  responses:
+    Accepted:
+      description: Command accepted for asynchronous execution
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CommandResponse"
+    Unauthorized:
+      description: Missing or invalid bearer token
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+  schemas:
+    Info:
+      type: object
+      additionalProperties: false
+      required:
+        - api_version
+        - gateway_version
+        - instance_id
+        - name
+        - capabilities
+      properties:
+        api_version:
+          type: integer
+          const: 1
+        gateway_version:
+          type: string
+          examples: [0.9.0]
+        instance_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          const: Reolink SIP Gateway
+        capabilities:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum: [call_status, caller_number, events, hangup, test_call]
+    Status:
+      type: object
+      additionalProperties: false
+      required: [api_version, revision, updated_at, gateway, sip, call, media, controls]
+      properties:
+        api_version:
+          type: integer
+          const: 1
+        revision:
+          type: integer
+          minimum: 1
+        updated_at:
+          type: string
+          format: date-time
+        gateway:
+          $ref: "#/components/schemas/GatewayStatus"
+        sip:
+          $ref: "#/components/schemas/SIPStatus"
+        call:
+          $ref: "#/components/schemas/CallStatus"
+        media:
+          $ref: "#/components/schemas/MediaStatus"
+        controls:
+          $ref: "#/components/schemas/Controls"
+    GatewayStatus:
+      type: object
+      additionalProperties: false
+      required: [version, state, started_at, home_assistant_connected, dry_run]
+      properties:
+        version:
+          type: string
+        state:
+          type: string
+          enum: [starting, preparing, idle, dialing, connecting_media, active, ending, error, stopping]
+        started_at:
+          type: string
+          format: date-time
+        home_assistant_connected:
+          type: boolean
+        dry_run:
+          type: boolean
+        last_visitor_event:
+          type: string
+          format: date-time
+        last_error:
+          type: string
+    SIPStatus:
+      type: object
+      additionalProperties: false
+      required: [registered]
+      properties:
+        registered:
+          type: boolean
+        last_registration_error:
+          type: string
+    CallStatus:
+      type: object
+      additionalProperties: false
+      required: [active, state]
+      properties:
+        active:
+          type: boolean
+        state:
+          type: string
+          enum: [idle, dialing, connecting_media, active, ending]
+        direction:
+          type: string
+          enum: [incoming, outgoing]
+        last_direction:
+          type: string
+          enum: [incoming, outgoing]
+        caller_number:
+          type: string
+          description: Canonical current incoming caller number or SIP user
+        last_caller_number:
+          type: string
+          description: Most recently accepted incoming caller number or SIP user
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        codec:
+          type: string
+          enum: [pcma, pcmu]
+    MediaStatus:
+      type: object
+      additionalProperties: false
+      required: [configured_reolink_mode, calibrated_delay_ms, current_delay_ms]
+      properties:
+        configured_reolink_mode:
+          type: string
+          enum: [auto, standalone, nvr]
+        active_reolink_mode:
+          type: string
+          enum: [standalone, nvr]
+        profile:
+          type: string
+        receive_mode:
+          type: string
+        receive_details:
+          type: string
+        talkback_mode:
+          type: string
+        talkback_details:
+          type: string
+        echo_cancellation:
+          type: string
+        calibrated_delay_ms:
+          type: integer
+          minimum: 0
+        current_delay_ms:
+          type: integer
+          minimum: 0
+        calibration_status:
+          type: string
+        last_calibration:
+          type: string
+          format: date-time
+    Controls:
+      type: object
+      additionalProperties: false
+      required: [test_call_available, hangup_available]
+      properties:
+        test_call_available:
+          type: boolean
+        hangup_available:
+          type: boolean
+    CommandResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: accepted
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - unauthorized
+                - forbidden
+                - not_found
+                - method_not_allowed
+                - call_busy
+                - sip_unavailable
+                - gateway_unavailable
+                - streaming_unavailable
+                - internal_error
+            message:
+              type: string

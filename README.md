@@ -6,12 +6,15 @@ Community Home Assistant app that bridges bidirectional audio between a Reolink 
 
 ## Current release
 
-**v0.8.0** hardens the incoming-call path introduced in v0.7. Allowed telephone numbers or internal SIP usernames can now be whitelisted before any dialog or camera resources are reserved. A short acoustic indication is played at the doorbell before an incoming call is answered, and an RTP inactivity watchdog cleans up abandoned calls even when no SIP `BYE` arrives.
+**v0.9.0** provides the stable, authenticated local API for the companion Home Assistant integration. It publishes immediate call-state/caller updates and accepts exactly two commands: call the configured SIP destination and hang up the current incoming or outgoing call. The machine-readable contract is [`docs/api-v1.openapi.yaml`](docs/api-v1.openapi.yaml).
 
-The existing visitor-triggered outbound call and the proven v0.6 media path remain unchanged. Incoming and outgoing calls share the same G.711/RTP, AEC and Reolink implementation; the watchdog observes valid negotiated RTP packets rather than audio level, so ordinary silent conversation intervals do not end a call.
+Visitor events, incoming INVITEs and API test calls now enter one shared call controller, preserving the single-call invariant. The integration API does not implement a second media path: incoming and outgoing calls still share the same G.711/RTP, AEC and Reolink implementation introduced and hardware-tested in earlier releases.
 
 Highlights:
 
+- Versioned `/api/v1` with bearer authentication, a stable installation UUID, complete status snapshots and Server-Sent Events.
+- Integration commands for a configured test call and idempotent hang-up, both routed through the normal call lifecycle.
+- Current/last call direction and normalized current/last incoming caller number in the integration status model.
 - SIP registration plus outbound and opt-in automatically answered incoming calls using G.711 A-law/µ-law.
 - Exact normalized incoming-caller whitelist, with an explicit `*` compatibility setting.
 - Short pre-answer acoustic connection indication using the established coded marker generator.
@@ -101,9 +104,15 @@ Set **Allow incoming SIP calls** (`incoming_calls_enabled`) in the **Call** sect
 
 Before an accepted incoming call is answered, `incoming_connection_tone_enabled` plays the first four symbols (256 ms) of the existing acoustic marker through the actual Reolink talkback path. `rtp_inactivity_timeout_seconds` then ends either call direction when no valid negotiated RTP audio packet is received for the configured interval. If only internal calls should reach the camera, do not assign external incoming numbers to this IP telephone in the FRITZ!Box, because forwarded external calls also originate from the trusted registrar.
 
-Planned sequencing: native Home Assistant status/caller sensors and test-call/hang-up buttons are reserved for v0.9 as a companion integration; DTMF follows separately in v1.0.
+The separate Home Assistant integration consumes the v0.9 API to provide status/caller sensors and test-call/hang-up buttons. DTMF remains deliberately reserved for v1.0.
 
 The **Passive mode / Passivmodus** toggle in **Operation & diagnostics / Betrieb & Diagnose** keeps the internal key `dry_run` for backwards compatibility. It monitors visitor events but suppresses SIP registration, outbound calls and the audible startup calibration marker.
+
+## Companion integration API
+
+Open the app's Ingress page after startup to copy the generated API token. The integration connects to `http://<Home-Assistant-IP>:18099`, verifies API version 1 and uses the stable installation UUID for its device and entity unique IDs. The token is generated once, stored with mode `0600` under `/data`, retained across app updates/backups and never written to the log.
+
+The API is intentionally local: requests require `Authorization: Bearer <token>` and must originate from loopback, a private network or a link-local address. `/api/v1/events` pushes complete snapshots on real state changes; clients should still reconcile with `/api/v1/status` after reconnecting. The existing ingress-only `/api/status` remains available for the status page but is not the integration contract.
 
 ## Echo cancellation
 

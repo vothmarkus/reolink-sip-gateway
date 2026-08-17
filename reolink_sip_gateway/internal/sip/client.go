@@ -670,7 +670,7 @@ func (c *Client) baseHeaders(method, uri, branch string, cseq uint32, callID, fr
 		fmt.Sprintf("Via: SIP/2.0/UDP %s:%d;branch=%s;rport", c.localIP, c.cfg.LocalPort, branch),
 		"Max-Forwards: 70", fromLine(from), "To: " + to, "Call-ID: " + callID, fmt.Sprintf("CSeq: %d %s", cseq, method),
 		fmt.Sprintf("Contact: <sip:%s@%s:%d;transport=udp>", c.cfg.Username, c.localIP, c.cfg.LocalPort),
-		"User-Agent: ReolinkSIPGateway/0.8.0",
+		"User-Agent: ReolinkSIPGateway/0.9.0",
 	}
 }
 func fromLine(v string) string      { return "From: " + v }

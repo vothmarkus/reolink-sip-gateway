@@ -1,8 +1,20 @@
-# Reolink SIP Gateway 0.8.0
+# Reolink SIP Gateway 0.9.0
 
 Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann einen SIP-Anruf auslösen; optional lässt sich die registrierte Gateway-Nebenstelle anrufen und direkt mit der Doorbell verbinden.
 
 > Community-Projekt. Nicht offiziell von Reolink oder Home Assistant bereitgestellt oder unterstützt.
+
+## 0.9.0: Schnittstelle für native Home-Assistant-Entities
+
+0.9.0 stellt die lokale, versionierte Schnittstelle für die separat installierbare Home-Assistant-Integration bereit. Die App bleibt ohne Integration vollständig funktionsfähig; SIP-Signalisierung, Audio, AEC, Reolink-Verbindungen und Gesprächsentscheidungen verbleiben ausschließlich im Gateway.
+
+`GET /api/v1/status` liefert einen vollständigen Snapshot aus Gateway-, SIP-, Gesprächs- und Medienstatus. `GET /api/v1/events` überträgt Änderungen unmittelbar als Server-Sent Events. Der Status enthält die aktuelle beziehungsweise letzte Anrufrichtung sowie die normalisierte aktuelle und letzte eingehende Rufnummer. Die spätere Integration kann daraus die beiden Sensoren **Status** und **Anrufende Nummer** erzeugen.
+
+`POST /api/v1/calls/test` startet einen normalen ausgehenden Anruf zum bereits unter SIP konfigurierten Ziel. `POST /api/v1/calls/hangup` beendet das aktuelle ein- oder ausgehende Gespräch; im Leerlauf ist der Aufruf bewusst folgenlos. Beide Befehle verwenden denselben neuen Call-Controller wie Besucherereignisse und eingehende SIP-Anrufe. Ein zweiter paralleler Gesprächspfad ist damit ausgeschlossen.
+
+Beim ersten Start erzeugt die App unter `/data` eine stabile Instanz-ID und ein zufälliges 256-Bit-API-Token. Adresse und Token werden ausschließlich auf der administrativen Ingress-Seite angezeigt. Die API erfordert Bearer-Authentifizierung und akzeptiert nur lokale beziehungsweise private Quelladressen. Es gibt keine neue Konfigurationsoption; vorhandene 0.8-Einstellungen bleiben unverändert.
+
+Der vollständige Integrationsvertrag liegt maschinenlesbar als `docs/api-v1.openapi.yaml` im Repository. API-Version 1 ist unabhängig von der App-Version; DTMF wird erst mit 1.0 additiv ergänzt.
 
 ## 0.8.0: sichere und robuste eingehende Anrufe
 
@@ -12,7 +24,7 @@ Der standardmäßig aktivierte **Akustische Hinweiston** verwendet die ersten vi
 
 Der **RTP-Verbindungswächter** beendet einen Gesprächsrest, wenn trotz ausbleibendem `BYE` für die konfigurierte Zeit kein gültiges G.711-RTP-Paket der Gegenstelle mehr eintrifft. Er überwacht Paketaktivität und nicht den Audiopegel: Gesprächspausen bleiben deshalb unberührt, solange das Endgerät weiterhin RTP sendet. Der Wächter gilt für ein- und ausgehende Gespräche; die maximale Gesprächsdauer bleibt als zweite Grenze erhalten.
 
-Die Reihenfolge unter **Anruf** lautet: Besucher-Sensor, eingehende Anrufe, erlaubte Anrufer, Hinweiston, Entprellung, Klingeldauer, RTP-Verbindungswächter und maximale Gesprächsdauer. v0.8 benötigt keine zusätzliche Home-Assistant-Integration. Native Status-/Anrufer-Entities sowie Testanruf/Auflegen sind für 0.9 vorgesehen; DTMF folgt getrennt in 1.0.
+Die Reihenfolge unter **Anruf** lautet: Besucher-Sensor, eingehende Anrufe, erlaubte Anrufer, Hinweiston, Entprellung, Klingeldauer, RTP-Verbindungswächter und maximale Gesprächsdauer. v0.8 benötigt keine zusätzliche Home-Assistant-Integration; die dafür vorbereitete API folgt in 0.9, DTMF getrennt in 1.0.
 
 ## 0.7.0: die Kamera über SIP anrufen
 

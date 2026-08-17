@@ -1,8 +1,8 @@
-# Prüfprotokoll 0.8.0
+# Prüfprotokoll 0.9.0
 
 ## Ziel
 
-0.8.0 ergänzt die eingehenden SIP-Anrufe um Anrufer-Whitelist, akustischen Verbindungshinweis und RTP-Inaktivitätswächter. Zu prüfen sind die fail-closed Autorisierung vor Ressourcenreservierung, die unveränderte Marker-Kalibrierung, der reale Hinweistonpfad sowie ein sauberer lokaler Abbau verlorener RTP-Verbindungen.
+0.9.0 ergänzt die Integrations-API, den gemeinsamen Call-Controller und den Status für die geplanten Home-Assistant-Entities. Zu prüfen sind Authentifizierung und lokale Netzwerkgrenze, stabiler API-Vertrag, verlustfreier Ereignisstrom, Einzelgesprächsschutz sowie sauberes Auflegen in Wähl-, Vorbereitungs- und aktiver Phase. Die hardwarebestätigten 0.8-Medienpfade müssen unverändert bleiben.
 
 ## Softwareprüfungen vor Release
 
@@ -17,9 +17,22 @@
 - YAML-/JSON-Prüfung von App-Konfiguration und Übersetzungen
 - identische fünf Gruppen und Feldmengen in `options`, `schema`, DE, EN und Testkonfiguration
 - Bash-Syntaxprüfung des s6-Startskripts
-- Versionsprüfung 0.8.0 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
+- Versionsprüfung 0.9.0 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
 - Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
 - expliziter Test der nativen Statistikbits 0…7
+
+## Ergänzungen 0.9.0
+
+- Identitätstest erzeugt UUID und 256-Bit-Token einmalig, prüft stabile Wiederverwendung und Dateirechte `0600`; manipulierte ungültige Werte müssen fail-closed zum Fehler führen.
+- Alle `/api/v1`-Routen verlangen einen gültigen Bearer-Header. Fehlender/falscher Token ergibt `401`, öffentliche Quelladressen ergeben auch mit Token `403`; interne Fehlertexte dürfen keine Details oder Secrets spiegeln.
+- `info` liefert exakt API-Version 1, Gateway-Version, UUID und die Fähigkeiten `call_status`, `caller_number`, `events`, `hangup`, `test_call`.
+- `status` bildet aktuelle und letzte Call-Daten getrennt ab. Ein aktiver eingehender Call setzt Richtung, aktuelle/letzte Nummer, Codec und Auflegen-Verfügbarkeit; Testanruf ist währenddessen nicht verfügbar.
+- Store-Revision und `updated_at` ändern sich nur bei einer realen Feldänderung. SSE liefert sofort den vollständigen aktuellen Snapshot und danach jeweils den neuesten vollständigen Snapshot; langsame Abonnenten blockieren den Gatewaypfad nicht.
+- Testanruf ergibt `202`, `409` bei belegtem Call-Slot und `503` vor Runtimebereitschaft beziehungsweise ohne SIP-Registrierung. Auflegen ergibt `202`, im Leerlauf idempotent `204`.
+- Controller-Test belegt: nur ein Runner gleichzeitig, Cancel erreicht den Call-Kontext, `ending` wird vor Cancel veröffentlicht und der Slot wird erst nach vollständigem Runner-Ende freigegeben.
+- Besuchertrigger, eingehender Anruf und API-Testanruf laufen durch denselben Controller. Ein API-Auflegen während des ausgehenden INVITE muss `CANCEL` beziehungsweise nach Dialogaufbau `BYE` auslösen; bei eingehender Vorbereitung folgt eine kontrollierte Ablehnung, bei aktivem Dialog `BYE`.
+- OpenAPI-Datei gegen einen 3.1-Parser validieren und Antwort-Fixtures der Companion-Integration gegen dieselben Schemas testen.
+- Keine neue Option: `options`, `schema`, DE, EN und Runtime-Fixtures bleiben gegenüber 0.8 unverändert. Alle 0.8-Whitelist-/Hinweiston-/Watchdog-, 0.7-UAS-, 0.6-Elastic- und AEC-Regressionen bleiben grün.
 
 ## Ergänzungen 0.8.0
 

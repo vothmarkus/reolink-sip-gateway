@@ -10,10 +10,12 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/vothmarkus/reolink-sip-gateway/internal/callcontrol"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/config"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/ha"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/media"
@@ -22,7 +24,7 @@ import (
 	statuspkg "github.com/vothmarkus/reolink-sip-gateway/internal/status"
 )
 
-const version = "0.8.0"
+const version = "0.9.0"
 
 func main() {
 	configPath := flag.String("config", "/data/options.json", "path to Home Assistant app options JSON")
@@ -63,8 +65,15 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	identity, err := statuspkg.LoadOrCreateIdentity("/data")
+	if err != nil {
+		logger.Error("cannot initialize Home Assistant integration API identity", "error", err)
+		os.Exit(1)
+	}
+	commands := &gatewayCommands{}
 	store := statuspkg.New(version)
 	store.Update(func(s *statuspkg.Snapshot) {
+		s.DryRun = cfg.DryRun
 		s.ConfiguredReolinkMode = cfg.ReolinkMode
 		s.EchoCancellationEnabled = cfg.EchoCancellationEnabled
 		s.CalibratedDelayMS = cfg.AECInitialDelayMS
@@ -81,11 +90,15 @@ func main() {
 		}
 	})
 	go func() {
-		if err := store.Serve(ctx, cfg.StatusPort); err != nil && !errors.Is(err, context.Canceled) {
+		serverOptions := statuspkg.ServerOptions{
+			Port: cfg.StatusPort, Token: identity.Token, InstanceID: identity.InstanceID, Commands: commands,
+		}
+		if err := store.Serve(ctx, serverOptions); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("status server stopped", "error", err)
 			cancel()
 		}
 	}()
+	logger.Info("Home Assistant integration API ready", "api_version", statuspkg.APIVersion, "port", cfg.StatusPort, "instance_id", identity.InstanceID)
 
 	token := os.Getenv("SUPERVISOR_TOKEN")
 	if token == "" {
@@ -207,7 +220,43 @@ func main() {
 		}
 	}()
 
-	var callActive atomic.Bool
+	var calls callcontrol.Controller
+	commands.Configure(
+		func(context.Context) error {
+			if cfg.DryRun || sipClient == nil || !sipClient.Registered() {
+				return statuspkg.ErrSIPUnavailable
+			}
+			if err := calls.Start(ctx, func(callCtx context.Context) {
+				handleCall(callCtx, cfg, sipClient, store, logger)
+			}); err != nil {
+				if errors.Is(err, callcontrol.ErrBusy) {
+					return statuspkg.ErrCallBusy
+				}
+				return err
+			}
+			logger.Info("Home Assistant integration test call accepted", "destination", cfg.SIPDestination)
+			return nil
+		},
+		func(context.Context) error {
+			err := calls.CancelActive(func() {
+				store.Update(func(s *statuspkg.Snapshot) {
+					if s.CurrentCallDirection != "" {
+						s.State = "ending"
+					}
+				})
+			})
+			if errors.Is(err, callcontrol.ErrNoActiveCall) {
+				return statuspkg.ErrNoActiveCall
+			}
+			if err != nil {
+				return err
+			}
+			logger.Info("Home Assistant integration hangup accepted")
+			return nil
+		},
+	)
+	defer commands.Disable()
+
 	var lastTrigger atomic.Int64
 	var incomingCalls <-chan *sip.IncomingInvite
 	if sipClient != nil {
@@ -228,29 +277,26 @@ func main() {
 			}
 			lastTrigger.Store(now.UnixNano())
 			store.Update(func(s *statuspkg.Snapshot) { s.LastVisitorEvent = now })
-			if !callActive.CompareAndSwap(false, true) {
+			if err := calls.Start(ctx, func(callCtx context.Context) {
+				handleCall(callCtx, cfg, sipClient, store, logger)
+			}); err != nil {
 				logger.Warn("visitor trigger ignored because a call is active")
 				continue
 			}
-			go func() {
-				defer callActive.Store(false)
-				handleCall(ctx, cfg, sipClient, store, logger)
-			}()
 		case incoming := <-incomingCalls:
 			if incoming == nil {
 				continue
 			}
-			if !callActive.CompareAndSwap(false, true) {
+			incomingCall := incoming
+			if err := calls.Start(ctx, func(callCtx context.Context) {
+				handleIncomingCall(callCtx, cfg, incomingCall, store, logger)
+			}); err != nil {
 				logger.Warn("incoming SIP call rejected because another call is active", "caller", incoming.CallerURI())
 				if err := incoming.Reject(486, "Busy Here"); err != nil && !errors.Is(err, sip.ErrIncomingCallCanceled) {
 					logger.Debug("cannot reject busy incoming SIP call", "error", err)
 				}
 				continue
 			}
-			go func() {
-				defer callActive.Store(false)
-				handleIncomingCall(ctx, cfg, incoming, store, logger)
-			}()
 		}
 	}
 }
@@ -261,7 +307,12 @@ func handleIncomingCall(parent context.Context, cfg config.Config, incoming *sip
 	store.Update(func(s *statuspkg.Snapshot) {
 		s.State = "connecting_media"
 		s.LastCallStarted = started
+		s.CurrentCallDirection = "incoming"
 		s.LastCallDirection = "incoming"
+		s.CurrentCallerNumber = incoming.CallerID()
+		if incoming.CallerID() != "" {
+			s.LastCallerNumber = incoming.CallerID()
+		}
 		s.LastError = ""
 		s.ActiveCodec = call.Codec.Name
 		s.ActiveTalkback = ""
@@ -352,7 +403,14 @@ func handleIncomingCall(parent context.Context, cfg config.Config, incoming *sip
 	case <-callCtx.Done():
 		cancelCall()
 		_ = waitMedia(mediaErr, 5*time.Second)
-		rejectUnavailable(errors.New("incoming call media preparation timed out"))
+		if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+			rejectUnavailable(errors.New("incoming call media preparation timed out"))
+		} else {
+			if err := incoming.Reject(480, "Temporarily Unavailable"); err != nil && !errors.Is(err, sip.ErrIncomingCallCanceled) {
+				logger.Debug("cannot reject canceled incoming SIP call", "error", err)
+			}
+			finishCall(store, logger, started, nil, "incoming call ended")
+		}
 		return
 	}
 
@@ -399,7 +457,9 @@ func handleCall(parent context.Context, cfg config.Config, sipClient *sip.Client
 	store.Update(func(s *statuspkg.Snapshot) {
 		s.State = "dialing"
 		s.LastCallStarted = started
+		s.CurrentCallDirection = "outgoing"
 		s.LastCallDirection = "outgoing"
+		s.CurrentCallerNumber = ""
 		s.LastError = ""
 		s.ActiveCodec = ""
 		s.ActiveTalkback = ""
@@ -414,6 +474,7 @@ func handleCall(parent context.Context, cfg config.Config, sipClient *sip.Client
 		store.Update(func(s *statuspkg.Snapshot) {
 			s.State = "idle"
 			s.LastCallEnded = time.Now()
+			clearActiveCall(s)
 		})
 		return
 	}
@@ -452,6 +513,10 @@ func handleCall(parent context.Context, cfg config.Config, sipClient *sip.Client
 	call, err := sipClient.Dial(ringCtx, cfg.SIPDestination, rtpPort)
 	cancelRing()
 	if err != nil {
+		if errors.Is(err, context.Canceled) && parent.Err() != nil {
+			finishCall(store, logger, started, nil, "call canceled")
+			return
+		}
 		recordCallError(store, logger, fmt.Errorf("SIP call failed: %w", err))
 		return
 	}
@@ -542,7 +607,7 @@ func finishCall(store *statuspkg.Store, logger *slog.Logger, started time.Time, 
 			s.State = "error"
 			s.LastError = finalErr.Error()
 			s.LastCallEnded = ended
-			clearActiveMedia(s)
+			clearActiveCall(s)
 		})
 		return
 	}
@@ -551,7 +616,7 @@ func finishCall(store *statuspkg.Store, logger *slog.Logger, started time.Time, 
 		s.State = "idle"
 		s.LastError = ""
 		s.LastCallEnded = ended
-		clearActiveMedia(s)
+		clearActiveCall(s)
 	})
 }
 
@@ -561,7 +626,7 @@ func finishCanceledIncomingCall(store *statuspkg.Store, logger *slog.Logger, sta
 		s.State = "idle"
 		s.LastError = ""
 		s.LastCallEnded = time.Now()
-		clearActiveMedia(s)
+		clearActiveCall(s)
 	})
 }
 
@@ -571,8 +636,14 @@ func recordIncomingCallError(store *statuspkg.Store, logger *slog.Logger, err er
 		s.State = "error"
 		s.LastError = err.Error()
 		s.LastCallEnded = time.Now()
-		clearActiveMedia(s)
+		clearActiveCall(s)
 	})
+}
+
+func clearActiveCall(s *statuspkg.Snapshot) {
+	s.CurrentCallDirection = ""
+	s.CurrentCallerNumber = ""
+	clearActiveMedia(s)
 }
 
 func clearActiveMedia(s *statuspkg.Snapshot) {
@@ -604,8 +675,48 @@ func recordCallError(store *statuspkg.Store, logger *slog.Logger, err error) {
 		s.State = "error"
 		s.LastError = err.Error()
 		s.LastCallEnded = time.Now()
-		clearActiveMedia(s)
+		clearActiveCall(s)
 	})
+}
+
+// gatewayCommands lets the status/API server start before acoustic startup
+// preparation has completed. API calls fail closed until Configure installs
+// callbacks that capture the final runtime configuration and SIP client.
+type gatewayCommands struct {
+	mu       sync.RWMutex
+	testCall func(context.Context) error
+	hangup   func(context.Context) error
+}
+
+func (c *gatewayCommands) Configure(testCall, hangup func(context.Context) error) {
+	c.mu.Lock()
+	c.testCall = testCall
+	c.hangup = hangup
+	c.mu.Unlock()
+}
+
+func (c *gatewayCommands) Disable() {
+	c.Configure(nil, nil)
+}
+
+func (c *gatewayCommands) StartTestCall(ctx context.Context) error {
+	c.mu.RLock()
+	command := c.testCall
+	c.mu.RUnlock()
+	if command == nil {
+		return statuspkg.ErrCommandUnavailable
+	}
+	return command(ctx)
+}
+
+func (c *gatewayCommands) Hangup(ctx context.Context) error {
+	c.mu.RLock()
+	command := c.hangup
+	c.mu.RUnlock()
+	if command == nil {
+		return statuspkg.ErrCommandUnavailable
+	}
+	return command(ctx)
 }
 
 func newLogger(level string) *slog.Logger {
