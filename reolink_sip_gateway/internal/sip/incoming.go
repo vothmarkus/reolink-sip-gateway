@@ -55,6 +55,13 @@ func (i *IncomingInvite) CallerURI() string {
 	return i.call.ToURI
 }
 
+func (i *IncomingInvite) CallerID() string {
+	if i == nil || i.call == nil {
+		return ""
+	}
+	return i.call.CallerID
+}
+
 // Answer completes the INVITE with one negotiated G.711 codec and the RTP
 // port that the application reserved before camera setup.
 func (i *IncomingInvite) Answer(rtpPort int) error {
@@ -234,6 +241,15 @@ func (c *Client) handleIncomingInvite(req Message, addr *net.UDPAddr) {
 		_ = c.sendTaggedResponse(req, addr, 400, "Bad Request")
 		return
 	}
+	remoteURI := extractURI(req.Header("from"))
+	callerID := canonicalCallerID(remoteURI)
+	if !c.allowedCallers.allows(remoteURI) {
+		if c.log != nil {
+			c.log.Warn("incoming SIP INVITE rejected by caller whitelist", "caller", remoteURI, "caller_id", callerID)
+		}
+		_ = c.sendTaggedResponse(req, addr, 403, "Forbidden")
+		return
+	}
 
 	key := serverInviteKey(req)
 	c.mu.Lock()
@@ -259,14 +275,13 @@ func (c *Client) handleIncomingInvite(req Message, addr *net.UDPAddr) {
 	}
 
 	localURI := extractURI(req.Header("to"))
-	remoteURI := extractURI(req.Header("from"))
 	remoteTarget := extractURI(req.Header("contact"))
 	if remoteTarget == "" {
 		remoteTarget = fmt.Sprintf("sip:remote@%s", addr.String())
 	}
 	call := &Call{
 		client: c, CallID: req.Header("call-id"), FromTag: randomID(), ToTag: param(req.Header("from"), "tag"),
-		FromURI: localURI, ToURI: remoteURI, RemoteTarget: remoteTarget, Codec: codec,
+		FromURI: localURI, ToURI: remoteURI, RemoteTarget: remoteTarget, CallerID: callerID, Codec: codec,
 		RemoteRTP: remoteRTP, done: make(chan error, 1), inbound: true,
 	}
 	invite := &IncomingInvite{
@@ -391,7 +406,7 @@ func buildResponse(req Message, code int, reason, toTag string, extra []string, 
 	}
 	lines = append(lines, "To: "+to, "Call-ID: "+req.Header("call-id"), "CSeq: "+req.Header("cseq"))
 	lines = append(lines, extra...)
-	lines = append(lines, "Server: ReolinkSIPGateway/0.7.0", fmt.Sprintf("Content-Length: %d", len(body)), "", "")
+	lines = append(lines, "Server: ReolinkSIPGateway/0.8.0", fmt.Sprintf("Content-Length: %d", len(body)), "", "")
 	return append([]byte(strings.Join(lines, "\r\n")), body...)
 }
 

@@ -471,7 +471,7 @@ func (b *phoneAudioBuffer) RecordBaichuanWrite(d time.Duration) {
 	b.mu.Unlock()
 }
 
-func runBaichuanAudioBridge(ctx context.Context, conn *net.UDPConn, call *sip.Call, writer talkBlockWriter, outputRate, blockSamples int, controls *audioControls, logger *slog.Logger, peerDone <-chan struct{}, peerErr func() error) error {
+func runBaichuanAudioBridge(ctx context.Context, conn *net.UDPConn, call *sip.Call, writer talkBlockWriter, outputRate, blockSamples int, controls *audioControls, logger *slog.Logger, peerDone <-chan struct{}, peerErr func() error, rtpInactivity time.Duration) error {
 	if outputRate <= 0 || blockSamples <= 0 {
 		return errors.New("invalid Baichuan audio profile")
 	}
@@ -484,7 +484,7 @@ func runBaichuanAudioBridge(ctx context.Context, conn *net.UDPConn, call *sip.Ca
 	defer cancelBridge()
 	recvErr := make(chan error, 1)
 	go func() {
-		err := receivePhoneRTP(bridgeCtx, conn, call, bridge, sequencer)
+		err := receivePhoneRTP(bridgeCtx, conn, call, bridge, sequencer, rtpInactivity)
 		bridge.MergeSequencerStats(sequencer.Stats())
 		recvErr <- err
 	}()
@@ -606,13 +606,14 @@ func runBaichuanAudioBridge(ctx context.Context, conn *net.UDPConn, call *sip.Ca
 	}
 }
 
-func receivePhoneRTP(ctx context.Context, conn *net.UDPConn, call *sip.Call, bridge *phoneAudioBuffer, sequencer *rtpSequencer) error {
+func receivePhoneRTP(ctx context.Context, conn *net.UDPConn, call *sip.Call, bridge *phoneAudioBuffer, sequencer *rtpSequencer, rtpInactivity time.Duration) error {
 	buf := make([]byte, 4096)
 	remote := call.RemoteRTPAddr()
 	if remote == nil {
 		return errors.New("missing remote RTP address")
 	}
 	remoteIP := append(net.IP(nil), remote.IP...)
+	watchdog := newRTPWatchdog(rtpInactivity, time.Now())
 	lastPacket := time.Now()
 	var previousArrival time.Time
 	var previousTimestamp uint32
@@ -622,6 +623,9 @@ func receivePhoneRTP(ctx context.Context, conn *net.UDPConn, call *sip.Call, bri
 		n, addr, err := conn.ReadFromUDP(buf)
 		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				if watchdogErr := watchdog.Check(time.Now()); watchdogErr != nil {
+					return watchdogErr
+				}
 				if time.Since(lastPacket) >= reorderFlushDelay {
 					for _, frame := range sequencer.FlushGap() {
 						bridge.Push(frame)
@@ -662,6 +666,7 @@ func receivePhoneRTP(ctx context.Context, conn *net.UDPConn, call *sip.Call, bri
 			call.UpdateRemoteRTP(addr)
 		}
 		lastPacket = time.Now()
+		watchdog.Mark(lastPacket)
 		for _, frame := range sequencer.Push(p) {
 			bridge.Push(frame)
 		}

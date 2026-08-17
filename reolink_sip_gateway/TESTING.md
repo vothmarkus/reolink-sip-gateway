@@ -1,8 +1,8 @@
-# Prüfprotokoll 0.7.0
+# Prüfprotokoll 0.8.0
 
 ## Ziel
 
-0.7.0 ergänzt eingehende SIP-Anrufe zur registrierten Gateway-Nebenstelle. Zu prüfen sind der sichere Opt-in, SIP-Dialogaufbau und -abbau, Codec-/RTP-Aushandlung, Anrufkonkurrenz sowie die Wiederverwendung des unveränderten Reolink-/AEC-/v0.6-Medienpfads.
+0.8.0 ergänzt die eingehenden SIP-Anrufe um Anrufer-Whitelist, akustischen Verbindungshinweis und RTP-Inaktivitätswächter. Zu prüfen sind die fail-closed Autorisierung vor Ressourcenreservierung, die unveränderte Marker-Kalibrierung, der reale Hinweistonpfad sowie ein sauberer lokaler Abbau verlorener RTP-Verbindungen.
 
 ## Softwareprüfungen vor Release
 
@@ -17,9 +17,22 @@
 - YAML-/JSON-Prüfung von App-Konfiguration und Übersetzungen
 - identische fünf Gruppen und Feldmengen in `options`, `schema`, DE, EN und Testkonfiguration
 - Bash-Syntaxprüfung des s6-Startskripts
-- Versionsprüfung 0.7.0 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
+- Versionsprüfung 0.8.0 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
 - Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
 - expliziter Test der nativen Statistikbits 0…7
+
+## Ergänzungen 0.8.0
+
+- Exakte UI-Reihenfolge in `options`, `schema`, DE, EN und Fixture: Besucher-Sensor, eingehende Anrufe, erlaubte Anrufer, Hinweiston, Entprellung, Klingeldauer, RTP-Verbindungswächter, maximale Gesprächsdauer.
+- Fresh-Install-/Upgrade-Normalisierung ergibt `incoming_allowed_callers: ["*"]`, `incoming_connection_tone_enabled: true` und `rtp_inactivity_timeout_seconds: 15`; explizite Werte erreichen den flachen Runtime-Snapshot unverändert.
+- Aktivierte eingehende Anrufe mit leerer Liste sowie `*` zusammen mit weiteren Einträgen werden als Konfigurationsfehler abgewiesen.
+- Caller-ID-Normalisierung deckt SIP-/TEL-URI, Displayname, Prozentkodierung, Leerzeichen, Bindestriche, Punkte, Schrägstriche und Klammern ab. Es gibt weder Rufnummernsuffix-Matching noch automatische Landesvorwahlumrechnung.
+- Ein gültiges Registrar-`INVITE` außerhalb der Whitelist erhält `403 Forbidden` und erreicht weder Anwendungs-Call-Queue noch SDP-/Medienaufbau.
+- Der 256-ms-Hinweis ist samplegenau der Anfang des unveränderten 1,024-s-Kalibrierungsmarkers. Beide getesteten Raten 8/16 kHz enden mit einer ausgeblendeten Nullkante.
+- Der Hinweiston läuft nur bei eingehenden Calls, nur bei aktivierter Option und über den bereits ausgehandelten Reolink-Talkback vor `media.Session.Ready()`/`200 OK`. Der AEC-Renderabgriff liegt weiterhin am tatsächlichen RTSP-/ADPCM-Write.
+- RTP-Watchdog startet mit dem Medienempfang, wird ausschließlich durch gültige Pakete des ausgehandelten Payloadtyps zurückgesetzt und liefert bei Ablauf den erkennbaren Fehler `ErrRTPInactivity`.
+- Watchdog-Ablauf beendet `media.Session`; die Anrufsteuerung versucht anschließend ein lokales SIP-`BYE`. Maximaldauer, entfernter `BYE` und normaler Kontextabbruch bleiben unverändert.
+- Alle v0.7-SIP-UAS-, AEC-, Kamera-Smoother- und v0.6-Elastic-Regressionsprüfungen bleiben grün. 0.8 enthält keine Home-Assistant-Entitäten und kein DTMF.
 
 ## Ergänzungen 0.7.0
 

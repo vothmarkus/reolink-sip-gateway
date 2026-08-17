@@ -18,39 +18,43 @@ const (
 	WebRTCNoiseSuppressionLevel = "moderate"
 	DefaultAECInitialDelayMS    = 1450
 	DefaultAECSearchWindowMS    = 300
+	DefaultRTPInactivitySeconds = 15
 	minimumAECSearchWindowMS    = 50
 	maximumAECSearchWindowMS    = 1000
 	MaxSupportedAECDelayMS      = 3000
 )
 
 type Config struct {
-	VisitorEntity                  string `json:"visitor_entity"`
-	ReolinkHost                    string `json:"reolink_host"`
-	ReolinkRTSPPort                int    `json:"reolink_rtsp_port"`
-	ReolinkStreamPath              string `json:"reolink_stream_path"`
-	ReolinkUsername                string `json:"reolink_username"`
-	ReolinkPassword                string `json:"reolink_password"`
-	ReolinkMode                    string `json:"reolink_mode"`
-	BaichuanPort                   int    `json:"baichuan_port"`
-	NVRChannel                     int    `json:"nvr_channel"`
-	EchoCancellationEnabled        bool   `json:"echo_cancellation_enabled"`
-	EchoCancellationSearchWindowMS int    `json:"echo_cancellation_search_window_ms"`
-	WebRTCHighPassFilterEnabled    bool   `json:"webrtc_high_pass_filter_enabled"`
-	WebRTCNoiseSuppressionEnabled  bool   `json:"webrtc_noise_suppression_enabled"`
-	SIPRegistrar                   string `json:"sip_registrar"`
-	SIPRegistrarPort               int    `json:"sip_registrar_port"`
-	SIPUsername                    string `json:"sip_username"`
-	SIPPassword                    string `json:"sip_password"`
-	SIPDestination                 string `json:"sip_destination"`
-	SIPLocalPort                   int    `json:"sip_local_port"`
-	SIPDisplayName                 string `json:"sip_display_name"`
-	SIPCodecPreference             string `json:"sip_codec_preference"`
-	IncomingCallsEnabled           bool   `json:"incoming_calls_enabled"`
-	RingTimeoutSeconds             int    `json:"ring_timeout_seconds"`
-	MaxCallDurationSeconds         int    `json:"max_call_duration_seconds"`
-	DebounceSeconds                int    `json:"debounce_seconds"`
-	LogLevel                       string `json:"log_level"`
-	DryRun                         bool   `json:"dry_run"`
+	VisitorEntity                  string   `json:"visitor_entity"`
+	ReolinkHost                    string   `json:"reolink_host"`
+	ReolinkRTSPPort                int      `json:"reolink_rtsp_port"`
+	ReolinkStreamPath              string   `json:"reolink_stream_path"`
+	ReolinkUsername                string   `json:"reolink_username"`
+	ReolinkPassword                string   `json:"reolink_password"`
+	ReolinkMode                    string   `json:"reolink_mode"`
+	BaichuanPort                   int      `json:"baichuan_port"`
+	NVRChannel                     int      `json:"nvr_channel"`
+	EchoCancellationEnabled        bool     `json:"echo_cancellation_enabled"`
+	EchoCancellationSearchWindowMS int      `json:"echo_cancellation_search_window_ms"`
+	WebRTCHighPassFilterEnabled    bool     `json:"webrtc_high_pass_filter_enabled"`
+	WebRTCNoiseSuppressionEnabled  bool     `json:"webrtc_noise_suppression_enabled"`
+	SIPRegistrar                   string   `json:"sip_registrar"`
+	SIPRegistrarPort               int      `json:"sip_registrar_port"`
+	SIPUsername                    string   `json:"sip_username"`
+	SIPPassword                    string   `json:"sip_password"`
+	SIPDestination                 string   `json:"sip_destination"`
+	SIPLocalPort                   int      `json:"sip_local_port"`
+	SIPDisplayName                 string   `json:"sip_display_name"`
+	SIPCodecPreference             string   `json:"sip_codec_preference"`
+	IncomingCallsEnabled           bool     `json:"incoming_calls_enabled"`
+	IncomingAllowedCallers         []string `json:"incoming_allowed_callers"`
+	IncomingConnectionToneEnabled  bool     `json:"incoming_connection_tone_enabled"`
+	RTPInactivityTimeoutSeconds    int      `json:"rtp_inactivity_timeout_seconds"`
+	RingTimeoutSeconds             int      `json:"ring_timeout_seconds"`
+	MaxCallDurationSeconds         int      `json:"max_call_duration_seconds"`
+	DebounceSeconds                int      `json:"debounce_seconds"`
+	LogLevel                       string   `json:"log_level"`
+	DryRun                         bool     `json:"dry_run"`
 
 	// Runtime-only values. They are resolved during startup and never exposed as
 	// user options. This keeps the Home Assistant form small while preserving a
@@ -84,6 +88,9 @@ func Defaults() Config {
 		SIPDisplayName:                 "Haustür",
 		SIPCodecPreference:             "pcma",
 		IncomingCallsEnabled:           false,
+		IncomingAllowedCallers:         []string{"*"},
+		IncomingConnectionToneEnabled:  true,
+		RTPInactivityTimeoutSeconds:    DefaultRTPInactivitySeconds,
 		RingTimeoutSeconds:             30,
 		MaxCallDurationSeconds:         300,
 		DebounceSeconds:                3,
@@ -142,6 +149,7 @@ func Load(path string) (Config, error) {
 	}
 	cfg.ReolinkMode = strings.ToLower(strings.TrimSpace(cfg.ReolinkMode))
 	cfg.SIPCodecPreference = strings.ToLower(strings.TrimSpace(cfg.SIPCodecPreference))
+	cfg.IncomingAllowedCallers = normalizeCallerEntries(cfg.IncomingAllowedCallers)
 	cfg.LogLevel = strings.ToLower(strings.TrimSpace(cfg.LogLevel))
 	cfg.StatusPort = 18099
 	cfg.SetAECDelay(DefaultAECInitialDelayMS)
@@ -217,6 +225,32 @@ func (c Config) Validate() error {
 	if c.SIPCodecPreference != "pcma" && c.SIPCodecPreference != "pcmu" && c.SIPCodecPreference != "auto" {
 		errs = append(errs, errors.New("sip_codec_preference must be pcma, pcmu or auto"))
 	}
+	if c.IncomingCallsEnabled && len(c.IncomingAllowedCallers) == 0 {
+		errs = append(errs, errors.New("incoming_allowed_callers must contain at least one caller or * when incoming calls are enabled"))
+	}
+	wildcardCallers := 0
+	for _, caller := range c.IncomingAllowedCallers {
+		caller = strings.TrimSpace(caller)
+		if caller == "" {
+			errs = append(errs, errors.New("incoming_allowed_callers entries must not be empty"))
+			continue
+		}
+		if strings.ContainsAny(caller, "\r\n") {
+			errs = append(errs, errors.New("incoming_allowed_callers must not contain CR/LF characters"))
+		}
+		if len(caller) > 128 {
+			errs = append(errs, errors.New("incoming_allowed_callers entries must not exceed 128 characters"))
+		}
+		if caller == "*" {
+			wildcardCallers++
+		}
+	}
+	if wildcardCallers > 0 && len(c.IncomingAllowedCallers) > 1 {
+		errs = append(errs, errors.New("incoming_allowed_callers wildcard * must be the only entry"))
+	}
+	if c.RTPInactivityTimeoutSeconds < 5 || c.RTPInactivityTimeoutSeconds > 120 {
+		errs = append(errs, errors.New("rtp_inactivity_timeout_seconds must be 5..120"))
+	}
 	if c.RingTimeoutSeconds < 5 || c.RingTimeoutSeconds > 180 {
 		errs = append(errs, errors.New("ring_timeout_seconds must be 5..180"))
 	}
@@ -273,12 +307,32 @@ func validBinarySensorEntityID(v string) bool {
 	return true
 }
 
+func normalizeCallerEntries(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
 func (c Config) HAPollInterval() time.Duration { return FixedHAPollInterval }
 func (c Config) RingTimeout() time.Duration    { return time.Duration(c.RingTimeoutSeconds) * time.Second }
 func (c Config) MaxCallDuration() time.Duration {
 	return time.Duration(c.MaxCallDurationSeconds) * time.Second
 }
 func (c Config) Debounce() time.Duration { return time.Duration(c.DebounceSeconds) * time.Second }
+func (c Config) RTPInactivityTimeout() time.Duration {
+	return time.Duration(c.RTPInactivityTimeoutSeconds) * time.Second
+}
 func (c Config) FFmpegPath() string {
 	if path := strings.TrimSpace(c.FFmpegBinaryPath); path != "" {
 		return path

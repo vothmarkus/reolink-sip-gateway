@@ -1,10 +1,10 @@
-# Reolink SIP Gateway 0.7.0 – Dokumentation
+# Reolink SIP Gateway 0.8.0 – Dokumentation
 
 ## Zweck
 
-**0.7.0** ergänzt eingehende SIP-Anrufe. Neben dem bisherigen Klingelereignis → ausgehender SIP-Anruf kann die registrierte Gateway-Nebenstelle nun optional angerufen und automatisch mit der fest konfigurierten Doorbell beziehungsweise dem NVR-Kanal verbunden werden.
+**0.8.0** sichert und überwacht die in 0.7.0 ergänzten eingehenden SIP-Anrufe. Eine Rufnummern-/SIP-Benutzer-Whitelist entscheidet vor dem Kameraaufbau über die Annahme, ein kurzer vorhandener Akustikmarker weist an der Doorbell auf die Verbindung hin und ein RTP-Wächter räumt abgebrochene Gespräche ohne SIP-`BYE` auf.
 
-Die fünf internen Konfigurationsgruppen und der flache Runtime-Vertrag bleiben bestehen. Neu ist ausschließlich der standardmäßig deaktivierte Schlüssel `call.incoming_calls_enabled`, der im Block **Anruf** direkt nach dem Besucher-Sensor steht. Es gibt weiterhin nur eine konfigurierte Kamera und höchstens ein aktives Gespräch.
+Die fünf internen Konfigurationsgruppen und der flache Runtime-Vertrag bleiben bestehen. Die neuen Einstellungen liegen vollständig im Block **Anruf**; es gibt weiterhin nur eine konfigurierte Kamera und höchstens ein aktives Gespräch. 0.8 benötigt keine zusätzliche Home-Assistant-Integration und erzeugt noch keine HA-Entities.
 
 Das bestehende Branding verwendet PNG-Transparenz für den Außenbereich von `icon.png`, `logo.png` und dem eingebetteten Ingress-Logo. Der Go-Modulpfad entspricht dem öffentlichen Repository `github.com/vothmarkus/reolink-sip-gateway`.
 
@@ -21,7 +21,7 @@ Bei einem normalen Start führt das Gateway die folgenden Schritte aus:
 3. Bei `reolink_mode: auto` ein vollständiges Reolink-Medienprofil erkennen.
 4. Bei aktivierter AEC die akustische Reolink-Latenz automatisch messen.
 5. Erfolgreiche Kalibrierung persistent speichern bzw. bei Messfehler einen passenden Cache oder 1450 ms verwenden.
-6. SIP registrieren und bei aktivierter Option eingehende Anrufe bereitstellen.
+6. SIP registrieren und bei aktivierter Option eingehende Anrufe mit der konfigurierten Anruferregel bereitstellen.
 7. Home-Assistant-Klingelereignisse primär per WebSocket überwachen; REST bleibt interner Fallback.
 
 `dry_run: true` verhindert SIP-Anrufe und den hörbaren Kalibrierungsmarker. Bei explizitem `standalone` oder `nvr` kann die Statusseite trotzdem den vorgesehenen Medienweg anzeigen.
@@ -151,16 +151,26 @@ PCMA, PCMU und `auto` bleiben als Codecpräferenz verfügbar.
 Der Aufbau erfolgt kontrolliert:
 
 1. Das Gateway akzeptiert `INVITE` ausschließlich von IP-Adresse und UDP-Port des konfigurierten SIP-Registrars.
-2. Das SDP-Angebot muss eine nutzbare IPv4-RTP-Adresse sowie PCMA oder PCMU enthalten. Die konfigurierte Codecpräferenz entscheidet, wenn beide angeboten werden.
-3. Das Gateway sendet `100 Trying`, reserviert einen dynamischen RTP-Port und startet Talkback sowie Kameraempfang für die festen Reolink-Einstellungen.
-4. Erst nachdem beide Reolink-Medienwege bereit sind, folgt die automatische Annahme mit `200 OK` und dem ausgewählten G.711-Codec.
-5. Kann der Medienweg nicht vorbereitet werden, erhält der Anrufer `480 Temporarily Unavailable`. Ein zweiter Anruf während eines laufenden oder gerade aufgebauten Gesprächs erhält `486 Busy Here`.
+2. Der SIP-User aus dem `From`-Header wird normalisiert und gegen `incoming_allowed_callers` geprüft. Ein nicht erlaubter Anrufer erhält `403 Forbidden`, bevor SDP, Call-Slot oder Kameraressourcen belegt werden.
+3. Das SDP-Angebot muss eine nutzbare IPv4-RTP-Adresse sowie PCMA oder PCMU enthalten. Die konfigurierte Codecpräferenz entscheidet, wenn beide angeboten werden.
+4. Das Gateway sendet `100 Trying`, reserviert einen dynamischen RTP-Port und startet den festen Reolink-Talkback.
+5. Bei `incoming_connection_tone_enabled: true` werden über diesen realen Talkback die ersten vier Symbole des Kalibrierungsmarkers abgespielt. Der Hinweis dauert 256 ms und wird nicht ausgewertet oder als neue Kalibrierung gespeichert.
+6. Anschließend wird der Kameraempfang vorbereitet. Erst wenn beide Medienrichtungen bereit sind, folgt die automatische Annahme mit `200 OK` und dem ausgewählten G.711-Codec.
+7. Kann der Medienweg nicht vorbereitet werden, erhält der Anrufer `480 Temporarily Unavailable`. Ein zweiter Anruf während eines laufenden oder gerade aufgebauten Gesprächs erhält `486 Busy Here`.
 
 `ACK`, `CANCEL` und `BYE` werden dialogbezogen verarbeitet. Ein erfolgreiches `200 OK` wird über UDP bis zum `ACK` kontrolliert wiederholt; bleibt das `ACK` aus, wird der Medienweg beendet. Ein `CANCEL` vor der Annahme beantwortet das Gateway mit `200 OK` und beendet das ursprüngliche `INVITE` mit `487 Request Terminated`.
 
 Die Vertrauensprüfung auf den Registrar verhindert direkte Anrufe von anderen LAN-Teilnehmern, unterscheidet aber nicht zwischen internen und von der Telefonanlage weitergeleiteten externen Gesprächen. Sollen ausschließlich interne FRITZ!Box-Anrufe angenommen werden, darf dem Gateway-IP-Telefon keine externe eingehende Rufnummer zugewiesen sein.
 
-DTMF-Auswertung, Mehrkameraauswahl, PIN und Türöffner sind in 0.7.0 bewusst noch nicht enthalten.
+### Anruferliste
+
+`incoming_allowed_callers` ist eine Liste. Der Eintrag `*` behält das 0.7-Verhalten „alle vom Registrar vermittelten Anrufer“ bei und darf nicht mit weiteren Einträgen kombiniert werden. Ohne `*` wird exakt gegen den SIP-User verglichen. Bei Rufnummern werden Leerzeichen, Bindestriche, Punkte, Schrägstriche und Klammern entfernt; `+49123…` und `0123…` bleiben bewusst verschiedene Identitäten. Interne Sterncodes wie `**620` sowie benannte SIP-User werden unterstützt. Eine leere Liste ist bei aktivierter Anrufannahme ungültig.
+
+### RTP-Verbindungswächter
+
+`rtp_inactivity_timeout_seconds` gilt für ein- und ausgehende Gespräche. Nach Medienstart beginnt ein Timer, der ausschließlich durch syntaktisch gültige RTP-Pakete mit dem ausgehandelten PCMA-/PCMU-Payloadtyp zurückgesetzt wird. Bleiben solche Pakete aus, beendet das Gateway die Medien und sendet nach Möglichkeit selbst ein `BYE`. Der Standard beträgt 15 Sekunden; zulässig sind 5 bis 120 Sekunden. Stille Audionutzlast zählt als RTP-Aktivität, weshalb normale Gesprächspausen den Wächter nicht auslösen.
+
+Native Home-Assistant-Sensoren für Status/Anrufer sowie die Tasten Testanruf/Auflegen sind für 0.9 vorgesehen und werden über eine Begleit-Integration umgesetzt. DTMF folgt getrennt in 1.0; Mehrkameraauswahl, PIN und Türöffner sind ebenfalls noch nicht Bestandteil von 0.8.
 
 ## FFmpeg
 
@@ -198,7 +208,9 @@ Die Statusseite zeigt den konfigurierten und aktiven Modus, Medienprofil, Kalibr
 
 ## Update von älteren Versionen
 
-0.7.0 ergänzt genau einen öffentlichen Optionsschlüssel: `call.incoming_calls_enabled`. Fehlt er in einer bestehenden Konfiguration, injiziert der Startadapter den sicheren Standard `false`; vorhandene Werte und der abgeschlossene Gruppierungsmigrationsmarker bleiben unangetastet. Ein Update aktiviert daher niemals unbeabsichtigt die automatische Annahme.
+0.8.0 ergänzt `call.incoming_allowed_callers`, `call.incoming_connection_tone_enabled` und `call.rtp_inactivity_timeout_seconds`. Für bestehende 0.7-Installationen wird `incoming_allowed_callers: ["*"]` verwendet, sodass die bereits bewusst aktivierte Anrufannahme beim Update funktional erhalten bleibt. Der Hinweiston ist standardmäßig aktiv, der RTP-Wächter verwendet 15 Sekunden. Vorhandene Werte und der abgeschlossene Gruppierungsmigrationsmarker bleiben unangetastet.
+
+0.7.0 ergänzte `call.incoming_calls_enabled`. Fehlt der Schalter in einer älteren Konfiguration, gilt weiterhin der sichere Standard `false`; ein Update aktiviert daher niemals unbeabsichtigt die automatische Annahme.
 
 0.6.0 übernimmt den in 0.5.10 abgeschlossenen Migrationszustand, den Visitor-Hotfix aus 0.5.13 und die Darstellung aus 0.5.14 unverändert. Bereits gespeicherte `sip_registrar`-, `reolink_username`- und manuelle `visitor_entity`-Werte bleiben bestehen; Defaults gelten nur, wenn die jeweilige Option noch nicht vorhanden ist. Es gibt keine neue oder geänderte Option für den elastischen Talkback-Puffer.
 

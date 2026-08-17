@@ -1,8 +1,18 @@
-# Reolink SIP Gateway 0.7.0
+# Reolink SIP Gateway 0.8.0
 
 Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann einen SIP-Anruf auslösen; optional lässt sich die registrierte Gateway-Nebenstelle anrufen und direkt mit der Doorbell verbinden.
 
 > Community-Projekt. Nicht offiziell von Reolink oder Home Assistant bereitgestellt oder unterstützt.
+
+## 0.8.0: sichere und robuste eingehende Anrufe
+
+0.8.0 ergänzt den in 0.7.0 eingeführten Telefon→Kamera-Weg um drei bewusst eigenständige Gateway-Funktionen. **Erlaubte Anrufer** enthält Rufnummern oder interne SIP-Benutzernamen, die vor SDP-Auswertung, Dialogreservierung und Kameraaufbau geprüft werden. Übliche Darstellungszeichen in Telefonnummern werden ignoriert; Landesvorwahlen werden aus Sicherheitsgründen nicht geraten. Der Kompatibilitätseintrag `*` erlaubt weiterhin alle Anrufer und muss allein in der Liste stehen. Nicht zugelassene Anrufe erhalten `403 Forbidden`.
+
+Der standardmäßig aktivierte **Akustische Hinweiston** verwendet die ersten vier Symbole des bewährten Kalibrierungsmarkers. Der 256 ms kurze Ausschnitt wird über den tatsächlich konfigurierten Reolink-Talkback abgespielt, bevor das Gateway den eingehenden SIP-Anruf mit `200 OK` annimmt. Die vollständige Startkalibrierung und ihre Korrelation bleiben unverändert.
+
+Der **RTP-Verbindungswächter** beendet einen Gesprächsrest, wenn trotz ausbleibendem `BYE` für die konfigurierte Zeit kein gültiges G.711-RTP-Paket der Gegenstelle mehr eintrifft. Er überwacht Paketaktivität und nicht den Audiopegel: Gesprächspausen bleiben deshalb unberührt, solange das Endgerät weiterhin RTP sendet. Der Wächter gilt für ein- und ausgehende Gespräche; die maximale Gesprächsdauer bleibt als zweite Grenze erhalten.
+
+Die Reihenfolge unter **Anruf** lautet: Besucher-Sensor, eingehende Anrufe, erlaubte Anrufer, Hinweiston, Entprellung, Klingeldauer, RTP-Verbindungswächter und maximale Gesprächsdauer. v0.8 benötigt keine zusätzliche Home-Assistant-Integration. Native Status-/Anrufer-Entities sowie Testanruf/Auflegen sind für 0.9 vorgesehen; DTMF folgt getrennt in 1.0.
 
 ## 0.7.0: die Kamera über SIP anrufen
 
@@ -122,8 +132,12 @@ audio:
 call:
   visitor_entity: auto
   incoming_calls_enabled: false
+  incoming_allowed_callers:
+    - "*"
+  incoming_connection_tone_enabled: true
   debounce_seconds: 3
   ring_timeout_seconds: 30
+  rtp_inactivity_timeout_seconds: 15
   max_call_duration_seconds: 300
 
 diagnostics:

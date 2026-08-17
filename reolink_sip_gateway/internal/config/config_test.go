@@ -26,6 +26,48 @@ func TestDefaultsAreUserFriendlyV050(t *testing.T) {
 	if cfg.IncomingCallsEnabled {
 		t.Fatal("incoming calls must remain opt-in for upgrades and fresh installs")
 	}
+	if len(cfg.IncomingAllowedCallers) != 1 || cfg.IncomingAllowedCallers[0] != "*" {
+		t.Fatalf("unexpected incoming caller default: %#v", cfg.IncomingAllowedCallers)
+	}
+	if !cfg.IncomingConnectionToneEnabled || cfg.RTPInactivityTimeout() != 15*time.Second {
+		t.Fatalf("unexpected incoming-call safety defaults: %#v", cfg)
+	}
+}
+
+func TestIncomingCallerAndRTPWatchdogValidation(t *testing.T) {
+	cfg := Defaults()
+	cfg.IncomingCallsEnabled = true
+	cfg.IncomingAllowedCallers = nil
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "incoming_allowed_callers") {
+		t.Fatalf("empty enabled whitelist should fail: %v", err)
+	}
+
+	cfg = Defaults()
+	cfg.IncomingAllowedCallers = []string{"*", "123"}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "wildcard") {
+		t.Fatalf("mixed wildcard should fail: %v", err)
+	}
+
+	cfg = Defaults()
+	cfg.IncomingCallsEnabled = true
+	cfg.IncomingAllowedCallers = []string{"   "}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "must not be empty") {
+		t.Fatalf("blank caller should fail: %v", err)
+	}
+
+	cfg = Defaults()
+	cfg.IncomingAllowedCallers = []string{" * ", "123"}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "wildcard") {
+		t.Fatalf("trimmed mixed wildcard should fail: %v", err)
+	}
+
+	for _, timeout := range []int{4, 121} {
+		cfg = Defaults()
+		cfg.RTPInactivityTimeoutSeconds = timeout
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "rtp_inactivity_timeout_seconds") {
+			t.Fatalf("watchdog timeout %d should fail: %v", timeout, err)
+		}
+	}
 }
 
 func TestDryRunDoesNotRequireCredentials(t *testing.T) {
@@ -164,6 +206,28 @@ func TestLoadNormalizesAndMigratesV04Aliases(t *testing.T) {
 	}
 	if cfg.AECInitialDelayMS != DefaultAECInitialDelayMS {
 		t.Fatalf("retired delay option must be ignored, got %d", cfg.AECInitialDelayMS)
+	}
+}
+
+func TestLoadNormalizesIncomingCallerWhitelist(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "options.json")
+	data := `{"incoming_calls_enabled":true,"incoming_allowed_callers":[" 0123 456789 ","0123 456789"," **620 "],"dry_run":true}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"0123 456789", "**620"}
+	if len(cfg.IncomingAllowedCallers) != len(want) {
+		t.Fatalf("normalized callers=%#v want=%#v", cfg.IncomingAllowedCallers, want)
+	}
+	for i := range want {
+		if cfg.IncomingAllowedCallers[i] != want[i] {
+			t.Fatalf("normalized callers=%#v want=%#v", cfg.IncomingAllowedCallers, want)
+		}
 	}
 }
 

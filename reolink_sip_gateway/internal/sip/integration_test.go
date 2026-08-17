@@ -12,7 +12,7 @@ import (
 )
 
 func TestIncomingInviteAnswerACKAndRemoteBye(t *testing.T) {
-	registrar, client, clientAddr := newIncomingTestClient(t, true)
+	registrar, client, clientAddr := newIncomingTestClientWithCallers(t, true, []string{"**610"})
 	sdp := "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=phone\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 40000 RTP/AVP 0 8 101\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\n"
 	invitePacket, inviteReq := buildMockIncomingInvite(t, clientAddr, registrar.LocalAddr().(*net.UDPAddr), "incoming-1", "z9hG4bK-incoming-1", sdp)
 	if _, err := registrar.WriteToUDP(invitePacket, clientAddr); err != nil {
@@ -32,6 +32,9 @@ func TestIncomingInviteAnswerACKAndRemoteBye(t *testing.T) {
 	}
 	if incoming.CallerURI() != "sip:**610@127.0.0.1" {
 		t.Fatalf("unexpected caller URI %q", incoming.CallerURI())
+	}
+	if incoming.CallerID() != "**610" || !call.IsInbound() {
+		t.Fatalf("unexpected normalized caller/direction: %q inbound=%t", incoming.CallerID(), call.IsInbound())
 	}
 
 	answerPort := freeUDPPort(t)
@@ -243,7 +246,29 @@ func TestIncomingInviteRequiresConfiguredRegistrarSource(t *testing.T) {
 	_ = registrar
 }
 
+func TestIncomingInviteRejectsCallerOutsideWhitelist(t *testing.T) {
+	registrar, client, clientAddr := newIncomingTestClientWithCallers(t, true, []string{"0123 456789"})
+	// The unsupported body would produce 488 if SDP were inspected first. A
+	// 403 therefore also proves that authorization precedes media parsing.
+	sdp := "v=0\r\n"
+	packet, _ := buildMockIncomingInvite(t, clientAddr, registrar.LocalAddr().(*net.UDPAddr), "caller-denied", "z9hG4bK-caller-denied", sdp)
+	if _, err := registrar.WriteToUDP(packet, clientAddr); err != nil {
+		t.Fatal(err)
+	}
+	_ = readSIPResponse(t, registrar, 403, "INVITE")
+	select {
+	case invite := <-client.IncomingCalls():
+		t.Fatalf("rejected caller reached application: %#v", invite)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func newIncomingTestClient(t *testing.T, enabled bool) (*net.UDPConn, *Client, *net.UDPAddr) {
+	t.Helper()
+	return newIncomingTestClientWithCallers(t, enabled, []string{"*"})
+}
+
+func newIncomingTestClientWithCallers(t *testing.T, enabled bool, callers []string) (*net.UDPConn, *Client, *net.UDPAddr) {
 	t.Helper()
 	registrar, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
@@ -253,7 +278,7 @@ func newIncomingTestClient(t *testing.T, enabled bool) (*net.UDPConn, *Client, *
 	registrarAddr := registrar.LocalAddr().(*net.UDPAddr)
 	client, err := New(Config{
 		Registrar: "127.0.0.1", RegistrarPort: registrarAddr.Port, Username: "621", Password: "secret",
-		LocalPort: localPort, DisplayName: "Door", CodecPreference: "pcma", AcceptIncoming: enabled,
+		LocalPort: localPort, DisplayName: "Door", CodecPreference: "pcma", AcceptIncoming: enabled, AllowedCallers: callers,
 	}, nil)
 	if err != nil {
 		registrar.Close()

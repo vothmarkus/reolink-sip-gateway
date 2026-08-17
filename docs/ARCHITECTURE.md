@@ -45,6 +45,8 @@ v0.5.13 resolves `visitor_entity: auto` at the same boundary. A short-lived help
 
 v0.7.0 adds `call.incoming_calls_enabled` at this boundary. The default is `false`, including when an older grouped configuration has no such key. The adapter passes an explicit user opt-in unchanged to the flat Go runtime.
 
+v0.8.0 adds the caller list, pre-answer indication and RTP watchdog in the same Call group. Existing v0.7 installations receive the explicit compatibility list `["*"]`; the gateway still fails closed if incoming calls are enabled with an empty list. The grouped-to-flat adapter preserves list order and values without interpreting telephone numbers.
+
 ## SIP call control
 
 The existing outbound path reserves a dynamic RTP socket, places an authenticated `INVITE` after a visitor event and starts the shared media session after the remote endpoint answers.
@@ -52,13 +54,17 @@ The existing outbound path reserves a dynamic RTP socket, places an authenticate
 The optional incoming path acts as a small SIP user agent server on the same registered UDP socket:
 
 1. Only an `INVITE` from the configured registrar address and port is eligible.
-2. The SDP offer is reduced to one supported PCMA/PCMU stream according to the configured preference.
-3. The dialog and its single-call slot are reserved and `100 Trying` is returned.
-4. The application reserves its RTP socket and starts the same Reolink `media.Session` used by outbound calls.
-5. Only `media.Session.Ready()` permits the `200 OK` SDP answer. Setup failure is returned as `480`; a concurrent call receives `486`.
-6. `ACK`, pre-answer `CANCEL`, in-dialog `BYE`, 2xx retransmission and missing-ACK cleanup close the SIP transaction and media lifetime deterministically.
+2. The normalized SIP `From` user must match the exact caller allowlist before SDP parsing, dialog reservation or camera work.
+3. The SDP offer is reduced to one supported PCMA/PCMU stream according to the configured preference.
+4. The dialog and its single-call slot are reserved and `100 Trying` is returned.
+5. The application reserves its RTP socket and starts the same Reolink `media.Session` used by outbound calls.
+6. If enabled, the first four symbols of the shared acoustic marker are paced through the opened Reolink talkback before the receive side and SIP answer are exposed.
+7. Only `media.Session.Ready()` permits the `200 OK` SDP answer. Setup failure is returned as `480`; a concurrent call receives `486`.
+8. `ACK`, pre-answer `CANCEL`, in-dialog `BYE`, 2xx retransmission and missing-ACK cleanup close the SIP transaction and media lifetime deterministically.
 
-Inbound and outbound setup share one mutual-exclusion slot. DTMF and multi-camera routing are deliberately outside the v0.7.0 call-control layer; every accepted incoming call uses the one startup-resolved Reolink profile.
+Inbound and outbound setup share one mutual-exclusion slot. Both live talkback readers attach an RTP watchdog to valid packets of the negotiated codec; expiry returns a media error and the common call controller performs local SIP cleanup. It does not inspect PCM level and therefore does not confuse silence with a broken transport.
+
+Home Assistant status/caller entities and call-control buttons are deliberately deferred to v0.9, where a companion integration can own proper registered entities. DTMF is deferred to v1.0. Every accepted incoming call in v0.8 continues to use the one startup-resolved Reolink profile.
 
 ## NVR media path
 

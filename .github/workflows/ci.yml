@@ -41,7 +41,7 @@ jobs:
       - name: Build Home Assistant image
         run: >-
           docker build
-          --build-arg BUILD_VERSION=0.7.0
+          --build-arg BUILD_VERSION=0.8.0
           --build-arg BUILD_ARCH=amd64
           -t reolink-sip-gateway:ci
           reolink_sip_gateway

@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vothmarkus/reolink-sip-gateway/internal/acousticmarker"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/baichuan"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/baichuanaudio"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/codec"
@@ -31,10 +32,10 @@ const (
 	latencyCaptureRate          = 16000
 	latencyWarmupSamples        = latencyCaptureRate / 2 // 500 ms of flowing RTSP audio before marker.
 	latencySearchDuration       = 5 * time.Second
-	latencyMarkerSymbolDuration = 64 * time.Millisecond
-	latencyMarkerSymbols        = 16
-	latencyMarkerDuration       = latencyMarkerSymbolDuration * latencyMarkerSymbols
-	latencyMarkerAmplitude      = 10000.0
+	latencyMarkerSymbolDuration = acousticmarker.SymbolDuration
+	latencyMarkerSymbols        = acousticmarker.CalibrationSymbols
+	latencyMarkerDuration       = acousticmarker.CalibrationDuration
+	latencyMarkerAmplitude      = acousticmarker.CalibrationAmplitude
 	latencyCorrelationFloor     = 0.12
 	latencyPeakMarginFloor      = 0.035
 	latencyPeakRatioFloor       = 1.20
@@ -43,14 +44,14 @@ const (
 	latencyCaptureRetryDelay    = 750 * time.Millisecond
 )
 
-var latencyMarkerFrequencies = [...]float64{850, 1200, 1700, 2300}
+var latencyMarkerFrequencies = acousticmarker.Frequencies()
 
 // The order deliberately does not repeat a short periodic pattern. Each
 // symbol selects one frequency from latencyMarkerFrequencies. Combined with
 // per-symbol fades this produces a robust, speech-band marker that survives
 // the Doorbell/NVR speaker, microphone and AAC path substantially better than
 // the former low-frequency sweep.
-var latencyMarkerCode = [...]uint8{0, 3, 1, 2, 3, 0, 2, 1, 2, 0, 3, 1, 1, 3, 0, 2}
+var latencyMarkerCode = acousticmarker.CalibrationCode()
 
 var rtspUserInfoPattern = regexp.MustCompile(`(?i)rtsp://[^\s/@]+(?::[^\s@]*)?@`)
 
@@ -697,55 +698,7 @@ func waitForRealtimePCM(ctx context.Context, c *pcmCollector, done <-chan error)
 }
 
 func generateLatencyMarker(rate int) []int16 {
-	if rate <= 0 {
-		return nil
-	}
-	totalSamples := int(math.Round(latencyMarkerDuration.Seconds() * float64(rate)))
-	if totalSamples < latencyMarkerSymbols*8 {
-		return nil
-	}
-	out := make([]int16, totalSamples)
-	fade := int(math.Round(0.006 * float64(rate))) // 6 ms fade on each symbol edge.
-	if fade < 1 {
-		fade = 1
-	}
-	for symbolIndex, code := range latencyMarkerCode {
-		if int(code) >= len(latencyMarkerFrequencies) {
-			continue
-		}
-		start := int(math.Round(float64(symbolIndex) * latencyMarkerSymbolDuration.Seconds() * float64(rate)))
-		end := int(math.Round(float64(symbolIndex+1) * latencyMarkerSymbolDuration.Seconds() * float64(rate)))
-		if end > len(out) {
-			end = len(out)
-		}
-		if start >= end {
-			continue
-		}
-		symbolSamples := end - start
-		symbolFade := fade
-		if symbolFade*2 >= symbolSamples {
-			symbolFade = symbolSamples / 4
-		}
-		freq := latencyMarkerFrequencies[code]
-		phaseStep := 2 * math.Pi * freq / float64(rate)
-		phase := 0.0
-		for i := 0; i < symbolSamples; i++ {
-			env := 1.0
-			if i < symbolFade {
-				x := float64(i) / float64(symbolFade)
-				env = math.Sin(x * math.Pi / 2)
-				env *= env
-			}
-			if tail := symbolSamples - 1 - i; tail < symbolFade {
-				x := float64(tail) / float64(symbolFade)
-				tailEnv := math.Sin(x * math.Pi / 2)
-				env *= tailEnv * tailEnv
-			}
-			out[start+i] = int16(math.Round(latencyMarkerAmplitude * env * math.Sin(phase)))
-			phase += phaseStep
-		}
-	}
-	return out
+	return acousticmarker.Calibration(rate)
 }
 
 func sendPCMThroughBaichuan(ctx context.Context, client *baichuan.Client, session *baichuan.TalkSession, pcm []int16) (markerSendStats, error) {

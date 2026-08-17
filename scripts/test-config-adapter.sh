@@ -40,12 +40,12 @@ assert_key_order() {
 # The Call UI keeps capability switches first and timing details afterwards.
 # config.yaml contains the order twice (options and schema); translations and
 # the public test fixture must expose the identical sequence.
-CALL_ORDER=(visitor_entity: incoming_calls_enabled: debounce_seconds: ring_timeout_seconds: max_call_duration_seconds:)
+CALL_ORDER=(visitor_entity: incoming_calls_enabled: incoming_allowed_callers: incoming_connection_tone_enabled: debounce_seconds: ring_timeout_seconds: rtp_inactivity_timeout_seconds: max_call_duration_seconds:)
 assert_key_order "${ROOT}/reolink_sip_gateway/config.yaml" 1 "${CALL_ORDER[@]}"
 assert_key_order "${ROOT}/reolink_sip_gateway/config.yaml" 2 "${CALL_ORDER[@]}"
 assert_key_order "${ROOT}/reolink_sip_gateway/translations/de.yaml" 1 "${CALL_ORDER[@]}"
 assert_key_order "${ROOT}/reolink_sip_gateway/translations/en.yaml" 1 "${CALL_ORDER[@]}"
-CALL_JSON_ORDER=('"visitor_entity":' '"incoming_calls_enabled":' '"debounce_seconds":' '"ring_timeout_seconds":' '"max_call_duration_seconds":')
+CALL_JSON_ORDER=('"visitor_entity":' '"incoming_calls_enabled":' '"incoming_allowed_callers":' '"incoming_connection_tone_enabled":' '"debounce_seconds":' '"ring_timeout_seconds":' '"rtp_inactivity_timeout_seconds":' '"max_call_duration_seconds":')
 assert_key_order "${ROOT}/reolink_sip_gateway/testdata/options.valid.json" 1 "${CALL_JSON_ORDER[@]}"
 
 # Fresh-install defaults exposed by the HA adapter.
@@ -54,6 +54,9 @@ assert_eq "$(jq -r .reolink.reolink_username <<<"${fresh}")" "admin"
 assert_eq "$(jq -r .sip.sip_registrar <<<"${fresh}")" "auto"
 assert_eq "$(jq -r .call.visitor_entity <<<"${fresh}")" "auto"
 assert_eq "$(jq -r .call.incoming_calls_enabled <<<"${fresh}")" "false"
+assert_eq "$(jq -c .call.incoming_allowed_callers <<<"${fresh}")" '["*"]'
+assert_eq "$(jq -r .call.incoming_connection_tone_enabled <<<"${fresh}")" "true"
+assert_eq "$(jq -r .call.rtp_inactivity_timeout_seconds <<<"${fresh}")" "15"
 
 # Direct legacy upgrade: old flat values must beat newly materialized grouped defaults once.
 legacy='{"sip_username":"legacy-user","sip_password":"legacy-pass","nvr_channel":1,"sip":{"sip_username":"","sip_password":""},"reolink":{"nvr_channel_number":1}}'
@@ -77,13 +80,18 @@ assert_eq "$(jq -r .nvr_channel <<<"${runtime}")" "1"
 assert_eq "$(jq -r .reolink_stream_path <<<"${runtime}")" "/Preview_02_sub"
 assert_eq "$(jq -r .echo_cancellation_search_window_ms <<<"${runtime}")" "300"
 assert_eq "$(jq -r .incoming_calls_enabled <<<"${runtime}")" "false"
+assert_eq "$(jq -c .incoming_allowed_callers <<<"${runtime}")" '["*"]'
+assert_eq "$(jq -r .incoming_connection_tone_enabled <<<"${runtime}")" "true"
+assert_eq "$(jq -r .rtp_inactivity_timeout_seconds <<<"${runtime}")" "15"
 
-# The new v0.7 incoming-call option stays opt-in and reaches the flat runtime
-# unchanged when explicitly enabled.
-incoming_options="$(jq -c '.call.incoming_calls_enabled=true' <<<"${normalized}")"
+# v0.8 incoming-call controls reach the flat runtime unchanged.
+incoming_options="$(jq -c '.call.incoming_calls_enabled=true | .call.incoming_allowed_callers=["0123 456789","**620"] | .call.incoming_connection_tone_enabled=false | .call.rtp_inactivity_timeout_seconds=25' <<<"${normalized}")"
 build_runtime_options "${incoming_options}"
 runtime="$(cat /tmp/reolink-sip-gateway-runtime-options.json)"
 assert_eq "$(jq -r .incoming_calls_enabled <<<"${runtime}")" "true"
+assert_eq "$(jq -c .incoming_allowed_callers <<<"${runtime}")" '["0123 456789","**620"]'
+assert_eq "$(jq -r .incoming_connection_tone_enabled <<<"${runtime}")" "false"
+assert_eq "$(jq -r .rtp_inactivity_timeout_seconds <<<"${runtime}")" "25"
 
 # Standalone ignores the public NVR channel and keeps the proven 0/Preview_01 mapping.
 standalone="$(jq -c '.reolink.reolink_mode="standalone" | .reolink.nvr_channel_number=9' <<<"${normalized}")"
@@ -161,7 +169,7 @@ WRITES=0
 LAST_WRITE=''
 supervisor_options_write(){ WRITES=$((WRITES+1)); LAST_WRITE="$1"; return 0; }
 
-grouped='{"reolink":{"reolink_host":"10.0.0.2","reolink_username":"u","reolink_password":"p","reolink_mode":"nvr","nvr_channel_number":2,"reolink_rtsp_port":554,"baichuan_port":9000},"sip":{"sip_registrar":"10.0.0.1","sip_registrar_port":5060,"sip_username":"s","sip_password":"x","sip_destination":"100","sip_local_port":5070,"sip_display_name":"Door","sip_codec_preference":"pcma"},"audio":{"echo_cancellation_enabled":true,"webrtc_high_pass_filter_enabled":true,"webrtc_noise_suppression_enabled":true},"call":{"visitor_entity":"binary_sensor.door","incoming_calls_enabled":false,"ring_timeout_seconds":30,"max_call_duration_seconds":300,"debounce_seconds":3},"diagnostics":{"log_level":"info","dry_run":false}}'
+grouped='{"reolink":{"reolink_host":"10.0.0.2","reolink_username":"u","reolink_password":"p","reolink_mode":"nvr","nvr_channel_number":2,"reolink_rtsp_port":554,"baichuan_port":9000},"sip":{"sip_registrar":"10.0.0.1","sip_registrar_port":5060,"sip_username":"s","sip_password":"x","sip_destination":"100","sip_local_port":5070,"sip_display_name":"Door","sip_codec_preference":"pcma"},"audio":{"echo_cancellation_enabled":true,"webrtc_high_pass_filter_enabled":true,"webrtc_noise_suppression_enabled":true},"call":{"visitor_entity":"binary_sensor.door","incoming_calls_enabled":false,"incoming_allowed_callers":["*"],"incoming_connection_tone_enabled":true,"debounce_seconds":3,"ring_timeout_seconds":30,"rtp_inactivity_timeout_seconds":15,"max_call_duration_seconds":300},"diagnostics":{"log_level":"info","dry_run":false}}'
 printf '%s\n' "${grouped}" > "${OPTIONS_FILE}"
 normalized="$(normalize_public_options "${grouped}" true)"
 assert_eq "$(jq -r .reolink.reolink_username <<<"${normalized}")" "u"

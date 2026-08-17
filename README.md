@@ -6,13 +6,16 @@ Community Home Assistant app that bridges bidirectional audio between a Reolink 
 
 ## Current release
 
-**v0.7.0** adds opt-in incoming SIP calls. Calling the gateway's registered extension now connects the caller to the single configured Reolink camera/NVR channel. The gateway sends `100 Trying`, prepares both Reolink media directions, and only then answers automatically with `200 OK`; failed camera setup is rejected instead of producing an answered silent call.
+**v0.8.0** hardens the incoming-call path introduced in v0.7. Allowed telephone numbers or internal SIP usernames can now be whitelisted before any dialog or camera resources are reserved. A short acoustic indication is played at the doorbell before an incoming call is answered, and an RTP inactivity watchdog cleans up abandoned calls even when no SIP `BYE` arrives.
 
-The existing visitor-triggered outbound call remains unchanged. Incoming and outgoing calls share the same G.711/RTP, AEC and Reolink media implementation, including the zero-lookahead elastic v0.6 talkback playout. Only one call is allowed at a time. Incoming `INVITE`, `ACK`, `CANCEL` and `BYE` handling is covered, while DTMF and multi-camera selection remain future work.
+The existing visitor-triggered outbound call and the proven v0.6 media path remain unchanged. Incoming and outgoing calls share the same G.711/RTP, AEC and Reolink implementation; the watchdog observes valid negotiated RTP packets rather than audio level, so ordinary silent conversation intervals do not end a call.
 
 Highlights:
 
 - SIP registration plus outbound and opt-in automatically answered incoming calls using G.711 A-law/µ-law.
+- Exact normalized incoming-caller whitelist, with an explicit `*` compatibility setting.
+- Short pre-answer acoustic connection indication using the established coded marker generator.
+- Configurable SIP RTP inactivity watchdog for deterministic cleanup of broken calls.
 - Home Assistant Reolink visitor binary sensor as call trigger, with entity-registry auto-discovery or manual override.
 - Reolink standalone and NVR media profiles.
 - Bidirectional audio via RTSP/ONVIF or Reolink Baichuan, depending on profile.
@@ -75,8 +78,12 @@ audio:
 call:
   visitor_entity: auto
   incoming_calls_enabled: false
+  incoming_allowed_callers:
+    - "*"
+  incoming_connection_tone_enabled: true
   debounce_seconds: 3
   ring_timeout_seconds: 30
+  rtp_inactivity_timeout_seconds: 15
   max_call_duration_seconds: 300
 
 diagnostics:
@@ -90,7 +97,11 @@ With `sip_registrar: auto`, the startup adapter reads the Home Assistant host's 
 
 With `visitor_entity: auto`, the adapter queries Home Assistant's compact `config/entity_registry/list_for_display` view and selects the single enabled `binary_sensor` from platform `reolink` with translation key `visitor`. Renamed entity IDs are therefore supported. If none or more than one are enabled, startup asks for an explicit manual entity instead of guessing. Existing manual visitor entities are retained during updates. WebSocket frames and complete messages remain bounded to 16 MiB.
 
-Set **Allow incoming SIP calls** (`incoming_calls_enabled`) in the **Call** section to call the camera through the gateway. With a FRITZ!Box, dial the internal number assigned to the gateway's IP telephone, for example `**620`; use the actual number shown by the FRITZ!Box. The option defaults to `false` so upgrades never begin auto-answering unexpectedly. Signalling is accepted only from the configured registrar IP and UDP port. If only internal calls should reach the camera, do not assign external incoming numbers to this IP telephone in the FRITZ!Box, because forwarded external calls also originate from the trusted registrar.
+Set **Allow incoming SIP calls** (`incoming_calls_enabled`) in the **Call** section to call the camera through the gateway. With a FRITZ!Box, dial the internal number assigned to the gateway's IP telephone, for example `**620`; use the actual number shown by the FRITZ!Box. The option defaults to `false` so upgrades never begin auto-answering unexpectedly. Signalling is accepted only from the configured registrar IP and UDP port, and the normalized SIP caller user must match `incoming_allowed_callers`. The compatibility value `*` permits every caller; replace it with the telephone numbers or internal extensions that should be accepted. Country-code variants are intentionally not inferred.
+
+Before an accepted incoming call is answered, `incoming_connection_tone_enabled` plays the first four symbols (256 ms) of the existing acoustic marker through the actual Reolink talkback path. `rtp_inactivity_timeout_seconds` then ends either call direction when no valid negotiated RTP audio packet is received for the configured interval. If only internal calls should reach the camera, do not assign external incoming numbers to this IP telephone in the FRITZ!Box, because forwarded external calls also originate from the trusted registrar.
+
+Planned sequencing: native Home Assistant status/caller sensors and test-call/hang-up buttons are reserved for v0.9 as a companion integration; DTMF follows separately in v1.0.
 
 The **Passive mode / Passivmodus** toggle in **Operation & diagnostics / Betrieb & Diagnose** keeps the internal key `dry_run` for backwards compatibility. It monitors visitor events but suppresses SIP registration, outbound calls and the audible startup calibration marker.
 

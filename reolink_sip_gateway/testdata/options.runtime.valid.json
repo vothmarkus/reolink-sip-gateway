@@ -21,7 +21,12 @@
   "sip_display_name": "Haustür",
   "sip_codec_preference": "pcma",
   "incoming_calls_enabled": false,
+  "incoming_allowed_callers": [
+    "*"
+  ],
+  "incoming_connection_tone_enabled": true,
   "ring_timeout_seconds": 30,
+  "rtp_inactivity_timeout_seconds": 15,
   "max_call_duration_seconds": 300,
   "debounce_seconds": 3,
   "log_level": "info",

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0
+
+- Neue Whitelist `call.incoming_allowed_callers` für eingehende SIP-Anrufe. Sie wird nach der Registrar-Vertrauensprüfung, aber vor SDP-Auswertung, Dialogreservierung und Kameraaufbau geprüft; nicht zugelassene Anrufer erhalten `403 Forbidden`.
+- Rufnummern werden ohne Leerzeichen, Bindestriche, Punkte, Schrägstriche und Klammern verglichen; interne Sterncodes und benannte SIP-Benutzer werden unterstützt. Landesvorwahlvarianten werden bewusst nicht geraten. `*` erhält das bisherige 0.7-Verhalten und muss allein in der Liste stehen; eine leere Liste schlägt bei aktivierter Anrufannahme sicher fehl.
+- Neuer, standardmäßig aktiver akustischer Verbindungshinweis: Vor der Annahme eines erlaubten eingehenden Anrufs spielt der echte Reolink-Talkbackpfad die ersten vier Symbole des bestehenden Kalibrierungsmarkers für 256 ms ab. Die 1,024-s-Startkalibrierung und ihre Signalfolge bleiben unverändert.
+- Neuer RTP-Verbindungswächter für beide Anrufrichtungen. Bleiben nach Medienstart gültige Pakete mit dem ausgehandelten PCMA-/PCMU-Payloadtyp aus, beendet das Gateway das Gespräch und sendet nach Möglichkeit selbst ein SIP-`BYE`; Stille innerhalb weiterlaufender RTP-Pakete gilt weiterhin als Aktivität.
+- `call.rtp_inactivity_timeout_seconds` ist von 5 bis 120 Sekunden einstellbar und steht standardmäßig auf 15 Sekunden. `call.incoming_connection_tone_enabled` erlaubt das gezielte Abschalten des Hinweistons.
+- Reihenfolge im Block **Anruf**: Besucher-Sensor, eingehende Anrufe, erlaubte Anrufer, Hinweiston, Entprellung, Klingeldauer, RTP-Verbindungswächter und maximale Gesprächsdauer. Konfigurationsadapter, Fixtures sowie deutsche und englische Übersetzungen übernehmen bestehende 0.7-Konfigurationen kompatibel.
+- Neue Unit-/Integrationstests decken Normalisierung und Ablehnung der Anrufer, die bitgleiche Markervorsilbe, den RTP-Timeout und die Runtime-Abbildung ab. Der bestehende AEC-/elastische v0.6-Medienpfad bleibt unverändert. Home-Assistant-Entitäten folgen in 0.9, DTMF in 1.0.
+- App-, Gateway-, SIP-/RTSP-User-Agent- und CI-Buildversion sind 0.8.0.
+
 ## 0.7.0
 
 - Neuer, standardmäßig deaktivierter Schalter **Eingehende SIP-Anrufe zulassen** (`call.incoming_calls_enabled`). Er steht im Block **Anruf** direkt nach dem Reolink-Besucher-Sensor; danach folgen Entprellung, Klingeldauer und maximale Gesprächsdauer.

@@ -74,13 +74,22 @@ configuration:
         description: „auto“ verwendet automatisch den aktivierten Besucher-/Klingelsensor der Reolink-Integration. Bei mehreren Reolink-Türklingeln muss die gewünschte binary_sensor-Entity manuell eingetragen werden.
       incoming_calls_enabled:
         name: Eingehende SIP-Anrufe zulassen
-        description: Nimmt Anrufe an die registrierte SIP-Nebenstelle automatisch an und verbindet sie mit der fest konfigurierten Reolink-Kamera. Es werden nur Anrufe vom konfigurierten SIP-Registrar akzeptiert.
+        description: Nimmt Anrufe an die registrierte SIP-Nebenstelle automatisch an und verbindet sie mit der fest konfigurierten Reolink-Kamera. Es werden nur Anrufe vom konfigurierten SIP-Registrar und aus der Anruferliste akzeptiert.
+      incoming_allowed_callers:
+        name: Erlaubte Anrufer
+        description: Liste zulässiger Rufnummern oder interner SIP-Benutzernamen. Leerzeichen, Bindestriche, Punkte, Schrägstriche und Klammern in Telefonnummern werden beim Vergleich ignoriert. „*“ erlaubt alle Anrufer und muss allein stehen; Landesvorwahlen werden nicht automatisch umgerechnet.
+      incoming_connection_tone_enabled:
+        name: Akustischer Hinweiston
+        description: Spielt vor der Annahme eines Telefon-zu-Kamera-Anrufs einen kurzen 256-ms-Ausschnitt des bewährten akustischen Kalibrierungsmarkers an der Doorbell ab.
       debounce_seconds:
         name: Klingelentprellung
         description: Weitere Klingelereignisse innerhalb dieser Zeit werden ignoriert.
       ring_timeout_seconds:
         name: Klingeldauer
         description: Zeit bis zum Abbruch eines nicht angenommenen Anrufs.
+      rtp_inactivity_timeout_seconds:
+        name: RTP-Verbindungswächter
+        description: Beendet ein Gespräch, wenn so lange kein gültiges RTP-Audiopaket der Gegenstelle empfangen wurde. Normale Gesprächspausen lösen den Wächter nicht aus, solange weiterhin RTP übertragen wird.
       max_call_duration_seconds:
         name: Maximale Gesprächsdauer
         description: Sicherheitsbegrenzung für ein Gespräch.

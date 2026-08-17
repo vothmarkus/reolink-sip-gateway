@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/vothmarkus/reolink-sip-gateway/internal/acousticmarker"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/baichuan"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/baichuanaudio"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/config"
@@ -133,6 +134,23 @@ func (s *Session) Run(ctx context.Context) error {
 	talkInfo := talkback.Info()
 	if s.logger != nil {
 		s.logger.Info("Reolink talkback active", "mode", talkInfo.Mode, "details", talkInfo.Details)
+	}
+	if s.call.IsInbound() && s.cfg.IncomingConnectionToneEnabled {
+		tone := acousticmarker.Connection(talkInfo.SampleRate)
+		if len(tone) == 0 {
+			s.closeTalkback(talkback)
+			return fmt.Errorf("generate incoming-call connection tone at %d Hz", talkInfo.SampleRate)
+		}
+		if err := talkback.PlayPCM(runCtx, tone, controls); err != nil {
+			s.closeTalkback(talkback)
+			return fmt.Errorf("play incoming-call connection tone: %w", err)
+		}
+		if s.logger != nil {
+			s.logger.Info("incoming-call acoustic indication played",
+				"duration", acousticmarker.ConnectionDuration,
+				"sample_rate", talkInfo.SampleRate,
+				"talkback_mode", talkInfo.Mode)
+		}
 	}
 
 	var (

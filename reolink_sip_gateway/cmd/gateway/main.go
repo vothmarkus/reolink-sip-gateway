@@ -22,7 +22,7 @@ import (
 	statuspkg "github.com/vothmarkus/reolink-sip-gateway/internal/status"
 )
 
-const version = "0.7.0"
+const version = "0.8.0"
 
 func main() {
 	configPath := flag.String("config", "/data/options.json", "path to Home Assistant app options JSON")
@@ -147,6 +147,7 @@ func main() {
 			DisplayName:     cfg.SIPDisplayName,
 			CodecPreference: cfg.SIPCodecPreference,
 			AcceptIncoming:  cfg.IncomingCallsEnabled,
+			AllowedCallers:  cfg.IncomingAllowedCallers,
 			Debug:           cfg.DebugEnabled(),
 		}, logger)
 		if err != nil {
@@ -155,6 +156,14 @@ func main() {
 		}
 		defer sipClient.Close()
 		sipClient.StartRegistration(ctx)
+		if cfg.IncomingCallsEnabled {
+			allowAll := len(cfg.IncomingAllowedCallers) == 1 && cfg.IncomingAllowedCallers[0] == "*"
+			logger.Info("incoming SIP call policy active",
+				"allow_all_callers", allowAll,
+				"allowed_caller_count", len(cfg.IncomingAllowedCallers),
+				"connection_tone", cfg.IncomingConnectionToneEnabled,
+				"rtp_inactivity_timeout", cfg.RTPInactivityTimeout())
+		}
 
 		go func() {
 			t := time.NewTicker(time.Second)
