@@ -205,7 +205,7 @@ Die bisherigen Schalter `debug_sip`, `debug_rtsp`, `debug_baichuan` sind entfern
 
 ## Ingress-Status
 
-Die Statusseite zeigt den konfigurierten und aktiven Modus, Medienprofil, Kalibrierungsstatus, kalibrierten Startwert, aktuellen Trackerwert, Suchfenster/-grenzen, WebRTC-Filter, SIP-/HA-Status, aktuelle/letzte Anrufrichtung, aktuelle/letzte anrufende Nummer und aktive Call-Medien. Zeitangaben werden kompakt formatiert; noch nicht vorhandene Zeitpunkte erscheinen als Gedankenstrich. Ein eigener administrativer Abschnitt zeigt API-Adresse und Token für die Einrichtung der Companion-Integration.
+Die Statusseite zeigt den konfigurierten und aktiven Modus, Medienprofil, Kalibrierungsstatus, kalibrierten Startwert, aktuellen Trackerwert, Suchfenster/-grenzen, WebRTC-Filter, SIP-/HA-Status, aktuelle/letzte Anrufrichtung, aktuelle/letzte anrufende Nummer und aktive Call-Medien. Zeitangaben werden kompakt formatiert; noch nicht vorhandene Zeitpunkte erscheinen als Gedankenstrich. Ein eigener administrativer Abschnitt zeigt den internen Add-on-Hostnamen und das Token für die Einrichtung der Companion-Integration. Die Integration erzeugt daraus selbst `http://<Hostname>:18099/api/v1`.
 
 ## Home-Assistant-Integrations-API v1
 

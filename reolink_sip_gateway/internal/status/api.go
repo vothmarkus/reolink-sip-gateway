@@ -38,6 +38,7 @@ type ServerOptions struct {
 	Port       int
 	Token      string
 	InstanceID string
+	Hostname   string
 	Commands   CommandHandler
 }
 

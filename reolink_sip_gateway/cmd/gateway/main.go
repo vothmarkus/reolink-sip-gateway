@@ -71,6 +71,10 @@ func main() {
 		os.Exit(1)
 	}
 	commands := &gatewayCommands{}
+	addonHostname, hostnameErr := os.Hostname()
+	if hostnameErr != nil {
+		logger.Warn("cannot determine Home Assistant app hostname", "error", hostnameErr)
+	}
 	store := statuspkg.New(version)
 	store.Update(func(s *statuspkg.Snapshot) {
 		s.DryRun = cfg.DryRun
@@ -91,7 +95,7 @@ func main() {
 	})
 	go func() {
 		serverOptions := statuspkg.ServerOptions{
-			Port: cfg.StatusPort, Token: identity.Token, InstanceID: identity.InstanceID, Commands: commands,
+			Port: cfg.StatusPort, Token: identity.Token, InstanceID: identity.InstanceID, Hostname: addonHostname, Commands: commands,
 		}
 		if err := store.Serve(ctx, serverOptions); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("status server stopped", "error", err)

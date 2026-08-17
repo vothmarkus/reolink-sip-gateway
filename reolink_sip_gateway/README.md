@@ -12,7 +12,7 @@ Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann einen 
 
 `POST /api/v1/calls/test` startet einen normalen ausgehenden Anruf zum bereits unter SIP konfigurierten Ziel. `POST /api/v1/calls/hangup` beendet das aktuelle ein- oder ausgehende Gespräch; im Leerlauf ist der Aufruf bewusst folgenlos. Beide Befehle verwenden denselben neuen Call-Controller wie Besucherereignisse und eingehende SIP-Anrufe. Ein zweiter paralleler Gesprächspfad ist damit ausgeschlossen.
 
-Beim ersten Start erzeugt die App unter `/data` eine stabile Instanz-ID und ein zufälliges 256-Bit-API-Token. Adresse und Token werden ausschließlich auf der administrativen Ingress-Seite angezeigt. Die API erfordert Bearer-Authentifizierung und akzeptiert nur lokale beziehungsweise private Quelladressen. Es gibt keine neue Konfigurationsoption; vorhandene 0.8-Einstellungen bleiben unverändert.
+Beim ersten Start erzeugt die App unter `/data` eine stabile Instanz-ID und ein zufälliges 256-Bit-API-Token. Interner Add-on-Hostname und Token werden ausschließlich auf der administrativen Ingress-Seite angezeigt; die Companion-Integration erzeugt daraus selbst die feste API-Adresse. Die API erfordert Bearer-Authentifizierung und akzeptiert nur lokale beziehungsweise private Quelladressen. Es gibt keine neue Konfigurationsoption; vorhandene 0.8-Einstellungen bleiben unverändert.
 
 Der vollständige Integrationsvertrag liegt maschinenlesbar als `docs/api-v1.openapi.yaml` im Repository. API-Version 1 ist unabhängig von der App-Version; DTMF wird erst mit 1.0 additiv ergänzt.
 

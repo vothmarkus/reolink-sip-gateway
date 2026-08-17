@@ -110,7 +110,7 @@ The **Passive mode / Passivmodus** toggle in **Operation & diagnostics / Betrieb
 
 ## Companion integration API
 
-Open the app's Ingress page after startup to copy the generated API token. The integration connects to `http://<Home-Assistant-IP>:18099`, verifies API version 1 and uses the stable installation UUID for its device and entity unique IDs. The token is generated once, stored with mode `0600` under `/data`, retained across app updates/backups and never written to the log.
+Open the app's Ingress page after startup to copy the internal app hostname and generated API token. The integration builds `http://<app-hostname>:18099/api/v1` itself, verifies API version 1 and uses the stable installation UUID for its device and entity unique IDs. The token is generated once, stored with mode `0600` under `/data`, retained across app updates/backups and never written to the log.
 
 The API is intentionally local: requests require `Authorization: Bearer <token>` and must originate from loopback, a private network or a link-local address. `/api/v1/events` pushes complete snapshots on real state changes; clients should still reconcile with `/api/v1/status` after reconnecting. The existing ingress-only `/api/status` remains available for the status page but is not the integration contract.
 

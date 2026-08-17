@@ -161,7 +161,7 @@ func (s *Store) Serve(ctx context.Context, options ServerOptions) error {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'self'")
-		_ = page.Execute(w, pageData{Snapshot: s.Get(), APIPort: options.Port, APIToken: options.Token})
+		_ = page.Execute(w, pageData{Snapshot: s.Get(), APIHostname: setupHostname(options.Hostname), APIToken: options.Token})
 	})))
 
 	srv := &http.Server{
@@ -227,11 +227,15 @@ func formatTime(v time.Time) string {
 
 type pageData struct {
 	Snapshot
-	APIPort  int
-	APIToken string
+	APIHostname string
+	APIToken    string
 }
 
-var page = template.Must(template.New("status").Funcs(template.FuncMap{"time": formatTime}).Parse(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reolink SIP Gateway</title><style>body{font:16px system-ui;margin:2rem;max-width:820px}.brand{display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem}.brand img{width:72px;height:72px;border-radius:16px}.brand h1{margin:0}.brand p{margin:.25rem 0 0;color:#666}.integration{background:#f4f6f8;border-radius:10px;padding:1rem;margin:0 0 1.25rem}.integration h2{font-size:1.1rem;margin:0 0 .65rem}.integration p{margin:.4rem 0}.token{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}.token code{overflow-wrap:anywhere}.token button{padding:.35rem .65rem}table{border-collapse:collapse;width:100%}td{padding:.55rem;border-bottom:1px solid #ddd;vertical-align:top}td:first-child{font-weight:600;width:40%}.ok{color:#087f23}.bad{color:#b00020}.muted{color:#666}code{background:#eee;padding:.15rem .3rem;border-radius:4px}@media(max-width:520px){body{margin:1rem}.brand img{width:60px;height:60px}.brand h1{font-size:1.55rem}}</style></head><body><div class="brand"><img src="./logo.png" alt="Reolink SIP Gateway"><div><h1>Reolink SIP Gateway</h1><p>Reolink ↔ SIP Zwei-Wege-Audio</p></div></div><section class="integration"><h2>Home-Assistant-Integration</h2><p>API-Adresse: <code>http://&lt;Home-Assistant-IP&gt;:{{.APIPort}}/api/v1</code></p><div class="token"><span>API-Token:</span><code id="api-token">{{.APIToken}}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('api-token').textContent)">kopieren</button></div><p class="muted">Token vertraulich behandeln; er berechtigt zu Testanruf und Auflegen.</p></section><table>
+func setupHostname(value string) string {
+	return strings.ReplaceAll(strings.TrimSpace(value), "_", "-")
+}
+
+var page = template.Must(template.New("status").Funcs(template.FuncMap{"time": formatTime}).Parse(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reolink SIP Gateway</title><style>body{font:16px system-ui;margin:2rem;max-width:820px}.brand{display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem}.brand img{width:72px;height:72px;border-radius:16px}.brand h1{margin:0}.brand p{margin:.25rem 0 0;color:#666}.integration{background:#f4f6f8;border-radius:10px;padding:1rem;margin:0 0 1.25rem}.integration h2{font-size:1.1rem;margin:0 0 .65rem}.integration p{margin:.4rem 0}.credential{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}.credential code{overflow-wrap:anywhere}.credential button{padding:.35rem .65rem}table{border-collapse:collapse;width:100%}td{padding:.55rem;border-bottom:1px solid #ddd;vertical-align:top}td:first-child{font-weight:600;width:40%}.ok{color:#087f23}.bad{color:#b00020}.muted{color:#666}code{background:#eee;padding:.15rem .3rem;border-radius:4px}@media(max-width:520px){body{margin:1rem}.brand img{width:60px;height:60px}.brand h1{font-size:1.55rem}}</style></head><body><div class="brand"><img src="./logo.png" alt="Reolink SIP Gateway"><div><h1>Reolink SIP Gateway</h1><p>Reolink ↔ SIP Zwei-Wege-Audio</p></div></div><section class="integration"><h2>Home-Assistant-Integration</h2><div class="credential"><span>Add-on-Hostname:</span><code id="api-hostname">{{.APIHostname}}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('api-hostname').textContent)">kopieren</button></div><div class="credential"><span>API-Token:</span><code id="api-token">{{.APIToken}}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('api-token').textContent)">kopieren</button></div><p class="muted">Die Integration erzeugt die API-Adresse automatisch. Token vertraulich behandeln; es berechtigt zu Testanruf und Auflegen.</p></section><table>
 <tr><td>Status</td><td><code>{{.State}}</code></td></tr>
 <tr><td>SIP registriert</td><td>{{if .SIPRegistered}}<span class="ok">ja</span>{{else}}<span class="bad">nein</span>{{end}}</td></tr>
 <tr><td>Home Assistant</td><td>{{if .HAConnected}}<span class="ok">verbunden</span>{{else}}<span class="bad">nicht verbunden</span>{{end}}</td></tr>

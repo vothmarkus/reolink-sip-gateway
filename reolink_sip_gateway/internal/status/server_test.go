@@ -33,14 +33,23 @@ func TestEmbeddedLogoPNG(t *testing.T) {
 
 func TestStatusPageContainsLogo(t *testing.T) {
 	var out bytes.Buffer
-	if err := page.Execute(&out, pageData{Snapshot: Snapshot{}, APIPort: 18099, APIToken: "secret-token"}); err != nil {
+	if err := page.Execute(&out, pageData{Snapshot: Snapshot{}, APIHostname: "1c33278a-reolink-sip-gateway", APIToken: "secret-token"}); err != nil {
 		t.Fatalf("render status page: %v", err)
 	}
 	if !bytes.Contains(out.Bytes(), []byte(`src="./logo.png"`)) {
 		t.Fatal("status page does not reference embedded logo")
 	}
-	if !bytes.Contains(out.Bytes(), []byte(`secret-token`)) || !bytes.Contains(out.Bytes(), []byte(`18099/api/v1`)) {
+	if !bytes.Contains(out.Bytes(), []byte(`secret-token`)) || !bytes.Contains(out.Bytes(), []byte(`1c33278a-reolink-sip-gateway`)) {
 		t.Fatal("status page does not contain integration setup data")
+	}
+	if bytes.Contains(out.Bytes(), []byte(`Home-Assistant-IP`)) {
+		t.Fatal("status page must ask for the add-on hostname, not an API URL")
+	}
+}
+
+func TestSetupHostnameUsesDNSForm(t *testing.T) {
+	if got := setupHostname(" 1c33278a_reolink_sip_gateway "); got != "1c33278a-reolink-sip-gateway" {
+		t.Fatalf("setupHostname()=%q", got)
 	}
 }
 
