@@ -49,7 +49,7 @@ func TestStorePublishesOnlyChangedSnapshots(t *testing.T) {
 	updates, unsubscribe := store.Subscribe()
 	defer unsubscribe()
 	initial := <-updates
-	store.Update(func(snapshot *Snapshot) { snapshot.State = snapshot.State })
+	store.Update(func(*Snapshot) {})
 	select {
 	case <-updates:
 		t.Fatal("unchanged snapshot was published")
