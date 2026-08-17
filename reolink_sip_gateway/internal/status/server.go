@@ -57,10 +57,23 @@ type Snapshot struct {
 	ReceiveDetails                string    `json:"receive_details,omitempty"`
 }
 
+type dtmfEvent struct {
+	Digit         string
+	DurationMS    int
+	ReceivedAt    time.Time
+	CallDirection string
+	CallerNumber  string
+}
+
+type subscriber struct {
+	status chan Snapshot
+	dtmf   chan dtmfEvent
+}
+
 type Store struct {
 	mu             sync.RWMutex
 	value          Snapshot
-	subscribers    map[uint64]chan Snapshot
+	subscribers    map[uint64]subscriber
 	nextSubscriber uint64
 }
 
@@ -68,7 +81,7 @@ func New(version string) *Store {
 	now := time.Now()
 	return &Store{
 		value:       Snapshot{Version: version, StartedAt: now, UpdatedAt: now, Revision: 1, State: "starting"},
-		subscribers: make(map[uint64]chan Snapshot),
+		subscribers: make(map[uint64]subscriber),
 	}
 }
 
@@ -85,16 +98,16 @@ func (s *Store) Update(fn func(*Snapshot)) {
 	current := s.value
 	for _, subscriber := range s.subscribers {
 		select {
-		case subscriber <- current:
+		case subscriber.status <- current:
 		default:
 			// A status stream needs the newest complete snapshot, not an
 			// unbounded history. Replace one stale buffered update.
 			select {
-			case <-subscriber:
+			case <-subscriber.status:
 			default:
 			}
 			select {
-			case subscriber <- current:
+			case subscriber.status <- current:
 			default:
 			}
 		}
@@ -116,18 +129,60 @@ func (s *Store) Subscribe() (<-chan Snapshot, func()) {
 	id := s.nextSubscriber
 	updates := make(chan Snapshot, 1)
 	updates <- s.value
-	s.subscribers[id] = updates
+	s.subscribers[id] = subscriber{status: updates}
 	s.mu.Unlock()
+	return updates, s.cancelSubscriber(id)
+}
 
+// subscribeEvents atomically registers both status and transient DTMF streams,
+// so an SSE client cannot miss an event in the gap between two subscriptions.
+func (s *Store) subscribeEvents() (<-chan Snapshot, <-chan dtmfEvent, func()) {
+	s.mu.Lock()
+	s.nextSubscriber++
+	id := s.nextSubscriber
+	updates := make(chan Snapshot, 1)
+	dtmf := make(chan dtmfEvent, 64)
+	updates <- s.value
+	s.subscribers[id] = subscriber{status: updates, dtmf: dtmf}
+	s.mu.Unlock()
+	return updates, dtmf, s.cancelSubscriber(id)
+}
+
+func (s *Store) cancelSubscriber(id uint64) func() {
 	var once sync.Once
-	cancel := func() {
+	return func() {
 		once.Do(func() {
 			s.mu.Lock()
 			delete(s.subscribers, id)
 			s.mu.Unlock()
 		})
 	}
-	return updates, cancel
+}
+
+// PublishDTMF fans one completed keypress out to connected SSE clients without
+// mutating the persistent status snapshot or its revision. Call metadata is
+// supplied by the owning call lifetime so teardown cannot erase it first.
+func (s *Store) PublishDTMF(digit string, durationMS int, receivedAt time.Time, callDirection, callerNumber string) {
+	if receivedAt.IsZero() {
+		receivedAt = time.Now()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	event := dtmfEvent{
+		Digit: digit, DurationMS: durationMS, ReceivedAt: receivedAt.UTC(),
+		CallDirection: callDirection, CallerNumber: callerNumber,
+	}
+	for _, subscriber := range s.subscribers {
+		if subscriber.dtmf == nil {
+			continue
+		}
+		select {
+		case subscriber.dtmf <- event:
+		default:
+			// The bounded per-client queue prevents a stalled SSE reader from
+			// applying backpressure to the real-time RTP receive path.
+		}
+	}
 }
 
 func (s *Store) Serve(ctx context.Context, options ServerOptions) error {

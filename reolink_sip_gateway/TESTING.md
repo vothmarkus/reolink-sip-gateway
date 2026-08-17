@@ -1,8 +1,8 @@
-# Prüfprotokoll 0.9.0
+# Prüfprotokoll 1.0.0
 
 ## Ziel
 
-0.9.0 ergänzt die Integrations-API, den gemeinsamen Call-Controller und den Status für die geplanten Home-Assistant-Entities. Zu prüfen sind Authentifizierung und lokale Netzwerkgrenze, stabiler API-Vertrag, verlustfreier Ereignisstrom, Einzelgesprächsschutz sowie sauberes Auflegen in Wähl-, Vorbereitungs- und aktiver Phase. Die hardwarebestätigten 0.8-Medienpfade müssen unverändert bleiben.
+1.0.0 ergänzt ausgehandeltes RFC-4733-DTMF und flüchtige Integrationsereignisse. Zu prüfen sind SDP-Aushandlung, Event-Deduplizierung, die klare Trennung von DTMF und Status sowie unveränderte Audio-, AEC- und Call-Control-Pfade.
 
 ## Softwareprüfungen vor Release
 
@@ -17,9 +17,17 @@
 - YAML-/JSON-Prüfung von App-Konfiguration und Übersetzungen
 - identische fünf Gruppen und Feldmengen in `options`, `schema`, DE, EN und Testkonfiguration
 - Bash-Syntaxprüfung des s6-Startskripts
-- Versionsprüfung 0.9.0 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
+- Versionsprüfung 1.0.0 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
 - Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
 - expliziter Test der nativen Statistikbits 0…7
+
+## Ergänzungen 1.0.0
+
+- Ausgehendes SDP bietet `telephone-event/8000` auf PT 101 an; nur eine passende Antwort aktiviert DTMF. Eingehendes SDP spiegelt einen gültigen dynamischen 8-kHz-Payloadtyp.
+- Terminale RFC-4733-Pakete für `0`–`9`, `*`, `#`, `A`–`D` ergeben genau ein Ereignis; Startpakete, Wiederholungen, reservierte Bits, Null-Dauer, unbekannte Codes und falsche Clockrate werden nicht veröffentlicht.
+- Beide Talkback-Pfade trennen DTMF vor G.711 ab. Nur Pakete vom ausgehandelten RTP-Port sind zulässig; DTMF darf weder symmetrisches RTP retargeten noch den Audio-Watchdog zurücksetzen.
+- SSE `dtmf` besitzt keine ID und ändert keine Statusrevision. Nutzdaten enthalten Dauer, Richtung, Anrufer, Zeit und Instanz-ID; Ziffern dürfen nicht im Gatewaylog erscheinen.
+- OpenAPI und `info.capabilities` enthalten `DTMFEvent` beziehungsweise `dtmf_events`. Es gibt weiterhin keine neue App-Option.
 
 ## Ergänzungen 0.9.0
 

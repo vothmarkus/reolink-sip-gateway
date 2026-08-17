@@ -6,13 +6,16 @@ import (
 )
 
 func TestParseAnswerSDP(t *testing.T) {
-	sdp := "v=0\r\nc=IN IP4 192.0.2.5\r\nm=audio 4000 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\n"
-	c, a, err := parseAnswerSDP(sdp)
+	sdp := "v=0\r\nc=IN IP4 192.0.2.5\r\nm=audio 4000 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\n"
+	media, err := parseAnswerMedia(sdp)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Name != "pcma" || c.PayloadType != 8 || a.Port != 4000 {
-		t.Fatalf("bad parse %#v %v", c, a)
+	if media.Codec.Name != "pcma" || media.Codec.PayloadType != 8 || media.RemoteRTP.Port != 4000 {
+		t.Fatalf("bad parse %#v", media)
+	}
+	if media.TelephoneEvent == nil || media.TelephoneEvent.PayloadType != 101 || media.TelephoneEvent.ClockRate != 8000 {
+		t.Fatalf("telephone-event was not negotiated: %#v", media.TelephoneEvent)
 	}
 }
 
@@ -37,20 +40,38 @@ func TestMessageParse(t *testing.T) {
 }
 
 func TestParseOfferSDPHonorsCodecPreference(t *testing.T) {
-	sdp := "v=0\r\nc=IN IP4 192.0.2.5\r\nm=audio 4000 RTP/AVP 0 8 101\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\n"
-	codec, remote, err := parseOfferSDP(sdp, "pcma")
+	sdp := "v=0\r\nc=IN IP4 192.0.2.5\r\nm=audio 4000 RTP/AVP 0 8 110\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:110 telephone-event/8000\r\n"
+	media, err := parseOfferMedia(sdp, "pcma")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if codec.Name != "pcma" || codec.PayloadType != 8 || remote.Port != 4000 {
-		t.Fatalf("unexpected preferred offer selection: %#v %v", codec, remote)
+	if media.Codec.Name != "pcma" || media.Codec.PayloadType != 8 || media.RemoteRTP.Port != 4000 {
+		t.Fatalf("unexpected preferred offer selection: %#v", media)
 	}
-	codec, _, err = parseOfferSDP(sdp, "pcmu")
+	if media.TelephoneEvent == nil || media.TelephoneEvent.PayloadType != 110 {
+		t.Fatalf("unexpected telephone-event selection: %#v", media.TelephoneEvent)
+	}
+	codec, _, err := parseOfferSDP(sdp, "pcmu")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if codec.Name != "pcmu" || codec.PayloadType != 0 {
 		t.Fatalf("unexpected PCMU offer selection: %#v", codec)
+	}
+}
+
+func TestTelephoneEventNegotiationRequiresEightKilohertzAndOfferedAnswerPayload(t *testing.T) {
+	for _, sdp := range []string{
+		"v=0\r\nc=IN IP4 192.0.2.5\r\nm=audio 4000 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/16000\r\n",
+		"v=0\r\nc=IN IP4 192.0.2.5\r\nm=audio 4000 RTP/AVP 8 110\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:110 telephone-event/8000\r\n",
+	} {
+		media, err := parseAnswerMedia(sdp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if media.TelephoneEvent != nil {
+			t.Fatalf("invalid answer negotiated telephone-event: %#v", media.TelephoneEvent)
+		}
 	}
 }
 

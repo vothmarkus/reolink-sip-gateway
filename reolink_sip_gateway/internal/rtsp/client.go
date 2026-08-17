@@ -402,7 +402,7 @@ func (c *Client) doOnce(ctx context.Context, method, uri string, headers map[str
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "%s %s RTSP/1.0\r\n", method, uri)
 	fmt.Fprintf(&b, "CSeq: %d\r\n", seq)
-	fmt.Fprintf(&b, "User-Agent: ReolinkSIPGateway/0.9.0\r\n")
+	fmt.Fprintf(&b, "User-Agent: ReolinkSIPGateway/1.0.0\r\n")
 	if c.session != "" && method != "DESCRIBE" {
 		fmt.Fprintf(&b, "Session: %s\r\n", c.session)
 	}

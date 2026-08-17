@@ -10,12 +10,13 @@ import (
 	"time"
 
 	"github.com/vothmarkus/reolink-sip-gateway/internal/config"
+	"github.com/vothmarkus/reolink-sip-gateway/internal/rtp"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/sip"
 )
 
 type fakeTalkback struct{ mode string }
 
-func (f *fakeTalkback) Run(context.Context, *net.UDPConn, *sip.Call, *audioControls) error {
+func (f *fakeTalkback) Run(context.Context, *net.UDPConn, *sip.Call, *audioControls, func(rtp.Packet) bool) error {
 	return nil
 }
 func (f *fakeTalkback) PlayPCM(context.Context, []int16, *audioControls) error { return nil }

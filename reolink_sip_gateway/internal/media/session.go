@@ -53,6 +53,8 @@ type Session struct {
 	ready                   chan SessionInfo
 	readyOnce               sync.Once
 	aecStatus               chan AECStatus
+	dtmfEvents              chan DTMFEvent
+	dtmfDetector            *telephoneEventDetector
 	ffmpegTimestampWarnings atomic.Uint64
 }
 
@@ -61,14 +63,42 @@ type Session struct {
 // intentionally opened before the SIP INVITE so local media-port conflicts
 // cannot surface only after the callee has already answered.
 func New(cfg config.Config, call *sip.Call, rtpConn, ffConn *net.UDPConn, logger *slog.Logger) *Session {
-	return &Session{cfg: cfg, call: call, rtpConn: rtpConn, ffConn: ffConn, logger: logger, ready: make(chan SessionInfo, 1), aecStatus: make(chan AECStatus, 1)}
+	session := &Session{
+		cfg: cfg, call: call, rtpConn: rtpConn, ffConn: ffConn, logger: logger,
+		ready: make(chan SessionInfo, 1), aecStatus: make(chan AECStatus, 1), dtmfEvents: make(chan DTMFEvent, 64),
+	}
+	if call != nil && call.TelephoneEvent != nil {
+		session.dtmfDetector = newTelephoneEventDetector(call.TelephoneEvent.ClockRate)
+	}
+	return session
 }
 
 // Ready receives exactly once after talkback negotiation succeeded and FFmpeg
 // was started. It deliberately means "media workers are active", not that the
 // first camera RTP packet has already arrived.
-func (s *Session) Ready() <-chan SessionInfo   { return s.ready }
-func (s *Session) AECStatus() <-chan AECStatus { return s.aecStatus }
+func (s *Session) Ready() <-chan SessionInfo    { return s.ready }
+func (s *Session) AECStatus() <-chan AECStatus  { return s.aecStatus }
+func (s *Session) DTMFEvents() <-chan DTMFEvent { return s.dtmfEvents }
+
+func (s *Session) handleTelephoneEvent(packet rtp.Packet) bool {
+	if s.call == nil || s.call.TelephoneEvent == nil || packet.PayloadType != s.call.TelephoneEvent.PayloadType {
+		return false
+	}
+	event, ok := s.dtmfDetector.Push(packet, time.Now())
+	if !ok {
+		return true
+	}
+	select {
+	case s.dtmfEvents <- event:
+	default:
+		// DTMF is intentionally not logged because digits may contain an access
+		// code. A bounded queue keeps hostile RTP floods out of the audio path.
+		if s.logger != nil {
+			s.logger.Warn("DTMF event queue is full; completed telephone event dropped")
+		}
+	}
+	return true
+}
 
 func (s *Session) signalReady(info SessionInfo) {
 	s.readyOnce.Do(func() { s.ready <- info })
@@ -279,7 +309,10 @@ func (s *Session) Run(ctx context.Context) error {
 		}()
 	}
 	wg.Add(1)
-	go func() { defer wg.Done(); errCh <- talkback.Run(runCtx, s.rtpConn, s.call, controls) }()
+	go func() {
+		defer wg.Done()
+		errCh <- talkback.Run(runCtx, s.rtpConn, s.call, controls, s.handleTelephoneEvent)
+	}()
 
 	echoInfo := "off"
 	if echo != nil {

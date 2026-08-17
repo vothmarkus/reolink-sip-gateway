@@ -17,6 +17,8 @@ type testCommands struct {
 	hangup   func(context.Context) error
 }
 
+const testInstanceID = "12345678-1234-5678-9234-567812345678"
+
 func (c testCommands) StartTestCall(ctx context.Context) error {
 	if c.testCall == nil {
 		return nil
@@ -57,8 +59,11 @@ func TestAPIV1RequiresBearerToken(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &info); err != nil {
 		t.Fatal(err)
 	}
-	if info.APIVersion != APIVersion || info.GatewayVersion != "0.9.0" || info.InstanceID != "instance-1" {
+	if info.APIVersion != APIVersion || info.GatewayVersion != "1.0.0" || info.InstanceID != testInstanceID {
 		t.Fatalf("unexpected info: %#v", info)
+	}
+	if !strings.Contains(strings.Join(info.Capabilities, ","), "dtmf_events") {
+		t.Fatalf("DTMF capability is missing: %#v", info.Capabilities)
 	}
 }
 
@@ -186,6 +191,75 @@ func TestAPIV1EventsStartsWithCompleteSnapshot(t *testing.T) {
 	}
 }
 
+func TestAPIV1EventsPublishesTransientDTMFWithoutChangingRevision(t *testing.T) {
+	store, handler := newTestAPI(t, testCommands{})
+	store.Update(func(snapshot *Snapshot) {
+		snapshot.State = "active"
+		snapshot.CurrentCallDirection = "incoming"
+		snapshot.CurrentCallerNumber = "**620"
+	})
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer test-token")
+	response, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	first := readSSEEvent(t, reader)
+	if first["event"] != "status" || first["id"] == "" {
+		t.Fatalf("unexpected initial event: %#v", first)
+	}
+
+	revision := store.Get().Revision
+	receivedAt := time.Date(2026, 8, 17, 10, 30, 0, 0, time.UTC)
+	store.PublishDTMF("#", 120, receivedAt, "incoming", "**620")
+	event := readSSEEvent(t, reader)
+	if event["event"] != "dtmf" || event["id"] != "" {
+		t.Fatalf("unexpected DTMF SSE envelope: %#v", event)
+	}
+	var payload APIDTMFEvent
+	if err := json.Unmarshal([]byte(event["data"]), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.APIVersion != APIVersion || payload.Digit != "#" || payload.DurationMS != 120 ||
+		payload.CallDirection != "incoming" || payload.CallerNumber != "**620" ||
+		payload.InstanceID != testInstanceID || !payload.ReceivedAt.Equal(receivedAt) {
+		t.Fatalf("unexpected DTMF payload: %#v", payload)
+	}
+	if store.Get().Revision != revision {
+		t.Fatalf("DTMF changed status revision: got %d want %d", store.Get().Revision, revision)
+	}
+}
+
+func readSSEEvent(t *testing.T, reader *bufio.Reader) map[string]string {
+	t.Helper()
+	event := make(map[string]string)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" && len(event) > 0 {
+			return event
+		}
+		field, value, found := strings.Cut(line, ":")
+		if !found || field == "" {
+			continue
+		}
+		event[field] = strings.TrimPrefix(value, " ")
+	}
+}
+
 func TestWriteCommandErrorDoesNotExposeInternalDetails(t *testing.T) {
 	res := httptest.NewRecorder()
 	writeCommandError(res, errors.New("password=secret"))
@@ -196,9 +270,9 @@ func TestWriteCommandErrorDoesNotExposeInternalDetails(t *testing.T) {
 
 func newTestAPI(t *testing.T, commands CommandHandler) (*Store, http.Handler) {
 	t.Helper()
-	store := New("0.9.0")
+	store := New("1.0.0")
 	mux := http.NewServeMux()
-	store.registerAPIRoutes(mux, ServerOptions{Token: "test-token", InstanceID: "instance-1", Commands: commands})
+	store.registerAPIRoutes(mux, ServerOptions{Token: "test-token", InstanceID: testInstanceID, Commands: commands})
 	return store, mux
 }
 

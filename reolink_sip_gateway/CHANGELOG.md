@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0
+
+- SIP-SDP handelt RFC-4733-DTMF als `telephone-event/8000` aus. Ausgehende Angebote verwenden Payloadtyp 101; bei eingehenden Angeboten wird ein gültiger dynamischer Payloadtyp gespiegelt. Fehlt die Aushandlung, bleibt der bisherige G.711-Audiopfad unverändert und es werden keine DTMF-Ereignisse erzeugt.
+- Beide produktiven SIP→Reolink-Pfade erkennen terminale RFC-4733-Pakete vor der Audiodekodierung. Wiederholte Endpakete werden anhand SSRC, RTP-Zeitstempel und Eventcode dedupliziert; unterstützt werden `0`–`9`, `*`, `#` und `A`–`D`.
+- `/api/v1/events` überträgt zusätzlich flüchtige SSE-Ereignisse vom Typ `dtmf` mit Ziffer, Tastendauer, Anrufrichtung, eingehender Nummer, Empfangszeitpunkt und Installations-ID. DTMF verändert weder Statusrevision noch Snapshot, besitzt keine SSE-ID und wird nach Verbindungsabbrüchen nicht wiederholt.
+- Die API-Fähigkeit `dtmf_events` und das zugehörige Schema wurden additiv in den OpenAPI-3.1-Vertrag aufgenommen. Die API-Version bleibt 1.
+- Ziffern werden nicht protokolliert und es gibt keine neue App-Option, PIN-Auswertung, Ziffernfolge, Kameraauswahl oder Türöffnerlogik. Die Bedeutung eines Tastendrucks liegt ausschließlich in der Companion-Integration beziehungsweise einer Home-Assistant-Automation.
+- Unit-, SIP-Integrations- und SSE-Tests decken Aushandlung, gültige/ungültige Eventcodes, Dauerumrechnung, Endpaket-Deduplizierung, Metadaten und die Trennung vom Statusmodell ab. App-, Gateway-, SIP-/RTSP-User-Agent- und CI-Buildversion sind 1.0.0.
+
 ## 0.9.0
 
 - Versionierte lokale Integrations-API unter `/api/v1` ergänzt. `info` liefert stabile Instanz-ID, Gateway-/API-Version und Fähigkeiten; `status` liefert einen vollständigen strukturierten Snapshot.

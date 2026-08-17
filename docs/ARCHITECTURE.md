@@ -54,13 +54,17 @@ v0.8.0 adds the caller list, pre-answer indication and RTP watchdog in the same 
 
 v0.9.0 deliberately adds no option. A stable UUID and random bearer token are runtime identity, persisted under `/data` with mode `0600`; they are neither part of the grouped public options nor the flat media configuration.
 
+v1.0.0 also adds no option. RFC 4733 reception is enabled only when the SIP
+offer/answer negotiates `telephone-event/8000`; all interpretation remains on
+the Home Assistant side of the API boundary.
+
 ## Home Assistant integration boundary
 
 The companion integration talks only to the versioned local HTTP API. It cannot construct SIP messages, reserve RTP ports, open Reolink sessions or mutate the media pipeline.
 
 - `/api/v1/info` is the compatibility handshake: API version, gateway version, stable instance UUID and additive capability names.
 - `/api/v1/status` maps the internal snapshot to a purpose-built v1 DTO. Internal fields may evolve without silently changing the integration contract.
-- `/api/v1/events` is an SSE stream of complete snapshots. The store assigns monotonically increasing revisions only when the comparable snapshot actually changes; a size-one subscriber buffer replaces stale data so a slow client cannot back-pressure real-time call work.
+- `/api/v1/events` carries complete `status` snapshots plus transient `dtmf` events. The store assigns monotonically increasing revisions only when the comparable snapshot actually changes; DTMF has no SSE ID and never changes or replays status. Bounded subscriber queues prevent a slow client from back-pressuring real-time call work.
 - `/api/v1/calls/test` and `/api/v1/calls/hangup` pass requests into a command interface that remains unavailable until startup has completed. Request contexts never become call lifetimes; accepted test calls use the process call context.
 - A 256-bit bearer token protects every v1 route. Constant-time comparison and a private/local source-address boundary protect the command surface; ingress-only legacy routes retain their stricter proxy/loopback rule.
 
@@ -85,7 +89,7 @@ Visitor events, API test calls and accepted incoming INVITEs enter one threadsaf
 
 Both live talkback readers attach an RTP watchdog to valid packets of the negotiated codec; expiry returns a media error and the common call controller performs local SIP cleanup. It does not inspect PCM level and therefore does not confuse silence with a broken transport.
 
-The v0.9 companion integration owns proper registered status/caller entities and call-control buttons; the gateway only provides their source data and commands. DTMF is deferred to v1.0. Every call continues to use the one startup-resolved Reolink profile.
+The companion integration owns proper registered status/caller entities and call-control buttons; the gateway only provides their source data and commands. In v1.0 it additionally translates each validated `dtmf` SSE item into `reolink_sip_gateway_dtmf`. It does not create DTMF state or action logic. Every call continues to use the one startup-resolved Reolink profile.
 
 ## NVR media path
 

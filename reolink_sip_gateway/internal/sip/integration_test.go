@@ -30,6 +30,9 @@ func TestIncomingInviteAnswerACKAndRemoteBye(t *testing.T) {
 	if call.Codec.Name != "pcma" || call.Codec.PayloadType != 8 || call.RemoteRTPAddr().Port != 40000 {
 		t.Fatalf("unexpected incoming media negotiation: %#v %v", call.Codec, call.RemoteRTPAddr())
 	}
+	if call.TelephoneEvent == nil || call.TelephoneEvent.PayloadType != 101 || call.TelephoneEvent.ClockRate != 8000 {
+		t.Fatalf("unexpected incoming DTMF negotiation: %#v", call.TelephoneEvent)
+	}
 	if incoming.CallerURI() != "sip:**610@127.0.0.1" {
 		t.Fatalf("unexpected caller URI %q", incoming.CallerURI())
 	}
@@ -42,7 +45,9 @@ func TestIncomingInviteAnswerACKAndRemoteBye(t *testing.T) {
 		t.Fatal(err)
 	}
 	answer := readSIPResponse(t, registrar, 200, "INVITE")
-	if !strings.Contains(string(answer.Body), fmt.Sprintf("m=audio %d RTP/AVP 8", answerPort)) || !strings.Contains(string(answer.Body), "a=rtpmap:8 PCMA/8000") {
+	if !strings.Contains(string(answer.Body), fmt.Sprintf("m=audio %d RTP/AVP 8 101", answerPort)) ||
+		!strings.Contains(string(answer.Body), "a=rtpmap:8 PCMA/8000") ||
+		!strings.Contains(string(answer.Body), "a=rtpmap:101 telephone-event/8000") {
 		t.Fatalf("unexpected SDP answer: %s", answer.Body)
 	}
 	if param(answer.Header("to"), "tag") == "" {
@@ -399,12 +404,16 @@ func TestRegisterDialAndRemoteBye(t *testing.T) {
 					serverErr <- fmt.Errorf("invite before registration")
 					return
 				}
+				if !strings.Contains(string(m.Body), "a=rtpmap:101 telephone-event/8000") {
+					serverErr <- fmt.Errorf("outgoing INVITE did not offer RFC 4733 DTMF")
+					return
+				}
 				if m.Header("authorization") == "" {
 					_ = mockResponse(server, addr, m, 401, "Unauthorized", []string{`WWW-Authenticate: Digest realm="fritz.box", nonce="def", qop="auth"`}, nil)
 				} else {
 					inviteAuthenticated = true
 					_ = mockResponse(server, addr, m, 180, "Ringing", nil, nil)
-					sdp := "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=mock\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 40000 RTP/AVP 8\r\na=rtpmap:8 PCMA/8000\r\n"
+					sdp := "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=mock\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 40000 RTP/AVP 8 101\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\n"
 					_ = mockResponse(server, addr, m, 200, "OK", []string{"Contact: <sip:mock@127.0.0.1:" + strconv.Itoa(serverAddr.Port) + ">", "Content-Type: application/sdp"}, []byte(sdp))
 				}
 			case "ACK":
@@ -436,6 +445,9 @@ func TestRegisterDialAndRemoteBye(t *testing.T) {
 	}
 	if call.Codec.Name != "pcma" || call.RemoteRTP.Port != 40000 {
 		t.Fatalf("bad media: %#v %v", call.Codec, call.RemoteRTP)
+	}
+	if call.TelephoneEvent == nil || call.TelephoneEvent.PayloadType != 101 || call.TelephoneEvent.ClockRate != 8000 {
+		t.Fatalf("bad DTMF negotiation: %#v", call.TelephoneEvent)
 	}
 	select {
 	case err := <-call.Done():

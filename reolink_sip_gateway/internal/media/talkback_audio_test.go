@@ -449,7 +449,7 @@ func TestBaichuanAudioBridgeMockSIPRTPToADPCM(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- runBaichuanAudioBridge(ctx, gateway, call, writer, 16000, 320, nil, nil, peerDone, nil, 0)
+		done <- runBaichuanAudioBridge(ctx, gateway, call, writer, 16000, 320, nil, nil, nil, peerDone, nil, 0)
 	}()
 
 	payload := make([]byte, 160)
@@ -517,7 +517,7 @@ func TestReceivePhoneRTPRetargetsOnlyValidatedMedia(t *testing.T) {
 	sequencer := newRTPSequencer(defaultReorderWindow)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- receivePhoneRTP(ctx, gateway, call, bridge, sequencer, 0) }()
+	go func() { done <- receivePhoneRTP(ctx, gateway, call, bridge, sequencer, nil, 0) }()
 
 	// Malformed traffic from the correct PBX IP but a different source port must
 	// not be allowed to retarget the symmetric RTP destination.
@@ -556,6 +556,82 @@ func TestReceivePhoneRTPRetargetsOnlyValidatedMedia(t *testing.T) {
 	}
 }
 
+func TestReceivePhoneRTPAcceptsDTMFOnlyFromNegotiatedPortWithoutRetargeting(t *testing.T) {
+	gateway, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gateway.Close()
+	phone, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer phone.Close()
+	alternate, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer alternate.Close()
+
+	call := &sip.Call{
+		Codec:          sip.Codec{Name: g711.PCMU, PayloadType: 0},
+		TelephoneEvent: &sip.TelephoneEvent{PayloadType: 101, ClockRate: 8000},
+		RemoteRTP:      phone.LocalAddr().(*net.UDPAddr),
+	}
+	bridge, err := newPhoneAudioBuffer(g711.PCMU, 8000, 160)
+	if err != nil {
+		t.Fatal(err)
+	}
+	received := make(chan rtp.Packet, 2)
+	handle := func(packet rtp.Packet) bool {
+		if packet.PayloadType != call.TelephoneEvent.PayloadType {
+			return false
+		}
+		received <- packet
+		return true
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- receivePhoneRTP(ctx, gateway, call, bridge, newRTPSequencer(defaultReorderWindow), handle, 0)
+	}()
+
+	packet := rtp.Marshal(rtp.Packet{PayloadType: 101, Sequence: 1, Timestamp: 1000, SSRC: 4, Payload: []byte{5, 0x80, 0x03, 0x20}})
+	if _, err := alternate.WriteToUDP(packet, gateway.LocalAddr().(*net.UDPAddr)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-received:
+		t.Fatal("DTMF from an unnegotiated source port was accepted")
+	case <-time.After(40 * time.Millisecond):
+	}
+	if got := call.RemoteRTPAddr().Port; got != phone.LocalAddr().(*net.UDPAddr).Port {
+		t.Fatalf("DTMF retargeted RTP port to %d", got)
+	}
+
+	if _, err := phone.WriteToUDP(packet, gateway.LocalAddr().(*net.UDPAddr)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-received:
+		if got.PayloadType != 101 {
+			t.Fatalf("unexpected telephone-event packet: %#v", got)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("DTMF from the negotiated source port was not accepted")
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil && err != context.Canceled {
+			t.Fatalf("receiver shutdown: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("receiver did not stop")
+	}
+}
+
 func TestReceivePhoneRTPWatchdogEndsAbandonedCall(t *testing.T) {
 	gateway, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
@@ -574,7 +650,7 @@ func TestReceivePhoneRTPWatchdogEndsAbandonedCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := time.Now()
-	err = receivePhoneRTP(context.Background(), gateway, call, bridge, newRTPSequencer(defaultReorderWindow), 60*time.Millisecond)
+	err = receivePhoneRTP(context.Background(), gateway, call, bridge, newRTPSequencer(defaultReorderWindow), nil, 60*time.Millisecond)
 	if !errors.Is(err, ErrRTPInactivity) {
 		t.Fatalf("watchdog result=%v", err)
 	}
@@ -600,7 +676,7 @@ func TestBaichuanAudioBridgeProducesSilenceDuringVADUnderrun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- runBaichuanAudioBridge(ctx, gateway, call, writer, 16000, 320, nil, nil, make(chan struct{}), nil, 0)
+		done <- runBaichuanAudioBridge(ctx, gateway, call, writer, 16000, 320, nil, nil, nil, make(chan struct{}), nil, 0)
 	}()
 
 	select {
@@ -657,7 +733,7 @@ func TestBaichuanAudioBridgeAECReferenceIsTappedAtEncodedPlayout(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- runBaichuanAudioBridge(ctx, gateway, call, writer, 16000, 320, controls, nil, make(chan struct{}), nil, 0)
+		done <- runBaichuanAudioBridge(ctx, gateway, call, writer, 16000, 320, controls, nil, nil, make(chan struct{}), nil, 0)
 	}()
 
 	payload := make([]byte, 160)

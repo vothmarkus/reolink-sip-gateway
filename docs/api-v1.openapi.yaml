@@ -1,14 +1,14 @@
 openapi: 3.1.0
 info:
   title: Reolink SIP Gateway Integration API
-  version: 1.0.0
+  version: 1.1.0
   description: >-
-    Local API exposed by Reolink SIP Gateway 0.9.0 and newer. The API is
+    Local API exposed by Reolink SIP Gateway 1.0.0 and newer. The API is
     versioned independently from the gateway release and is intended for the
     companion Home Assistant integration.
 servers:
-  - url: http://homeassistant.local:18099/api/v1
-    description: Home Assistant host running the app
+  - url: http://1c33278a-reolink-sip-gateway:18099/api/v1
+    description: Internal Home Assistant app hostname
 security:
   - bearerAuth: []
 paths:
@@ -41,12 +41,15 @@ paths:
   /events:
     get:
       operationId: streamEvents
-      summary: Stream complete status snapshots as Server-Sent Events
+      summary: Stream status snapshots and transient DTMF as Server-Sent Events
       description: >-
-        Each event uses event type `status`, the snapshot revision as its ID
-        and a complete Status object as its single-line JSON data value. The
-        first event always contains the current snapshot. Comment keepalives
-        may be sent between changes.
+        Status events use event type `status`, the snapshot revision as their
+        ID and a complete Status object as their single-line JSON data value.
+        The first event always contains the current snapshot. A completed RFC
+        4733 keypress uses event type `dtmf` and a DTMFEvent data object. DTMF
+        events deliberately have no SSE ID, do not change the status revision
+        and are not replayed after reconnect. Comment keepalives may be sent
+        between events.
       responses:
         "200":
           description: Server-Sent Event stream
@@ -133,7 +136,7 @@ components:
           const: 1
         gateway_version:
           type: string
-          examples: [0.9.0]
+          examples: [1.0.0]
         instance_id:
           type: string
           format: uuid
@@ -145,7 +148,7 @@ components:
           uniqueItems: true
           items:
             type: string
-            enum: [call_status, caller_number, events, hangup, test_call]
+            enum: [call_status, caller_number, dtmf_events, events, hangup, test_call]
     Status:
       type: object
       additionalProperties: false
@@ -170,6 +173,42 @@ components:
           $ref: "#/components/schemas/MediaStatus"
         controls:
           $ref: "#/components/schemas/Controls"
+    DTMFEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - api_version
+        - digit
+        - duration_ms
+        - call_direction
+        - caller_number
+        - received_at
+        - instance_id
+      properties:
+        api_version:
+          type: integer
+          const: 1
+        digit:
+          type: string
+          pattern: '^[0-9*#A-D]$'
+          description: Completed RFC 4733 DTMF key
+        duration_ms:
+          type: integer
+          minimum: 0
+          maximum: 8192
+          description: Telephone-event duration converted from the 8 kHz RTP clock
+        call_direction:
+          type: string
+          enum: [incoming, outgoing]
+        caller_number:
+          type: string
+          description: Normalized incoming caller number; empty for outgoing calls
+        received_at:
+          type: string
+          format: date-time
+        instance_id:
+          type: string
+          format: uuid
     GatewayStatus:
       type: object
       additionalProperties: false

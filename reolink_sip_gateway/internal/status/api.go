@@ -24,6 +24,7 @@ var (
 var apiCapabilities = []string{
 	"call_status",
 	"caller_number",
+	"dtmf_events",
 	"events",
 	"hangup",
 	"test_call",
@@ -108,6 +109,16 @@ type APIControls struct {
 	HangupAvailable   bool `json:"hangup_available"`
 }
 
+type APIDTMFEvent struct {
+	APIVersion    int       `json:"api_version"`
+	Digit         string    `json:"digit"`
+	DurationMS    int       `json:"duration_ms"`
+	CallDirection string    `json:"call_direction"`
+	CallerNumber  string    `json:"caller_number"`
+	ReceivedAt    time.Time `json:"received_at"`
+	InstanceID    string    `json:"instance_id"`
+}
+
 type apiCommandResponse struct {
 	Status string `json:"status"`
 }
@@ -145,7 +156,7 @@ func (s *Store) registerAPIRoutes(mux *http.ServeMux, options ServerOptions) {
 		if !apiMethod(w, r, http.MethodGet) {
 			return
 		}
-		s.serveEvents(w, r)
+		s.serveEvents(w, r, options.InstanceID)
 	}))
 	mux.Handle("/api/v1/calls/test", auth(func(w http.ResponseWriter, r *http.Request) {
 		if !apiMethod(w, r, http.MethodPost) {
@@ -223,7 +234,7 @@ func newAPIStatus(snapshot Snapshot) APIStatus {
 	}
 }
 
-func (s *Store) serveEvents(w http.ResponseWriter, r *http.Request) {
+func (s *Store) serveEvents(w http.ResponseWriter, r *http.Request, instanceID string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeAPIError(w, http.StatusInternalServerError, "streaming_unavailable", "event streaming is unavailable")
@@ -235,18 +246,45 @@ func (s *Store) serveEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
-	updates, unsubscribe := s.Subscribe()
+	updates, dtmfEvents, unsubscribe := s.subscribeEvents()
 	defer unsubscribe()
 	keepalive := time.NewTicker(15 * time.Second)
 	defer keepalive.Stop()
+	writeStatus := func(snapshot Snapshot) bool {
+		payload, err := json.Marshal(newAPIStatus(snapshot))
+		if err != nil {
+			return false
+		}
+		if _, err := fmt.Fprintf(w, "id: %d\nevent: status\ndata: %s\n\n", snapshot.Revision, payload); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+	// Write the queued complete snapshot before entering the multiplexing
+	// select. This preserves the contract that status is always the first SSE
+	// item even if DTMF arrives while the HTTP stream is being established.
+	if !writeStatus(<-updates) {
+		return
+	}
 	for {
 		select {
 		case snapshot := <-updates:
-			payload, err := json.Marshal(newAPIStatus(snapshot))
+			if !writeStatus(snapshot) {
+				return
+			}
+		case event := <-dtmfEvents:
+			payload, err := json.Marshal(APIDTMFEvent{
+				APIVersion: APIVersion, Digit: event.Digit, DurationMS: event.DurationMS,
+				CallDirection: event.CallDirection, CallerNumber: event.CallerNumber,
+				ReceivedAt: event.ReceivedAt, InstanceID: instanceID,
+			})
 			if err != nil {
 				return
 			}
-			if _, err := fmt.Fprintf(w, "id: %d\nevent: status\ndata: %s\n\n", snapshot.Revision, payload); err != nil {
+			// Transient DTMF events deliberately have no SSE id and are never
+			// replayed. Status event IDs therefore remain snapshot revisions.
+			if _, err := fmt.Fprintf(w, "event: dtmf\ndata: %s\n\n", payload); err != nil {
 				return
 			}
 			flusher.Flush()

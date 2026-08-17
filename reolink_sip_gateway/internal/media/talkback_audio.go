@@ -471,7 +471,7 @@ func (b *phoneAudioBuffer) RecordBaichuanWrite(d time.Duration) {
 	b.mu.Unlock()
 }
 
-func runBaichuanAudioBridge(ctx context.Context, conn *net.UDPConn, call *sip.Call, writer talkBlockWriter, outputRate, blockSamples int, controls *audioControls, logger *slog.Logger, peerDone <-chan struct{}, peerErr func() error, rtpInactivity time.Duration) error {
+func runBaichuanAudioBridge(ctx context.Context, conn *net.UDPConn, call *sip.Call, writer talkBlockWriter, outputRate, blockSamples int, controls *audioControls, handleTelephoneEvent func(rtp.Packet) bool, logger *slog.Logger, peerDone <-chan struct{}, peerErr func() error, rtpInactivity time.Duration) error {
 	if outputRate <= 0 || blockSamples <= 0 {
 		return errors.New("invalid Baichuan audio profile")
 	}
@@ -484,7 +484,7 @@ func runBaichuanAudioBridge(ctx context.Context, conn *net.UDPConn, call *sip.Ca
 	defer cancelBridge()
 	recvErr := make(chan error, 1)
 	go func() {
-		err := receivePhoneRTP(bridgeCtx, conn, call, bridge, sequencer, rtpInactivity)
+		err := receivePhoneRTP(bridgeCtx, conn, call, bridge, sequencer, handleTelephoneEvent, rtpInactivity)
 		bridge.MergeSequencerStats(sequencer.Stats())
 		recvErr <- err
 	}()
@@ -606,7 +606,7 @@ func runBaichuanAudioBridge(ctx context.Context, conn *net.UDPConn, call *sip.Ca
 	}
 }
 
-func receivePhoneRTP(ctx context.Context, conn *net.UDPConn, call *sip.Call, bridge *phoneAudioBuffer, sequencer *rtpSequencer, rtpInactivity time.Duration) error {
+func receivePhoneRTP(ctx context.Context, conn *net.UDPConn, call *sip.Call, bridge *phoneAudioBuffer, sequencer *rtpSequencer, handleTelephoneEvent func(rtp.Packet) bool, rtpInactivity time.Duration) error {
 	buf := make([]byte, 4096)
 	remote := call.RemoteRTPAddr()
 	if remote == nil {
@@ -644,7 +644,14 @@ func receivePhoneRTP(ctx context.Context, conn *net.UDPConn, call *sip.Call, bri
 			continue
 		}
 		p, err := rtp.Parse(buf[:n])
-		if err != nil || len(p.Payload) == 0 || p.PayloadType != call.Codec.PayloadType {
+		if err != nil || len(p.Payload) == 0 {
+			continue
+		}
+		current := call.RemoteRTPAddr()
+		if handleTelephoneEvent != nil && current != nil && addr.Port == current.Port && handleTelephoneEvent(p) {
+			continue
+		}
+		if p.PayloadType != call.Codec.PayloadType {
 			continue
 		}
 		arrival := time.Now()
@@ -661,7 +668,6 @@ func receivePhoneRTP(ctx context.Context, conn *net.UDPConn, call *sip.Call, bri
 		// Only a syntactically valid RTP packet with the negotiated payload type
 		// may retarget symmetric RTP. This avoids changing the media destination
 		// because of malformed/RTCP/unrelated UDP traffic from the PBX host.
-		current := call.RemoteRTPAddr()
 		if current == nil || addr.Port != current.Port { // RFC 4961-style symmetric RTP adaptation.
 			call.UpdateRemoteRTP(addr)
 		}

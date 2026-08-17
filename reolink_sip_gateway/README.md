@@ -1,20 +1,20 @@
-# Reolink SIP Gateway 0.9.0
+# Reolink SIP Gateway 1.0.0
 
 Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann einen SIP-Anruf auslösen; optional lässt sich die registrierte Gateway-Nebenstelle anrufen und direkt mit der Doorbell verbinden.
 
 > Community-Projekt. Nicht offiziell von Reolink oder Home Assistant bereitgestellt oder unterstützt.
 
-## 0.9.0: Schnittstelle für native Home-Assistant-Entities
+## 1.0.0: DTMF als reines Home-Assistant-Ereignis
 
-0.9.0 stellt die lokale, versionierte Schnittstelle für die separat installierbare Home-Assistant-Integration bereit. Die App bleibt ohne Integration vollständig funktionsfähig; SIP-Signalisierung, Audio, AEC, Reolink-Verbindungen und Gesprächsentscheidungen verbleiben ausschließlich im Gateway.
+1.0.0 handelt Out-of-Band-DTMF nach RFC 4733 als `telephone-event/8000` aus. Jeder vollständig empfangene Tastendruck (`0`–`9`, `*`, `#`, `A`–`D`) wird einmalig als flüchtiges `dtmf`-Ereignis über die bestehende Integrations-API übertragen. Wiederholte RTP-Endpakete erzeugen keine Duplikate.
 
-`GET /api/v1/status` liefert einen vollständigen Snapshot aus Gateway-, SIP-, Gesprächs- und Medienstatus. `GET /api/v1/events` überträgt Änderungen unmittelbar als Server-Sent Events. Der Status enthält die aktuelle beziehungsweise letzte Anrufrichtung sowie die normalisierte aktuelle und letzte eingehende Rufnummer. Die spätere Integration kann daraus die beiden Sensoren **Status** und **Anrufende Nummer** erzeugen.
+`GET /api/v1/status` liefert weiterhin einen vollständigen Snapshot aus Gateway-, SIP-, Gesprächs- und Medienstatus. `GET /api/v1/events` überträgt Statusänderungen sowie DTMF unmittelbar als Server-Sent Events. DTMF verändert den Snapshot und dessen Revision nicht und wird nach einem Verbindungsabbruch nicht nachträglich wiederholt.
 
 `POST /api/v1/calls/test` startet einen normalen ausgehenden Anruf zum bereits unter SIP konfigurierten Ziel. `POST /api/v1/calls/hangup` beendet das aktuelle ein- oder ausgehende Gespräch; im Leerlauf ist der Aufruf bewusst folgenlos. Beide Befehle verwenden denselben neuen Call-Controller wie Besucherereignisse und eingehende SIP-Anrufe. Ein zweiter paralleler Gesprächspfad ist damit ausgeschlossen.
 
 Beim ersten Start erzeugt die App unter `/data` eine stabile Instanz-ID und ein zufälliges 256-Bit-API-Token. Interner Add-on-Hostname und Token werden ausschließlich auf der administrativen Ingress-Seite angezeigt; die Companion-Integration erzeugt daraus selbst die feste API-Adresse. Die API erfordert Bearer-Authentifizierung und akzeptiert nur lokale beziehungsweise private Quelladressen. Es gibt keine neue Konfigurationsoption; vorhandene 0.8-Einstellungen bleiben unverändert.
 
-Der vollständige Integrationsvertrag liegt maschinenlesbar als `docs/api-v1.openapi.yaml` im Repository. API-Version 1 ist unabhängig von der App-Version; DTMF wird erst mit 1.0 additiv ergänzt.
+Der vollständige Integrationsvertrag liegt maschinenlesbar als `docs/api-v1.openapi.yaml` im Repository. API-Version 1 bleibt unabhängig von der App-Version. Es gibt keine neue Konfigurationsoption und keine PIN-, Ziffernfolgen-, Kamera- oder Türöffnerlogik im Gateway; die Automation liegt ausschließlich in Home Assistant.
 
 ## 0.8.0: sichere und robuste eingehende Anrufe
 

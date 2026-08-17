@@ -24,7 +24,7 @@ import (
 	statuspkg "github.com/vothmarkus/reolink-sip-gateway/internal/status"
 )
 
-const version = "0.9.0"
+const version = "1.0.0"
 
 func main() {
 	configPath := flag.String("config", "/data/options.json", "path to Home Assistant app options JSON")
@@ -358,16 +358,7 @@ func handleIncomingCall(parent context.Context, cfg config.Config, incoming *sip
 	mediaSession := media.New(cfg, call, rtpConn, ffConn, logger)
 	mediaErr := make(chan error, 1)
 	go func() { mediaErr <- mediaSession.Run(callCtx) }()
-	go func() {
-		for {
-			select {
-			case update := <-mediaSession.AECStatus():
-				store.Update(func(s *statuspkg.Snapshot) { s.CurrentDelayMS = update.CurrentDelayMS })
-			case <-callCtx.Done():
-				return
-			}
-		}
-	}()
+	go forwardMediaEvents(callCtx, mediaSession, store, "incoming", incoming.CallerID())
 
 	var ready media.SessionInfo
 	select {
@@ -534,16 +525,7 @@ func handleCall(parent context.Context, cfg config.Config, sipClient *sip.Client
 	mediaSession := media.New(cfg, call, rtpConn, ffConn, logger)
 	mediaErr := make(chan error, 1)
 	go func() { mediaErr <- mediaSession.Run(callCtx) }()
-	go func() {
-		for {
-			select {
-			case update := <-mediaSession.AECStatus():
-				store.Update(func(s *statuspkg.Snapshot) { s.CurrentDelayMS = update.CurrentDelayMS })
-			case <-callCtx.Done():
-				return
-			}
-		}
-	}()
+	go forwardMediaEvents(callCtx, mediaSession, store, "outgoing", "")
 	go func() {
 		select {
 		case info := <-mediaSession.Ready():
@@ -601,6 +583,19 @@ func handleCall(parent context.Context, cfg config.Config, sipClient *sip.Client
 	}
 
 	finishCall(store, logger, started, finalErr, "call ended")
+}
+
+func forwardMediaEvents(ctx context.Context, session *media.Session, store *statuspkg.Store, callDirection, callerNumber string) {
+	for {
+		select {
+		case update := <-session.AECStatus():
+			store.Update(func(s *statuspkg.Snapshot) { s.CurrentDelayMS = update.CurrentDelayMS })
+		case event := <-session.DTMFEvents():
+			store.PublishDTMF(event.Digit, event.DurationMS, event.ReceivedAt, callDirection, callerNumber)
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func finishCall(store *statuspkg.Store, logger *slog.Logger, started time.Time, finalErr error, message string) {

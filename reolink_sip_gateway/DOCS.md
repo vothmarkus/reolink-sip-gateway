@@ -1,10 +1,10 @@
-# Reolink SIP Gateway 0.9.0 – Dokumentation
+# Reolink SIP Gateway 1.0.0 – Dokumentation
 
 ## Zweck
 
-**0.9.0** ergänzt die lokale, authentifizierte Schnittstelle für die separate Home-Assistant-Integration. Status und anrufende Nummer stehen als vollständiger Snapshot und Ereignisstrom bereit; Testanruf und Auflegen werden als kontrollierte Befehle an denselben Gesprächsablauf übergeben, den Besucherereignisse und eingehende SIP-Anrufe verwenden.
+**1.0.0** ergänzt die lokale, authentifizierte Schnittstelle um ausgehandeltes RFC-4733-DTMF. Ein abgeschlossener Tastendruck wird als flüchtiges Ereignis an die separate Home-Assistant-Integration übergeben; Status, Testanruf und Auflegen bleiben unverändert.
 
-Die fünf internen Konfigurationsgruppen und der flache Runtime-Vertrag bleiben bestehen. 0.9 fügt keine neue Benutzeroption hinzu; es gibt weiterhin nur eine konfigurierte Kamera und höchstens ein aktives Gespräch. Die App bleibt ohne Companion-Integration vollständig funktionsfähig und erzeugt selbst keine HA-Entities.
+Die fünf internen Konfigurationsgruppen und der flache Runtime-Vertrag bleiben bestehen. 1.0 fügt keine neue Benutzeroption hinzu; es gibt weiterhin nur eine konfigurierte Kamera und höchstens ein aktives Gespräch. Die App bleibt ohne Companion-Integration vollständig funktionsfähig und erzeugt selbst keine HA-Entities oder Automationen.
 
 Das bestehende Branding verwendet PNG-Transparenz für den Außenbereich von `icon.png`, `logo.png` und dem eingebetteten Ingress-Logo. Der Go-Modulpfad entspricht dem öffentlichen Repository `github.com/vothmarkus/reolink-sip-gateway`.
 
@@ -145,6 +145,21 @@ Der SIP-Signalisierungsport bleibt über `sip_local_port` konfigurierbar. Für j
 
 PCMA, PCMU und `auto` bleiben als Codecpräferenz verfügbar.
 
+### DTMF-Aushandlung und Erkennung
+
+Ausgehende SDP-Angebote enthalten zusätzlich Payloadtyp 101 als
+`telephone-event/8000`. Eine SDP-Antwort muss genau diesen Payloadtyp bestätigen;
+andernfalls bleibt DTMF für das Gespräch deaktiviert. Bei eingehenden Anrufen
+übernimmt die Antwort einen angebotenen dynamischen Payloadtyp zwischen 96 und
+127, sofern dessen Clockrate 8 kHz beträgt.
+
+Beide Talkback-Wege trennen ausgehandelte Telephone-Event-Pakete vor der
+G.711-Audiodekodierung ab. Ein Ereignis entsteht erst beim Endbit und genau
+einmal pro Kombination aus SSRC, RTP-Zeitstempel und Eventcode. Unterstützt
+werden `0`–`9`, `*`, `#` und `A`–`D`; hörbare In-Band-Töne werden nicht
+analysiert. DTMF-Pakete setzen den Audio-Inaktivitätswächter bewusst nicht
+zurück.
+
 ## Eingehende SIP-Anrufe
 
 `incoming_calls_enabled: true` aktiviert automatische Anrufe an die registrierte Gateway-Nebenstelle. Bei einer FRITZ!Box wird die interne Nummer des als IP-Telefon eingerichteten Gateway-Kontos gewählt, beispielsweise `**620`; maßgeblich ist die tatsächlich unter **Telefonie → Telefoniegeräte** angezeigte Nummer.
@@ -171,7 +186,7 @@ Die Vertrauensprüfung auf den Registrar verhindert direkte Anrufe von anderen L
 
 `rtp_inactivity_timeout_seconds` gilt für ein- und ausgehende Gespräche. Nach Medienstart beginnt ein Timer, der ausschließlich durch syntaktisch gültige RTP-Pakete mit dem ausgehandelten PCMA-/PCMU-Payloadtyp zurückgesetzt wird. Bleiben solche Pakete aus, beendet das Gateway die Medien und sendet nach Möglichkeit selbst ein `BYE`. Der Standard beträgt 15 Sekunden; zulässig sind 5 bis 120 Sekunden. Stille Audionutzlast zählt als RTP-Aktivität, weshalb normale Gesprächspausen den Wächter nicht auslösen.
 
-Native Home-Assistant-Sensoren für Status/Anrufer sowie die Tasten Testanruf/Auflegen sind für 0.9 vorgesehen und werden über eine Begleit-Integration umgesetzt. DTMF folgt getrennt in 1.0; Mehrkameraauswahl, PIN und Türöffner sind ebenfalls noch nicht Bestandteil von 0.8.
+Die Begleit-Integration stellt Status/Anrufer sowie Testanruf/Auflegen bereit und löst für DTMF ausschließlich `reolink_sip_gateway_dtmf` aus. Ziffernfolgen, PINs, Mehrkameraauswahl und Türöffner sind keine Gateway-Funktion und werden bei Bedarf als Home-Assistant-Automation umgesetzt.
 
 ## FFmpeg
 
@@ -209,11 +224,11 @@ Die Statusseite zeigt den konfigurierten und aktiven Modus, Medienprofil, Kalibr
 
 ## Home-Assistant-Integrations-API v1
 
-Die API läuft zusammen mit Statusseite und Healthcheck auf Port `18099`. Der vollständige OpenAPI-3.1-Vertrag liegt unter `docs/api-v1.openapi.yaml`. Die API-Versionsnummer ist unabhängig von der App-Version; 0.9.0 stellt API-Version 1 bereit.
+Die API läuft zusammen mit Statusseite und Healthcheck auf Port `18099`. Der vollständige OpenAPI-3.1-Vertrag liegt unter `docs/api-v1.openapi.yaml`. Die API-Versionsnummer ist unabhängig von der App-Version; 1.0.0 erweitert API-Version 1 additiv.
 
 - `GET /api/v1/info`: API-/Gateway-Version, stabile Installations-UUID und Fähigkeiten.
 - `GET /api/v1/status`: vollständiger Gateway-, SIP-, Call-, Medien- und Befehlsstatus.
-- `GET /api/v1/events`: Server-Sent Events vom Typ `status`; das erste Ereignis ist immer der aktuelle vollständige Snapshot. Weitere Ereignisse entstehen nur bei tatsächlichen Änderungen, 15-Sekunden-Kommentare dienen als Keepalive.
+- `GET /api/v1/events`: Server-Sent Events vom Typ `status` und `dtmf`; das erste Ereignis ist immer der aktuelle vollständige Snapshot. Ein `dtmf`-Ereignis enthält Ziffer, Dauer, Anrufrichtung, eingehende Nummer, Empfangszeit und Installations-ID. Es besitzt keine SSE-ID, ändert keine Statusrevision und wird nicht wiederholt. 15-Sekunden-Kommentare dienen als Keepalive.
 - `POST /api/v1/calls/test`: normaler ausgehender Anruf zum vorhandenen `sip_destination`; `202` bei Annahme, `409` bei belegtem Call-Slot und `503` bei nicht registriertem SIP beziehungsweise noch nicht bereiter Runtime.
 - `POST /api/v1/calls/hangup`: beendet Wähl-, Vorbereitungs- oder Gesprächsphase beider Richtungen; im Leerlauf bestätigt `204` die idempotente Wirkung.
 
@@ -222,6 +237,10 @@ Beim ersten normalen Start entstehen `/data/integration-api-instance-id` und `/d
 Der Status unterscheidet aktuelle und letzte Werte: `call.direction` und `call.caller_number` werden nach dem Gespräch geleert, während `call.last_direction` und `call.last_caller_number` erhalten bleiben. Die letzte anrufende Nummer wird nur durch einen zugelassenen eingehenden Anruf aktualisiert. Diagnosen und Fehlerantworten enthalten niemals Token oder Zugangsdaten.
 
 ## Update von älteren Versionen
+
+1.0.0 ergänzt ausschließlich die additive DTMF-Aushandlung und den flüchtigen
+Ereignistyp. Es gibt keine neue Option oder Konfigurationsmigration. Die bereits
+unter 0.9.0 erzeugte API-Identität und das Token bleiben unverändert erhalten.
 
 0.9.0 ergänzt ausschließlich automatisch verwaltete Dateien unter `/data` und die API auf dem bereits verwendeten Statusport. Es gibt keine neue Option und keine Migration bestehender Einstellungen. Die Identität wird einmal erzeugt und bleibt danach stabil; eine ungültig veränderte Identitätsdatei führt aus Sicherheitsgründen zu einem klaren Startfehler statt zu stiller Tokenrotation.
 

@@ -68,7 +68,7 @@ func (i *IncomingInvite) Answer(rtpPort int) error {
 	if rtpPort < 1 || rtpPort > 65535 {
 		return fmt.Errorf("invalid RTP port %d", rtpPort)
 	}
-	sdp := i.client.answerSDP(rtpPort, i.call.Codec)
+	sdp := i.client.answerSDP(rtpPort, i.call.Codec, i.call.TelephoneEvent)
 	extra := []string{
 		fmt.Sprintf("Contact: <sip:%s@%s:%d;transport=udp>", i.client.cfg.Username, i.client.localIP, i.client.cfg.LocalPort),
 		"Allow: INVITE, ACK, CANCEL, BYE, OPTIONS",
@@ -265,7 +265,7 @@ func (c *Client) handleIncomingInvite(req Message, addr *net.UDPAddr) {
 	}
 	c.mu.Unlock()
 
-	codec, remoteRTP, err := parseOfferSDP(string(req.Body), c.cfg.CodecPreference)
+	media, err := parseOfferMedia(string(req.Body), c.cfg.CodecPreference)
 	if err != nil {
 		if c.log != nil {
 			c.log.Warn("incoming SIP INVITE has no supported audio offer", "source", addr.String(), "error", err)
@@ -281,8 +281,8 @@ func (c *Client) handleIncomingInvite(req Message, addr *net.UDPAddr) {
 	}
 	call := &Call{
 		client: c, CallID: req.Header("call-id"), FromTag: randomID(), ToTag: param(req.Header("from"), "tag"),
-		FromURI: localURI, ToURI: remoteURI, RemoteTarget: remoteTarget, CallerID: callerID, Codec: codec,
-		RemoteRTP: remoteRTP, done: make(chan error, 1), inbound: true,
+		FromURI: localURI, ToURI: remoteURI, RemoteTarget: remoteTarget, CallerID: callerID, Codec: media.Codec,
+		TelephoneEvent: media.TelephoneEvent, RemoteRTP: media.RemoteRTP, done: make(chan error, 1), inbound: true,
 	}
 	invite := &IncomingInvite{
 		client: c, request: req, source: cloneUDPAddr(addr), key: key, call: call,
@@ -313,7 +313,7 @@ func (c *Client) handleIncomingInvite(req Message, addr *net.UDPAddr) {
 	select {
 	case c.incoming <- invite:
 		if c.log != nil {
-			c.log.Info("incoming SIP call received", "caller", invite.CallerURI(), "codec", codec.Name, "rtp", remoteRTP.String())
+			c.log.Info("incoming SIP call received", "caller", invite.CallerURI(), "codec", media.Codec.Name, "rtp", media.RemoteRTP.String(), "dtmf_rfc4733", media.TelephoneEvent != nil)
 		}
 	case <-c.closed:
 		call.finish(errors.New("SIP client closed"))
@@ -406,22 +406,35 @@ func buildResponse(req Message, code int, reason, toTag string, extra []string, 
 	}
 	lines = append(lines, "To: "+to, "Call-ID: "+req.Header("call-id"), "CSeq: "+req.Header("cseq"))
 	lines = append(lines, extra...)
-	lines = append(lines, "Server: ReolinkSIPGateway/0.9.0", fmt.Sprintf("Content-Length: %d", len(body)), "", "")
+	lines = append(lines, "Server: ReolinkSIPGateway/1.0.0", fmt.Sprintf("Content-Length: %d", len(body)), "", "")
 	return append([]byte(strings.Join(lines, "\r\n")), body...)
 }
 
-func (c *Client) answerSDP(port int, codec Codec) string {
+func (c *Client) answerSDP(port int, codec Codec, telephoneEvent *TelephoneEvent) string {
 	name := strings.ToUpper(codec.Name)
-	return strings.Join([]string{
+	payloads := fmt.Sprintf("%d", codec.PayloadType)
+	if telephoneEvent != nil {
+		payloads += fmt.Sprintf(" %d", telephoneEvent.PayloadType)
+	}
+	lines := []string{
 		"v=0",
 		fmt.Sprintf("o=- %d 1 IN IP4 %s", time.Now().Unix(), c.localIP),
 		"s=Reolink SIP Gateway",
 		fmt.Sprintf("c=IN IP4 %s", c.localIP),
 		"t=0 0",
-		fmt.Sprintf("m=audio %d RTP/AVP %d", port, codec.PayloadType),
+		fmt.Sprintf("m=audio %d RTP/AVP %s", port, payloads),
 		fmt.Sprintf("a=rtpmap:%d %s/8000", codec.PayloadType, name),
+	}
+	if telephoneEvent != nil {
+		lines = append(lines,
+			fmt.Sprintf("a=rtpmap:%d telephone-event/%d", telephoneEvent.PayloadType, telephoneEvent.ClockRate),
+			fmt.Sprintf("a=fmtp:%d 0-15", telephoneEvent.PayloadType),
+		)
+	}
+	lines = append(lines,
 		"a=ptime:20",
 		"a=sendrecv",
 		"",
-	}, "\r\n")
+	)
+	return strings.Join(lines, "\r\n")
 }

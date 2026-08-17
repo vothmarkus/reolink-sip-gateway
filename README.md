@@ -6,13 +6,14 @@ Community Home Assistant app that bridges bidirectional audio between a Reolink 
 
 ## Current release
 
-**v0.9.0** provides the stable, authenticated local API for the companion Home Assistant integration. It publishes immediate call-state/caller updates and accepts exactly two commands: call the configured SIP destination and hang up the current incoming or outgoing call. The machine-readable contract is [`docs/api-v1.openapi.yaml`](docs/api-v1.openapi.yaml).
+**v1.0.0** adds negotiated RFC 4733 DTMF to the stable local integration API. Each completed keypress is published as one transient event for Home Assistant automations; the gateway does not interpret digit sequences, PINs or actions. The machine-readable contract is [`docs/api-v1.openapi.yaml`](docs/api-v1.openapi.yaml).
 
 Visitor events, incoming INVITEs and API test calls now enter one shared call controller, preserving the single-call invariant. The integration API does not implement a second media path: incoming and outgoing calls still share the same G.711/RTP, AEC and Reolink implementation introduced and hardware-tested in earlier releases.
 
 Highlights:
 
 - Versioned `/api/v1` with bearer authentication, a stable installation UUID, complete status snapshots and Server-Sent Events.
+- Negotiated `telephone-event/8000` reception for `0`–`9`, `*`, `#` and `A`–`D`, deduplicated to one event per completed keypress.
 - Integration commands for a configured test call and idempotent hang-up, both routed through the normal call lifecycle.
 - Current/last call direction and normalized current/last incoming caller number in the integration status model.
 - SIP registration plus outbound and opt-in automatically answered incoming calls using G.711 A-law/µ-law.
@@ -104,7 +105,7 @@ Set **Allow incoming SIP calls** (`incoming_calls_enabled`) in the **Call** sect
 
 Before an accepted incoming call is answered, `incoming_connection_tone_enabled` plays the first four symbols (256 ms) of the existing acoustic marker through the actual Reolink talkback path. `rtp_inactivity_timeout_seconds` then ends either call direction when no valid negotiated RTP audio packet is received for the configured interval. If only internal calls should reach the camera, do not assign external incoming numbers to this IP telephone in the FRITZ!Box, because forwarded external calls also originate from the trusted registrar.
 
-The separate Home Assistant integration consumes the v0.9 API to provide status/caller sensors and test-call/hang-up buttons. DTMF remains deliberately reserved for v1.0.
+The separate Home Assistant integration consumes API v1 to provide status/caller sensors, test-call/hang-up buttons and the transient `reolink_sip_gateway_dtmf` event. All DTMF meaning and actions remain in Home Assistant automations.
 
 The **Passive mode / Passivmodus** toggle in **Operation & diagnostics / Betrieb & Diagnose** keeps the internal key `dry_run` for backwards compatibility. It monitors visitor events but suppresses SIP registration, outbound calls and the audible startup calibration marker.
 
@@ -112,7 +113,7 @@ The **Passive mode / Passivmodus** toggle in **Operation & diagnostics / Betrieb
 
 Open the app's Ingress page after startup to copy the internal app hostname and generated API token. The integration builds `http://<app-hostname>:18099/api/v1` itself, verifies API version 1 and uses the stable installation UUID for its device and entity unique IDs. The token is generated once, stored with mode `0600` under `/data`, retained across app updates/backups and never written to the log.
 
-The API is intentionally local: requests require `Authorization: Bearer <token>` and must originate from loopback, a private network or a link-local address. `/api/v1/events` pushes complete snapshots on real state changes; clients should still reconcile with `/api/v1/status` after reconnecting. The existing ingress-only `/api/status` remains available for the status page but is not the integration contract.
+The API is intentionally local: requests require `Authorization: Bearer <token>` and must originate from loopback, a private network or a link-local address. `/api/v1/events` pushes complete snapshots on real state changes and transient `dtmf` events for completed RFC 4733 keypresses. DTMF events have no SSE ID, do not alter status revisions and are not replayed; clients should still reconcile reconstructable state with `/api/v1/status` after reconnecting. The existing ingress-only `/api/status` remains available for the status page but is not the integration contract.
 
 ## Echo cancellation
 

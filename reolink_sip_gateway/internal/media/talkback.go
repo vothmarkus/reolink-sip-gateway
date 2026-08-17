@@ -28,7 +28,7 @@ type TalkbackInfo struct {
 }
 
 type talkbackTransport interface {
-	Run(context.Context, *net.UDPConn, *sip.Call, *audioControls) error
+	Run(context.Context, *net.UDPConn, *sip.Call, *audioControls, func(rtp.Packet) bool) error
 	PlayPCM(context.Context, []int16, *audioControls) error
 	Close(context.Context) error
 	Info() TalkbackInfo
@@ -81,7 +81,7 @@ func (t *rtspTalkback) PlayPCM(ctx context.Context, pcm []int16, controls *audio
 	})
 }
 
-func (t *rtspTalkback) Run(ctx context.Context, in *net.UDPConn, call *sip.Call, controls *audioControls) error {
+func (t *rtspTalkback) Run(ctx context.Context, in *net.UDPConn, call *sip.Call, controls *audioControls, handleTelephoneEvent func(rtp.Packet) bool) error {
 	buf := make([]byte, 4096)
 	remote := call.RemoteRTPAddr()
 	if remote == nil {
@@ -120,12 +120,18 @@ func (t *rtspTalkback) Run(ctx context.Context, in *net.UDPConn, call *sip.Call,
 			continue
 		}
 		p, err := rtp.Parse(buf[:n])
-		if err != nil || len(p.Payload) == 0 || p.PayloadType != call.Codec.PayloadType {
+		if err != nil || len(p.Payload) == 0 {
+			continue
+		}
+		current := call.RemoteRTPAddr()
+		if handleTelephoneEvent != nil && current != nil && addr.Port == current.Port && handleTelephoneEvent(p) {
+			continue
+		}
+		if p.PayloadType != call.Codec.PayloadType {
 			continue
 		}
 		watchdog.Mark(time.Now())
 		// Retarget symmetric RTP only after validating the negotiated media PT.
-		current := call.RemoteRTPAddr()
 		if current == nil || addr.Port != current.Port {
 			call.UpdateRemoteRTP(addr)
 		}
@@ -165,8 +171,8 @@ func (t *baichuanTalkback) Info() TalkbackInfo {
 	}
 }
 
-func (t *baichuanTalkback) Run(ctx context.Context, in *net.UDPConn, call *sip.Call, controls *audioControls) error {
-	return runBaichuanAudioBridge(ctx, in, call, t.session, t.session.SampleRate(), t.session.SamplesPerBlock(), controls, t.logger, t.client.Done(), t.client.Err, t.rtpInactivity)
+func (t *baichuanTalkback) Run(ctx context.Context, in *net.UDPConn, call *sip.Call, controls *audioControls, handleTelephoneEvent func(rtp.Packet) bool) error {
+	return runBaichuanAudioBridge(ctx, in, call, t.session, t.session.SampleRate(), t.session.SamplesPerBlock(), controls, handleTelephoneEvent, t.logger, t.client.Done(), t.client.Err, t.rtpInactivity)
 }
 
 func (t *baichuanTalkback) PlayPCM(ctx context.Context, pcm []int16, controls *audioControls) error {
