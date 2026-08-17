@@ -20,6 +20,7 @@
   "sip_local_port": 5070,
   "sip_display_name": "Haustür",
   "sip_codec_preference": "pcma",
+  "incoming_calls_enabled": false,
   "ring_timeout_seconds": 30,
   "max_call_duration_seconds": 300,
   "debounce_seconds": 3,

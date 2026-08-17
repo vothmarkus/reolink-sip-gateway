@@ -1,8 +1,18 @@
-# Reolink SIP Gateway 0.6.0
+# Reolink SIP Gateway 0.7.0
 
-Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis löst einen SIP-Anruf aus; Audio läuft bidirektional zwischen SIP-Endgerät und Doorbell.
+Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann einen SIP-Anruf auslösen; optional lässt sich die registrierte Gateway-Nebenstelle anrufen und direkt mit der Doorbell verbinden.
 
 > Community-Projekt. Nicht offiziell von Reolink oder Home Assistant bereitgestellt oder unterstützt.
+
+## 0.7.0: die Kamera über SIP anrufen
+
+Mit der neuen Option **Eingehende SIP-Anrufe zulassen** kann die registrierte SIP-Nebenstelle des Gateways angerufen werden. Bei einer FRITZ!Box wird dazu die dem IP-Telefon zugewiesene interne Nummer gewählt, beispielsweise `**620`. Das Gateway verbindet den Anrufer mit genau der bereits konfigurierten Doorbell beziehungsweise dem fest gewählten NVR-Kanal.
+
+Der Anruf wird nicht voreilig angenommen: Nach dem `INVITE` sendet das Gateway zunächst `100 Trying`, handelt PCMA oder PCMU aus und bereitet Talkback sowie Kameraempfang vor. Erst wenn beide Reolink-Medienwege bereit sind, folgt die automatische Annahme mit `200 OK`. Schlägt der Kameraaufbau fehl, wird der Anruf mit `480 Temporarily Unavailable` abgewiesen, statt ein stummes Gespräch anzunehmen.
+
+Unterstützt werden `INVITE`, `ACK`, `CANCEL` und `BYE`, Wiederholungen der `200 OK` bis zum `ACK`, dynamische RTP-Ports sowie symmetrisches RTP. Es bleibt bei genau einem Gespräch gleichzeitig; ein zweiter Anruf erhält `486 Busy Here`, und Klingelereignisse werden während eines laufenden Gesprächs wie bisher ignoriert. Der vorhandene Weg Besucher-Sensor → ausgehender Anruf bleibt funktional unverändert und verwendet denselben Medien-, AEC- und v0.6-Pufferpfad.
+
+Der neue Schalter liegt im Block **Anruf** direkt nach dem Besucher-Sensor und ist standardmäßig aus. Signalisierung wird nur von IP-Adresse und UDP-Port des konfigurierten SIP-Registrars akzeptiert. Sollen ausschließlich interne FRITZ!Box-Anrufe zur Kamera gelangen, dürfen diesem IP-Telefon keine externen eingehenden Rufnummern zugewiesen werden; auch extern weitergeleitete Anrufe stammen technisch von der vertrauenswürdigen FRITZ!Box. DTMF, Mehrkameraauswahl und Türöffner sind bewusst noch nicht Bestandteil von 0.7.0.
 
 ## 0.6.0: elastischer Talkback-Puffer ohne zusätzlichen Vorpuffer
 
@@ -111,6 +121,7 @@ audio:
 
 call:
   visitor_entity: auto
+  incoming_calls_enabled: false
   debounce_seconds: 3
   ring_timeout_seconds: 30
   max_call_duration_seconds: 300
@@ -123,6 +134,8 @@ diagnostics:
 Bei `sip_registrar: auto` wird beim Start die IPv4-Default-Gateway-Adresse des Home-Assistant-Hosts verwendet. Ein manueller Registrar überschreibt diese Automatik. Kann kein nutzbares IPv4-Gateway gefunden werden, fordert das Startlog dazu auf, den Registrar manuell einzutragen.
 
 Bei `visitor_entity: auto` wird genau ein aktivierter Reolink-Besucher-Sensor aus der Home-Assistant-Entity-Registry verwendet. Bei keinem oder mehreren Treffern fordert das Startlog zur manuellen Auswahl auf.
+
+Mit `incoming_calls_enabled: true` nimmt das Gateway Anrufe an seine registrierte SIP-Nebenstelle automatisch an, sobald der konfigurierte Reolink-Medienweg bereit ist. Bei einer FRITZ!Box wird die in **Telefonie → Telefoniegeräte** angezeigte interne Nummer des Gateway-IP-Telefons gewählt.
 
 RTP-Ports werden automatisch vom Betriebssystem gewählt. FFmpeg liegt fest unter `/usr/bin/ffmpeg`. Die WebRTC-Rauschunterdrückung verwendet bei Aktivierung fest `moderate`. Der Home-Assistant-WebSocket ist der primäre Klingelpfad; der REST-Fallback läuft intern mit festem Einsekundenintervall.
 

@@ -22,7 +22,7 @@ import (
 	statuspkg "github.com/vothmarkus/reolink-sip-gateway/internal/status"
 )
 
-const version = "0.6.0"
+const version = "0.7.0"
 
 func main() {
 	configPath := flag.String("config", "/data/options.json", "path to Home Assistant app options JSON")
@@ -146,6 +146,7 @@ func main() {
 			LocalPort:       cfg.SIPLocalPort,
 			DisplayName:     cfg.SIPDisplayName,
 			CodecPreference: cfg.SIPCodecPreference,
+			AcceptIncoming:  cfg.IncomingCallsEnabled,
 			Debug:           cfg.DebugEnabled(),
 		}, logger)
 		if err != nil {
@@ -199,6 +200,10 @@ func main() {
 
 	var callActive atomic.Bool
 	var lastTrigger atomic.Int64
+	var incomingCalls <-chan *sip.IncomingInvite
+	if sipClient != nil {
+		incomingCalls = sipClient.IncomingCalls()
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -222,8 +227,162 @@ func main() {
 				defer callActive.Store(false)
 				handleCall(ctx, cfg, sipClient, store, logger)
 			}()
+		case incoming := <-incomingCalls:
+			if incoming == nil {
+				continue
+			}
+			if !callActive.CompareAndSwap(false, true) {
+				logger.Warn("incoming SIP call rejected because another call is active", "caller", incoming.CallerURI())
+				if err := incoming.Reject(486, "Busy Here"); err != nil && !errors.Is(err, sip.ErrIncomingCallCanceled) {
+					logger.Debug("cannot reject busy incoming SIP call", "error", err)
+				}
+				continue
+			}
+			go func() {
+				defer callActive.Store(false)
+				handleIncomingCall(ctx, cfg, incoming, store, logger)
+			}()
 		}
 	}
+}
+
+func handleIncomingCall(parent context.Context, cfg config.Config, incoming *sip.IncomingInvite, store *statuspkg.Store, logger *slog.Logger) {
+	started := time.Now()
+	call := incoming.Call()
+	store.Update(func(s *statuspkg.Snapshot) {
+		s.State = "connecting_media"
+		s.LastCallStarted = started
+		s.LastCallDirection = "incoming"
+		s.LastError = ""
+		s.ActiveCodec = call.Codec.Name
+		s.ActiveTalkback = ""
+		s.TalkbackDetails = ""
+		s.ActiveReceive = ""
+		s.ReceiveDetails = ""
+		s.ActiveEchoCancellation = ""
+		s.CurrentDelayMS = cfg.AECInitialDelayMS
+	})
+
+	rejectUnavailable := func(cause error) {
+		if err := incoming.Reject(480, "Temporarily Unavailable"); err != nil && !errors.Is(err, sip.ErrIncomingCallCanceled) {
+			logger.Debug("cannot reject unavailable incoming SIP call", "error", err)
+		}
+		recordIncomingCallError(store, logger, cause)
+	}
+
+	rtpConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: call.ClientLocalIP(), Port: 0})
+	if err != nil {
+		rejectUnavailable(fmt.Errorf("reserve SIP RTP port: %w", err))
+		return
+	}
+	defer rtpConn.Close()
+	rtpPort := rtpConn.LocalAddr().(*net.UDPAddr).Port
+
+	var ffConn *net.UDPConn
+	if cfg.ReceiveMode() == "rtsp" {
+		ffConn, err = net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+		if err != nil {
+			rejectUnavailable(fmt.Errorf("reserve local FFmpeg RTP port: %w", err))
+			return
+		}
+		defer ffConn.Close()
+	}
+	logger.Debug("dynamic media ports reserved for incoming call", "sip_rtp_port", rtpPort, "rtsp_receive", cfg.ReceiveMode() == "rtsp")
+
+	callCtx, cancelCall := context.WithTimeout(parent, cfg.MaxCallDuration())
+	defer cancelCall()
+	mediaSession := media.New(cfg, call, rtpConn, ffConn, logger)
+	mediaErr := make(chan error, 1)
+	go func() { mediaErr <- mediaSession.Run(callCtx) }()
+	go func() {
+		for {
+			select {
+			case update := <-mediaSession.AECStatus():
+				store.Update(func(s *statuspkg.Snapshot) { s.CurrentDelayMS = update.CurrentDelayMS })
+			case <-callCtx.Done():
+				return
+			}
+		}
+	}()
+
+	var ready media.SessionInfo
+	select {
+	case ready = <-mediaSession.Ready():
+		if err := incoming.Answer(rtpPort); err != nil {
+			cancelCall()
+			_ = waitMedia(mediaErr, 5*time.Second)
+			if errors.Is(err, sip.ErrIncomingCallCanceled) {
+				finishCanceledIncomingCall(store, logger, started)
+			} else {
+				recordIncomingCallError(store, logger, fmt.Errorf("answer incoming SIP call: %w", err))
+			}
+			return
+		}
+		store.Update(func(s *statuspkg.Snapshot) {
+			s.State = "active"
+			s.ActiveTalkback = ready.Talkback.Mode
+			s.TalkbackDetails = ready.Talkback.Details
+			s.ActiveReceive = ready.Receive.Mode
+			s.ReceiveDetails = ready.Receive.Details
+			s.ActiveEchoCancellation = ready.EchoCancellation
+		})
+		logger.Info("incoming call media active", "caller", incoming.CallerURI(), "sip_codec", call.Codec.Name, "receive_mode", ready.Receive.Mode, "receive", ready.Receive.Details, "talkback_mode", ready.Talkback.Mode, "talkback", ready.Talkback.Details, "echo_cancellation", ready.EchoCancellation)
+	case err := <-mediaErr:
+		cancelCall()
+		rejectUnavailable(fmt.Errorf("prepare Reolink media for incoming call: %w", err))
+		return
+	case err := <-call.Done():
+		cancelCall()
+		_ = waitMedia(mediaErr, 5*time.Second)
+		if errors.Is(err, sip.ErrIncomingCallCanceled) || err == nil {
+			finishCanceledIncomingCall(store, logger, started)
+		} else {
+			recordIncomingCallError(store, logger, err)
+		}
+		return
+	case <-callCtx.Done():
+		cancelCall()
+		_ = waitMedia(mediaErr, 5*time.Second)
+		rejectUnavailable(errors.New("incoming call media preparation timed out"))
+		return
+	}
+
+	var finalErr error
+	select {
+	case err := <-call.Done():
+		finalErr = err
+		cancelCall()
+		if mediaStopErr := waitMedia(mediaErr, 5*time.Second); finalErr == nil && mediaStopErr != nil {
+			finalErr = mediaStopErr
+		}
+	case err := <-mediaErr:
+		finalErr = err
+		if errors.Is(err, context.DeadlineExceeded) && errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+			finalErr = errors.New("maximum call duration reached")
+		}
+		cancelCall()
+		hctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		hangupErr := call.Hangup(hctx)
+		cancel()
+		if finalErr == nil && hangupErr != nil {
+			finalErr = hangupErr
+		}
+	case <-callCtx.Done():
+		if errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+			finalErr = errors.New("maximum call duration reached")
+		}
+		hctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		hangupErr := call.Hangup(hctx)
+		cancel()
+		if finalErr == nil && hangupErr != nil && parent.Err() == nil {
+			finalErr = hangupErr
+		}
+		if mediaStopErr := waitMedia(mediaErr, 5*time.Second); finalErr == nil && mediaStopErr != nil {
+			finalErr = mediaStopErr
+		}
+	}
+
+	finishCall(store, logger, started, finalErr, "incoming call ended")
 }
 
 func handleCall(parent context.Context, cfg config.Config, sipClient *sip.Client, store *statuspkg.Store, logger *slog.Logger) {
@@ -231,6 +390,7 @@ func handleCall(parent context.Context, cfg config.Config, sipClient *sip.Client
 	store.Update(func(s *statuspkg.Snapshot) {
 		s.State = "dialing"
 		s.LastCallStarted = started
+		s.LastCallDirection = "outgoing"
 		s.LastError = ""
 		s.ActiveCodec = ""
 		s.ActiveTalkback = ""
@@ -362,23 +522,48 @@ func handleCall(parent context.Context, cfg config.Config, sipClient *sip.Client
 		}
 	}
 
+	finishCall(store, logger, started, finalErr, "call ended")
+}
+
+func finishCall(store *statuspkg.Store, logger *slog.Logger, started time.Time, finalErr error, message string) {
 	ended := time.Now()
 	if finalErr != nil && !errors.Is(finalErr, context.Canceled) {
-		logger.Warn("call ended with error", "error", finalErr)
+		logger.Warn(message+" with error", "error", finalErr)
 		store.Update(func(s *statuspkg.Snapshot) {
 			s.State = "error"
 			s.LastError = finalErr.Error()
 			s.LastCallEnded = ended
 			clearActiveMedia(s)
 		})
-	} else {
-		logger.Info("call ended", "duration", ended.Sub(started).Round(time.Second))
-		store.Update(func(s *statuspkg.Snapshot) {
-			s.State = "idle"
-			s.LastCallEnded = ended
-			clearActiveMedia(s)
-		})
+		return
 	}
+	logger.Info(message, "duration", ended.Sub(started).Round(time.Second))
+	store.Update(func(s *statuspkg.Snapshot) {
+		s.State = "idle"
+		s.LastError = ""
+		s.LastCallEnded = ended
+		clearActiveMedia(s)
+	})
+}
+
+func finishCanceledIncomingCall(store *statuspkg.Store, logger *slog.Logger, started time.Time) {
+	logger.Info("incoming SIP call canceled before answer", "duration", time.Since(started).Round(time.Second))
+	store.Update(func(s *statuspkg.Snapshot) {
+		s.State = "idle"
+		s.LastError = ""
+		s.LastCallEnded = time.Now()
+		clearActiveMedia(s)
+	})
+}
+
+func recordIncomingCallError(store *statuspkg.Store, logger *slog.Logger, err error) {
+	logger.Error("cannot accept incoming call", "error", err)
+	store.Update(func(s *statuspkg.Snapshot) {
+		s.State = "error"
+		s.LastError = err.Error()
+		s.LastCallEnded = time.Now()
+		clearActiveMedia(s)
+	})
 }
 
 func clearActiveMedia(s *statuspkg.Snapshot) {

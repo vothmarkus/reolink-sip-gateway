@@ -1,18 +1,18 @@
 # Reolink SIP Gateway for Home Assistant
 
-Community Home Assistant app that turns a Reolink Video Doorbell event into a SIP call and bridges bidirectional audio between the SIP endpoint and the doorbell.
+Community Home Assistant app that bridges bidirectional audio between a Reolink Video Doorbell and SIP. A Home Assistant visitor event can place a call, and the registered gateway extension can optionally be called directly.
 
 > **Community project:** This repository is not affiliated with, endorsed by, or supported by Reolink or the Home Assistant project.
 
 ## Current release
 
-**v0.6.0** makes SIP-to-Baichuan talkback more tolerant of short RTP/FIFO timing fluctuations. Each already-due Reolink block may be stretched by at most 2% or compressed by at most 3%; unavoidable underruns and overflow discontinuities receive causal 5 ms half-Hann transitions. The playout does not wait, add a prebuffer, enlarge the bounded FIFO, or change the Reolink write cadence.
+**v0.7.0** adds opt-in incoming SIP calls. Calling the gateway's registered extension now connects the caller to the single configured Reolink camera/NVR channel. The gateway sends `100 Trying`, prepares both Reolink media directions, and only then answers automatically with `200 OK`; failed camera setup is rejected instead of producing an answered silent call.
 
-The Home Assistant option set stays unchanged. Camera-to-SIP smoothing, startup calibration, the fixed coarse AEC delay, AEC3 and the actual-write render reference remain unchanged as well.
+The existing visitor-triggered outbound call remains unchanged. Incoming and outgoing calls share the same G.711/RTP, AEC and Reolink media implementation, including the zero-lookahead elastic v0.6 talkback playout. Only one call is allowed at a time. Incoming `INVITE`, `ACK`, `CANCEL` and `BYE` handling is covered, while DTMF and multi-camera selection remain future work.
 
 Highlights:
 
-- SIP registration and outbound calls using G.711 A-law/µ-law.
+- SIP registration plus outbound and opt-in automatically answered incoming calls using G.711 A-law/µ-law.
 - Home Assistant Reolink visitor binary sensor as call trigger, with entity-registry auto-discovery or manual override.
 - Reolink standalone and NVR media profiles.
 - Bidirectional audio via RTSP/ONVIF or Reolink Baichuan, depending on profile.
@@ -74,6 +74,7 @@ audio:
 
 call:
   visitor_entity: auto
+  incoming_calls_enabled: false
   debounce_seconds: 3
   ring_timeout_seconds: 30
   max_call_duration_seconds: 300
@@ -88,6 +89,8 @@ diagnostics:
 With `sip_registrar: auto`, the startup adapter reads the Home Assistant host's IPv4 routing table and uses its default-gateway address (commonly the FRITZ!Box). Set an IP address or DNS name instead to override auto-detection. Existing saved registrar values are not replaced during an update.
 
 With `visitor_entity: auto`, the adapter queries Home Assistant's compact `config/entity_registry/list_for_display` view and selects the single enabled `binary_sensor` from platform `reolink` with translation key `visitor`. Renamed entity IDs are therefore supported. If none or more than one are enabled, startup asks for an explicit manual entity instead of guessing. Existing manual visitor entities are retained during updates. WebSocket frames and complete messages remain bounded to 16 MiB.
+
+Set **Allow incoming SIP calls** (`incoming_calls_enabled`) in the **Call** section to call the camera through the gateway. With a FRITZ!Box, dial the internal number assigned to the gateway's IP telephone, for example `**620`; use the actual number shown by the FRITZ!Box. The option defaults to `false` so upgrades never begin auto-answering unexpectedly. Signalling is accepted only from the configured registrar IP and UDP port. If only internal calls should reach the camera, do not assign external incoming numbers to this IP telephone in the FRITZ!Box, because forwarded external calls also originate from the trusted registrar.
 
 The **Passive mode / Passivmodus** toggle in **Operation & diagnostics / Betrieb & Diagnose** keeps the internal key `dry_run` for backwards compatibility. It monitors visitor events but suppresses SIP registration, outbound calls and the audible startup calibration marker.
 

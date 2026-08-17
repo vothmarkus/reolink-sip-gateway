@@ -1,8 +1,8 @@
-# Prüfprotokoll 0.6.0
+# Prüfprotokoll 0.7.0
 
 ## Ziel
 
-0.6.0 glättet ausschließlich den SIP→Baichuan-Talkback-FIFO. Zu prüfen sind die Grenzen der elastischen Zeitkorrektur, kausale Übergänge bei Restfehlern, unveränderte Echtzeitkadenz und AEC-Referenz sowie alle bisherigen Migrations-, Kalibrierungs-, Medien- und Konfigurationsregressionen.
+0.7.0 ergänzt eingehende SIP-Anrufe zur registrierten Gateway-Nebenstelle. Zu prüfen sind der sichere Opt-in, SIP-Dialogaufbau und -abbau, Codec-/RTP-Aushandlung, Anrufkonkurrenz sowie die Wiederverwendung des unveränderten Reolink-/AEC-/v0.6-Medienpfads.
 
 ## Softwareprüfungen vor Release
 
@@ -17,9 +17,23 @@
 - YAML-/JSON-Prüfung von App-Konfiguration und Übersetzungen
 - identische fünf Gruppen und Feldmengen in `options`, `schema`, DE, EN und Testkonfiguration
 - Bash-Syntaxprüfung des s6-Startskripts
-- Versionsprüfung 0.6.0 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
+- Versionsprüfung 0.7.0 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
 - Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
 - expliziter Test der nativen Statistikbits 0…7
+
+## Ergänzungen 0.7.0
+
+- `incoming_calls_enabled` steht in `options`, `schema`, DE, EN und Testkonfiguration direkt nach `visitor_entity`; Entprellung, Klingeldauer und maximale Gesprächsdauer folgen in dieser Reihenfolge.
+- Fresh-Install- und Upgrade-Normalisierung ergeben `incoming_calls_enabled: false`; ein explizites `true` erreicht den flachen Runtime-Snapshot unverändert.
+- Bei deaktivierter Option wird ein `INVITE` mit `403 Forbidden` abgewiesen. Absender-IP und UDP-Port müssen exakt dem aufgelösten konfigurierten Registrar entsprechen.
+- Ein gültiges SDP-Angebot mit PCMA und PCMU berücksichtigt die konfigurierte Präferenz; ein Angebot ohne unterstütztes G.711-Audio erhält `488 Not Acceptable Here`.
+- Ein angenommener Dialog liefert zunächst `100 Trying`, danach ein getaggtes `200 OK` mit dynamischem lokalem RTP-Port und genau dem ausgewählten Codec.
+- `ACK` stoppt die kontrollierte Wiederholung des `200 OK`; `BYE` erhält `200 OK` und beendet den Call. Ein ausbleibendes `ACK` beendet den Medienweg kontrolliert.
+- `CANCEL` vor der Annahme erhält `200 OK`; das ursprüngliche `INVITE` endet mit `487 Request Terminated` und kann danach nicht mehr angenommen werden.
+- Ein zweites `INVITE` während eines reservierten oder aktiven Dialogs erhält `486 Busy Here`. Ausgehender Wählvorgang und eingehender Dialog reservieren denselben SIP-Call-Slot race-frei.
+- Die Anwendung wartet vor `200 OK` auf `media.Session.Ready()`. Fehler beim Reolink-Aufbau führen zu `480 Temporarily Unavailable`, nicht zu einem angenommenen stummen Gespräch.
+- Eingehende und ausgehende Calls verwenden dieselbe `media.Session`; AEC, Startup-Kalibrierung, Kamera-PLL und elastischer v0.6-Talkback bleiben ohne Parallelimplementierung erhalten.
+- DTMF, Mehrkameraauswahl, PIN und Türöffner sind nicht Teil des 0.7.0-Produktionspfads.
 
 ## Ergänzungen 0.6.0
 

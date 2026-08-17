@@ -67,11 +67,14 @@ configuration:
         description: Enables WebRTC noise suppression using the fixed, proven moderate profile.
   call:
     name: Call
-    description: Doorbell trigger and time limits for outgoing calls.
+    description: Doorbell trigger, incoming SIP calls and call time limits.
     fields:
       visitor_entity:
         name: Reolink visitor sensor
         description: “auto” automatically uses the enabled visitor/doorbell sensor from the Reolink integration. If multiple Reolink doorbells are present, enter the desired binary_sensor entity manually.
+      incoming_calls_enabled:
+        name: Allow incoming SIP calls
+        description: Automatically answers calls to the registered SIP extension and connects them to the configured Reolink camera. Only calls from the configured SIP registrar are accepted.
       debounce_seconds:
         name: Doorbell debounce
         description: Additional visitor events within this interval are ignored.

@@ -27,6 +27,7 @@ type Snapshot struct {
 	LastVisitorEvent              time.Time `json:"last_visitor_event,omitempty"`
 	LastCallStarted               time.Time `json:"last_call_started,omitempty"`
 	LastCallEnded                 time.Time `json:"last_call_ended,omitempty"`
+	LastCallDirection             string    `json:"last_call_direction,omitempty"`
 	LastError                     string    `json:"last_error,omitempty"`
 	ActiveCodec                   string    `json:"active_codec,omitempty"`
 	ConfiguredReolinkMode         string    `json:"configured_reolink_mode"`
@@ -164,6 +165,7 @@ var page = template.Must(template.New("status").Funcs(template.FuncMap{"time": f
 <tr><td>Aktiver Codec</td><td>{{.ActiveCodec}}</td></tr>
 <tr><td>Aktiver Empfang</td><td>{{.ActiveReceive}}{{if .ReceiveDetails}} – {{.ReceiveDetails}}{{end}}</td></tr>
 <tr><td>Aktiver Rückkanal</td><td>{{.ActiveTalkback}}{{if .TalkbackDetails}} – {{.TalkbackDetails}}{{end}}</td></tr>
+<tr><td>Letzte Anrufrichtung</td><td>{{if .LastCallDirection}}{{.LastCallDirection}}{{else}}–{{end}}</td></tr>
 <tr><td>Letztes Klingeln</td><td>{{time .LastVisitorEvent}}</td></tr>
 <tr><td>Letzter Registrierungsfehler</td><td>{{.LastRegistrationErr}}</td></tr>
 <tr><td>Letzter Fehler</td><td>{{.LastError}}</td></tr>

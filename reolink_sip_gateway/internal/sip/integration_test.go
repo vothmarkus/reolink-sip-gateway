@@ -2,6 +2,7 @@ package sip
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -9,6 +10,332 @@ import (
 	"testing"
 	"time"
 )
+
+func TestIncomingInviteAnswerACKAndRemoteBye(t *testing.T) {
+	registrar, client, clientAddr := newIncomingTestClient(t, true)
+	sdp := "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=phone\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 40000 RTP/AVP 0 8 101\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:101 telephone-event/8000\r\n"
+	invitePacket, inviteReq := buildMockIncomingInvite(t, clientAddr, registrar.LocalAddr().(*net.UDPAddr), "incoming-1", "z9hG4bK-incoming-1", sdp)
+	if _, err := registrar.WriteToUDP(invitePacket, clientAddr); err != nil {
+		t.Fatal(err)
+	}
+	_ = readSIPResponse(t, registrar, 100, "INVITE")
+
+	var incoming *IncomingInvite
+	select {
+	case incoming = <-client.IncomingCalls():
+	case <-time.After(time.Second):
+		t.Fatal("incoming INVITE was not delivered")
+	}
+	call := incoming.Call()
+	if call.Codec.Name != "pcma" || call.Codec.PayloadType != 8 || call.RemoteRTPAddr().Port != 40000 {
+		t.Fatalf("unexpected incoming media negotiation: %#v %v", call.Codec, call.RemoteRTPAddr())
+	}
+	if incoming.CallerURI() != "sip:**610@127.0.0.1" {
+		t.Fatalf("unexpected caller URI %q", incoming.CallerURI())
+	}
+
+	answerPort := freeUDPPort(t)
+	if err := incoming.Answer(answerPort); err != nil {
+		t.Fatal(err)
+	}
+	answer := readSIPResponse(t, registrar, 200, "INVITE")
+	if !strings.Contains(string(answer.Body), fmt.Sprintf("m=audio %d RTP/AVP 8", answerPort)) || !strings.Contains(string(answer.Body), "a=rtpmap:8 PCMA/8000") {
+		t.Fatalf("unexpected SDP answer: %s", answer.Body)
+	}
+	if param(answer.Header("to"), "tag") == "" {
+		t.Fatal("successful INVITE answer has no To tag")
+	}
+
+	ack := buildMockDialogRequest("ACK", 1, inviteReq, answer, clientAddr, registrar.LocalAddr().(*net.UDPAddr))
+	if _, err := registrar.WriteToUDP(ack, clientAddr); err != nil {
+		t.Fatal(err)
+	}
+	bye := buildMockDialogRequest("BYE", 2, inviteReq, answer, clientAddr, registrar.LocalAddr().(*net.UDPAddr))
+	if _, err := registrar.WriteToUDP(bye, clientAddr); err != nil {
+		t.Fatal(err)
+	}
+	_ = readSIPResponse(t, registrar, 200, "BYE")
+	select {
+	case err := <-call.Done():
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("remote BYE did not finish incoming call")
+	}
+}
+
+func TestIncomingInviteCanBeCanceledBeforeAnswer(t *testing.T) {
+	registrar, client, clientAddr := newIncomingTestClient(t, true)
+	sdp := "v=0\r\nc=IN IP4 127.0.0.1\r\nm=audio 40000 RTP/AVP 8\r\na=rtpmap:8 PCMA/8000\r\n"
+	packet, req := buildMockIncomingInvite(t, clientAddr, registrar.LocalAddr().(*net.UDPAddr), "incoming-cancel", "z9hG4bK-incoming-cancel", sdp)
+	if _, err := registrar.WriteToUDP(packet, clientAddr); err != nil {
+		t.Fatal(err)
+	}
+	_ = readSIPResponse(t, registrar, 100, "INVITE")
+	var incoming *IncomingInvite
+	select {
+	case incoming = <-client.IncomingCalls():
+	case <-time.After(time.Second):
+		t.Fatal("incoming INVITE was not delivered")
+	}
+
+	cancel := buildMockCancel(req, clientAddr, registrar.LocalAddr().(*net.UDPAddr))
+	if _, err := registrar.WriteToUDP(cancel, clientAddr); err != nil {
+		t.Fatal(err)
+	}
+	gotCancelOK, gotInvite487 := false, false
+	deadline := time.Now().Add(2 * time.Second)
+	for !gotCancelOK || !gotInvite487 {
+		response := readAnySIPMessage(t, registrar, deadline)
+		if response.StatusCode == 200 && cseqMethod(response.Header("cseq")) == "CANCEL" {
+			gotCancelOK = true
+		}
+		if response.StatusCode == 487 && cseqMethod(response.Header("cseq")) == "INVITE" {
+			gotInvite487 = true
+		}
+	}
+	select {
+	case err := <-incoming.Call().Done():
+		if !errors.Is(err, ErrIncomingCallCanceled) {
+			t.Fatalf("unexpected cancellation result: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("CANCEL did not finish incoming call")
+	}
+	if err := incoming.Answer(freeUDPPort(t)); !errors.Is(err, ErrIncomingCallCanceled) {
+		t.Fatalf("answer after CANCEL returned %v", err)
+	}
+}
+
+func TestIncomingInviteIsDeduplicatedAndAnswerRetransmitsUntilACK(t *testing.T) {
+	registrar, client, clientAddr := newIncomingTestClient(t, true)
+	sdp := "v=0\r\nc=IN IP4 127.0.0.1\r\nm=audio 40000 RTP/AVP 8\r\n"
+	packet, req := buildMockIncomingInvite(t, clientAddr, registrar.LocalAddr().(*net.UDPAddr), "incoming-retry", "z9hG4bK-incoming-retry", sdp)
+	_, _ = registrar.WriteToUDP(packet, clientAddr)
+	_ = readSIPResponse(t, registrar, 100, "INVITE")
+	var incoming *IncomingInvite
+	select {
+	case incoming = <-client.IncomingCalls():
+	case <-time.After(time.Second):
+		t.Fatal("incoming INVITE was not delivered")
+	}
+
+	// UDP may repeat an INVITE. The same server transaction must repeat its
+	// response without creating a second application call.
+	_, _ = registrar.WriteToUDP(packet, clientAddr)
+	_ = readSIPResponse(t, registrar, 100, "INVITE")
+	select {
+	case <-client.IncomingCalls():
+		t.Fatal("retransmitted INVITE created a duplicate call")
+	case <-time.After(75 * time.Millisecond):
+	}
+
+	if err := incoming.Answer(freeUDPPort(t)); err != nil {
+		t.Fatal(err)
+	}
+	answer := readSIPResponse(t, registrar, 200, "INVITE")
+	// Do not ACK the first 200. The UAS must retransmit it over UDP.
+	_ = readSIPResponse(t, registrar, 200, "INVITE")
+	ack := buildMockDialogRequest("ACK", 1, req, answer, clientAddr, registrar.LocalAddr().(*net.UDPAddr))
+	_, _ = registrar.WriteToUDP(ack, clientAddr)
+	bye := buildMockDialogRequest("BYE", 2, req, answer, clientAddr, registrar.LocalAddr().(*net.UDPAddr))
+	_, _ = registrar.WriteToUDP(bye, clientAddr)
+	_ = readSIPResponse(t, registrar, 200, "BYE")
+	select {
+	case <-incoming.Call().Done():
+	case <-time.After(time.Second):
+		t.Fatal("incoming call did not finish")
+	}
+}
+
+func TestIncomingCallCanHangUpLocally(t *testing.T) {
+	registrar, client, clientAddr := newIncomingTestClient(t, true)
+	sdp := "v=0\r\nc=IN IP4 127.0.0.1\r\nm=audio 40000 RTP/AVP 8\r\n"
+	packet, req := buildMockIncomingInvite(t, clientAddr, registrar.LocalAddr().(*net.UDPAddr), "incoming-local-bye", "z9hG4bK-incoming-local-bye", sdp)
+	_, _ = registrar.WriteToUDP(packet, clientAddr)
+	_ = readSIPResponse(t, registrar, 100, "INVITE")
+	var incoming *IncomingInvite
+	select {
+	case incoming = <-client.IncomingCalls():
+	case <-time.After(time.Second):
+		t.Fatal("incoming INVITE was not delivered")
+	}
+	if err := incoming.Answer(freeUDPPort(t)); err != nil {
+		t.Fatal(err)
+	}
+	answer := readSIPResponse(t, registrar, 200, "INVITE")
+	ack := buildMockDialogRequest("ACK", 1, req, answer, clientAddr, registrar.LocalAddr().(*net.UDPAddr))
+	_, _ = registrar.WriteToUDP(ack, clientAddr)
+
+	serverErr := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 65535)
+		_ = registrar.SetReadDeadline(time.Now().Add(2 * time.Second))
+		n, addr, err := registrar.ReadFromUDP(buf)
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		bye, err := parseMessage(buf[:n])
+		if err != nil {
+			serverErr <- err
+			return
+		}
+		if bye.Method != "BYE" || param(bye.Header("from"), "tag") != param(answer.Header("to"), "tag") || param(bye.Header("to"), "tag") != "phone-tag" {
+			serverErr <- fmt.Errorf("invalid inbound-dialog BYE: from=%q to=%q", bye.Header("from"), bye.Header("to"))
+			return
+		}
+		serverErr <- mockResponse(registrar, addr, bye, 200, "OK", nil, nil)
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := incoming.Call().Hangup(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-serverErr; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIncomingCallsDisabledAndBusyAreRejected(t *testing.T) {
+	sdp := "v=0\r\nc=IN IP4 127.0.0.1\r\nm=audio 40000 RTP/AVP 8\r\n"
+	t.Run("disabled", func(t *testing.T) {
+		registrar, _, clientAddr := newIncomingTestClient(t, false)
+		packet, _ := buildMockIncomingInvite(t, clientAddr, registrar.LocalAddr().(*net.UDPAddr), "disabled", "z9hG4bK-disabled", sdp)
+		_, _ = registrar.WriteToUDP(packet, clientAddr)
+		_ = readSIPResponse(t, registrar, 403, "INVITE")
+	})
+	t.Run("busy", func(t *testing.T) {
+		registrar, client, clientAddr := newIncomingTestClient(t, true)
+		serverAddr := registrar.LocalAddr().(*net.UDPAddr)
+		first, _ := buildMockIncomingInvite(t, clientAddr, serverAddr, "busy-1", "z9hG4bK-busy-1", sdp)
+		_, _ = registrar.WriteToUDP(first, clientAddr)
+		_ = readSIPResponse(t, registrar, 100, "INVITE")
+		var pending *IncomingInvite
+		select {
+		case pending = <-client.IncomingCalls():
+		case <-time.After(time.Second):
+			t.Fatal("first incoming call missing")
+		}
+		second, _ := buildMockIncomingInvite(t, clientAddr, serverAddr, "busy-2", "z9hG4bK-busy-2", sdp)
+		_, _ = registrar.WriteToUDP(second, clientAddr)
+		_ = readSIPResponse(t, registrar, 486, "INVITE")
+		if err := pending.Reject(486, "Busy Here"); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestIncomingInviteRequiresConfiguredRegistrarSource(t *testing.T) {
+	registrar, _, clientAddr := newIncomingTestClient(t, true)
+	attacker, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer attacker.Close()
+	sdp := "v=0\r\nc=IN IP4 127.0.0.1\r\nm=audio 40000 RTP/AVP 8\r\n"
+	packet, _ := buildMockIncomingInvite(t, clientAddr, attacker.LocalAddr().(*net.UDPAddr), "untrusted", "z9hG4bK-untrusted", sdp)
+	if _, err := attacker.WriteToUDP(packet, clientAddr); err != nil {
+		t.Fatal(err)
+	}
+	_ = readSIPResponse(t, attacker, 403, "INVITE")
+	_ = registrar
+}
+
+func newIncomingTestClient(t *testing.T, enabled bool) (*net.UDPConn, *Client, *net.UDPAddr) {
+	t.Helper()
+	registrar, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	localPort := freeUDPPort(t)
+	registrarAddr := registrar.LocalAddr().(*net.UDPAddr)
+	client, err := New(Config{
+		Registrar: "127.0.0.1", RegistrarPort: registrarAddr.Port, Username: "621", Password: "secret",
+		LocalPort: localPort, DisplayName: "Door", CodecPreference: "pcma", AcceptIncoming: enabled,
+	}, nil)
+	if err != nil {
+		registrar.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		client.Close()
+		registrar.Close()
+	})
+	return registrar, client, &net.UDPAddr{IP: client.LocalIP(), Port: localPort}
+}
+
+func buildMockIncomingInvite(t *testing.T, clientAddr, registrarAddr *net.UDPAddr, callID, branch, sdp string) ([]byte, Message) {
+	t.Helper()
+	lines := []string{
+		fmt.Sprintf("INVITE sip:621@%s SIP/2.0", clientAddr.String()),
+		fmt.Sprintf("Via: SIP/2.0/UDP %s;branch=%s;rport", registrarAddr.String(), branch),
+		"Max-Forwards: 70",
+		"From: \"Phone\" <sip:**610@127.0.0.1>;tag=phone-tag",
+		"To: <sip:621@127.0.0.1>",
+		"Call-ID: " + callID,
+		"CSeq: 1 INVITE",
+		fmt.Sprintf("Contact: <sip:phone@%s>", registrarAddr.String()),
+		"Content-Type: application/sdp",
+		fmt.Sprintf("Content-Length: %d", len(sdp)), "", "",
+	}
+	packet := append([]byte(strings.Join(lines, "\r\n")), []byte(sdp)...)
+	req, err := parseMessage(packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return packet, req
+}
+
+func buildMockCancel(invite Message, clientAddr, registrarAddr *net.UDPAddr) []byte {
+	lines := []string{
+		fmt.Sprintf("CANCEL sip:621@%s SIP/2.0", clientAddr.String()),
+		"Via: " + invite.Header("via"),
+		"Max-Forwards: 70", "From: " + invite.Header("from"), "To: " + invite.Header("to"),
+		"Call-ID: " + invite.Header("call-id"), "CSeq: 1 CANCEL", "Content-Length: 0", "", "",
+	}
+	_ = registrarAddr
+	return []byte(strings.Join(lines, "\r\n"))
+}
+
+func buildMockDialogRequest(method string, cseq int, invite, answer Message, clientAddr, registrarAddr *net.UDPAddr) []byte {
+	lines := []string{
+		fmt.Sprintf("%s sip:621@%s SIP/2.0", method, clientAddr.String()),
+		fmt.Sprintf("Via: SIP/2.0/UDP %s;branch=%s", registrarAddr.String(), branchID()),
+		"Max-Forwards: 70", "From: " + invite.Header("from"), "To: " + answer.Header("to"),
+		"Call-ID: " + invite.Header("call-id"), fmt.Sprintf("CSeq: %d %s", cseq, method), "Content-Length: 0", "", "",
+	}
+	return []byte(strings.Join(lines, "\r\n"))
+}
+
+func readSIPResponse(t *testing.T, conn *net.UDPConn, status int, method string) Message {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		message := readAnySIPMessage(t, conn, deadline)
+		if message.IsResponse && message.StatusCode == status && cseqMethod(message.Header("cseq")) == method {
+			return message
+		}
+	}
+}
+
+func readAnySIPMessage(t *testing.T, conn *net.UDPConn, deadline time.Time) Message {
+	t.Helper()
+	buf := make([]byte, 65535)
+	if err := conn.SetReadDeadline(deadline); err != nil {
+		t.Fatal(err)
+	}
+	n, _, err := conn.ReadFromUDP(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := parseMessage(buf[:n])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return message
+}
 
 func TestRegisterDialAndRemoteBye(t *testing.T) {
 	server, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})

@@ -1,7 +1,7 @@
 name: Reolink SIP Gateway
-version: "0.6.0"
+version: "0.7.0"
 slug: reolink_sip_gateway
-description: Ruft bei einem Reolink-Klingelereignis ein SIP-Ziel an und überträgt Zwei-Wege-Audio.
+description: Verbindet Reolink-Klingelereignisse und eingehende SIP-Anrufe mit Zwei-Wege-Audio.
 url: https://github.com/vothmarkus/reolink-sip-gateway
 arch:
   - amd64
@@ -41,6 +41,7 @@ options:
     webrtc_noise_suppression_enabled: true
   call:
     visitor_entity: auto
+    incoming_calls_enabled: false
     debounce_seconds: 3
     ring_timeout_seconds: 30
     max_call_duration_seconds: 300
@@ -71,6 +72,7 @@ schema:
     webrtc_noise_suppression_enabled: bool
   call:
     visitor_entity: "match(^(auto|binary_sensor\\.[a-z0-9_]+)$)"
+    incoming_calls_enabled: bool
     debounce_seconds: int(0,60)
     ring_timeout_seconds: int(5,180)
     max_call_duration_seconds: int(15,3600)

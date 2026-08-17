@@ -67,11 +67,14 @@ configuration:
         description: Aktiviert die WebRTC-Rauschunterdrückung mit festem, bewährtem Profil „moderate“.
   call:
     name: Anruf
-    description: Klingelauslöser und zeitliche Begrenzungen für ausgehende Anrufe.
+    description: Klingelauslöser, eingehende SIP-Anrufe und zeitliche Begrenzungen.
     fields:
       visitor_entity:
         name: Reolink-Besucher-Sensor
         description: „auto“ verwendet automatisch den aktivierten Besucher-/Klingelsensor der Reolink-Integration. Bei mehreren Reolink-Türklingeln muss die gewünschte binary_sensor-Entity manuell eingetragen werden.
+      incoming_calls_enabled:
+        name: Eingehende SIP-Anrufe zulassen
+        description: Nimmt Anrufe an die registrierte SIP-Nebenstelle automatisch an und verbindet sie mit der fest konfigurierten Reolink-Kamera. Es werden nur Anrufe vom konfigurierten SIP-Registrar akzeptiert.
       debounce_seconds:
         name: Klingelentprellung
         description: Weitere Klingelereignisse innerhalb dieser Zeit werden ignoriert.

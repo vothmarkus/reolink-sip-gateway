@@ -25,6 +25,7 @@ type Config struct {
 	LocalPort       int
 	DisplayName     string
 	CodecPreference string
+	AcceptIncoming  bool
 	Debug           bool
 }
 
@@ -38,6 +39,9 @@ type Client struct {
 	mu              sync.Mutex
 	transactions    map[string]chan Message
 	active          *Call
+	dialing         bool
+	incoming        chan *IncomingInvite
+	serverInvites   map[string]*IncomingInvite
 	registerCallID  string
 	registerCSeq    uint32
 	registered      atomic.Bool
@@ -76,6 +80,8 @@ type Call struct {
 	done         chan error
 	doneOnce     sync.Once
 	rtpMu        sync.RWMutex
+	inbound      bool
+	incoming     *IncomingInvite
 }
 
 func New(cfg Config, logger *slog.Logger) (*Client, error) {
@@ -94,13 +100,15 @@ func New(cfg Config, logger *slog.Logger) (*Client, error) {
 		return nil, fmt.Errorf("listen SIP UDP: %w", err)
 	}
 	c := &Client{cfg: cfg, log: logger, conn: conn, registrar: reg, localIP: localIP,
-		transactions: make(map[string]chan Message), registerCallID: randomID() + "@" + localIP.String(), closed: make(chan struct{})}
+		transactions: make(map[string]chan Message), incoming: make(chan *IncomingInvite, 4),
+		serverInvites: make(map[string]*IncomingInvite), registerCallID: randomID() + "@" + localIP.String(), closed: make(chan struct{})}
 	go c.readLoop()
 	return c, nil
 }
 
-func (c *Client) LocalIP() net.IP  { return append(net.IP(nil), c.localIP...) }
-func (c *Client) Registered() bool { return c.registered.Load() }
+func (c *Client) LocalIP() net.IP                       { return append(net.IP(nil), c.localIP...) }
+func (c *Client) Registered() bool                      { return c.registered.Load() }
+func (c *Client) IncomingCalls() <-chan *IncomingInvite { return c.incoming }
 func (c *Client) LastRegisterError() string {
 	v := c.lastRegisterErr.Load()
 	if v == nil {
@@ -228,11 +236,21 @@ func (c *Client) register(ctx context.Context, expires int) (int, error) {
 
 func (c *Client) Dial(ctx context.Context, destination string, rtpPort int) (*Call, error) {
 	c.mu.Lock()
-	if c.active != nil {
+	if c.active != nil || c.dialing {
 		c.mu.Unlock()
 		return nil, errors.New("another SIP call is active")
 	}
+	c.dialing = true
 	c.mu.Unlock()
+	established := false
+	defer func() {
+		if established {
+			return
+		}
+		c.mu.Lock()
+		c.dialing = false
+		c.mu.Unlock()
+	}()
 	toURI := destination
 	if !strings.HasPrefix(strings.ToLower(toURI), "sip:") {
 		toURI = fmt.Sprintf("sip:%s@%s", destination, c.cfg.Registrar)
@@ -288,7 +306,9 @@ func (c *Client) Dial(ctx context.Context, destination string, rtpPort int) (*Ca
 	// re-ACKed by readLoop while we finish media validation.
 	c.mu.Lock()
 	c.active = call
+	c.dialing = false
 	c.mu.Unlock()
+	established = true
 	if err := c.sendACK(call); err != nil {
 		c.mu.Lock()
 		if c.active == call {
@@ -379,6 +399,9 @@ func (call *Call) finish(err error) {
 			call.client.active = nil
 		}
 		call.client.mu.Unlock()
+		if call.incoming != nil {
+			call.incoming.stopRetransmission()
+		}
 		call.done <- err
 		close(call.done)
 	})
@@ -583,7 +606,7 @@ func (c *Client) readLoop() {
 					callCSeq = call.CSeq
 				}
 				c.mu.Unlock()
-				if call != nil && m.Header("call-id") == call.CallID && cseqNumber(m.Header("cseq")) == callCSeq {
+				if call != nil && !call.inbound && m.Header("call-id") == call.CallID && cseqNumber(m.Header("cseq")) == callCSeq {
 					_ = c.sendACK(call)
 				}
 			}
@@ -595,14 +618,26 @@ func (c *Client) readLoop() {
 
 func (c *Client) handleRequest(m Message, addr *net.UDPAddr) {
 	switch strings.ToUpper(m.Method) {
+	case "INVITE":
+		c.handleIncomingInvite(m, addr)
+	case "ACK":
+		c.handleIncomingACK(m, addr)
+	case "CANCEL":
+		c.handleIncomingCancel(m, addr)
 	case "BYE":
-		_ = c.sendResponse(m, addr, 200, "OK")
 		c.mu.Lock()
 		call := c.active
 		c.mu.Unlock()
-		if call != nil && m.Header("call-id") == call.CallID {
-			call.finish(nil)
+		if call == nil || m.Header("call-id") != call.CallID {
+			_ = c.sendResponse(m, addr, 481, "Call/Transaction Does Not Exist")
+			return
 		}
+		if call.inbound && !c.isRegistrarSource(addr) {
+			_ = c.sendResponse(m, addr, 403, "Forbidden")
+			return
+		}
+		_ = c.sendResponse(m, addr, 200, "OK")
+		call.finish(nil)
 	case "OPTIONS", "NOTIFY":
 		_ = c.sendResponse(m, addr, 200, "OK")
 	default:
@@ -631,7 +666,7 @@ func (c *Client) baseHeaders(method, uri, branch string, cseq uint32, callID, fr
 		fmt.Sprintf("Via: SIP/2.0/UDP %s:%d;branch=%s;rport", c.localIP, c.cfg.LocalPort, branch),
 		"Max-Forwards: 70", fromLine(from), "To: " + to, "Call-ID: " + callID, fmt.Sprintf("CSeq: %d %s", cseq, method),
 		fmt.Sprintf("Contact: <sip:%s@%s:%d;transport=udp>", c.cfg.Username, c.localIP, c.cfg.LocalPort),
-		"User-Agent: ReolinkSIPGateway/0.6.0",
+		"User-Agent: ReolinkSIPGateway/0.7.0",
 	}
 }
 func fromLine(v string) string      { return "From: " + v }
@@ -724,13 +759,51 @@ func (m Message) Header(name string) string {
 	return v[0]
 }
 
+type parsedAudioSDP struct {
+	payloads []int
+	rtpmap   map[int]string
+	remote   *net.UDPAddr
+}
+
 func parseAnswerSDP(s string) (Codec, *net.UDPAddr, error) {
-	sessionIP := ""
-	audioIP := ""
+	parsed, err := parseAudioSDP(s)
+	if err != nil {
+		return Codec{}, nil, fmt.Errorf("SIP answer %w", err)
+	}
+	for _, pt := range parsed.payloads {
+		if codec, ok := codecForPayload(pt, parsed.rtpmap); ok {
+			return codec, parsed.remote, nil
+		}
+	}
+	return Codec{}, nil, errors.New("SIP answer did not select PCMA/PCMU")
+}
+
+func parseOfferSDP(s, preference string) (Codec, *net.UDPAddr, error) {
+	parsed, err := parseAudioSDP(s)
+	if err != nil {
+		return Codec{}, nil, fmt.Errorf("SIP offer %w", err)
+	}
+	order := []string{"pcma", "pcmu"}
+	if strings.EqualFold(strings.TrimSpace(preference), "pcmu") {
+		order = []string{"pcmu", "pcma"}
+	}
+	for _, wanted := range order {
+		for _, pt := range parsed.payloads {
+			codec, ok := codecForPayload(pt, parsed.rtpmap)
+			if ok && codec.Name == wanted {
+				return codec, parsed.remote, nil
+			}
+		}
+	}
+	return Codec{}, nil, errors.New("SIP offer contains neither PCMA nor PCMU")
+}
+
+func parseAudioSDP(s string) (parsedAudioSDP, error) {
+	parsed := parsedAudioSDP{rtpmap: make(map[int]string)}
+	var sessionIP, audioIP string
 	port := 0
-	payloads := []int{}
-	rtpmap := map[int]string{}
 	inAudio := false
+	beforeMedia := true
 	for _, raw := range strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n") {
 		line := strings.TrimSpace(raw)
 		switch {
@@ -739,65 +812,73 @@ func parseAnswerSDP(s string) (Codec, *net.UDPAddr, error) {
 			if len(f) >= 4 && port == 0 {
 				inAudio = true
 				port, _ = strconv.Atoi(f[1])
-				for _, x := range f[3:] {
-					if n, err := strconv.Atoi(x); err == nil {
-						payloads = append(payloads, n)
+				for _, value := range f[3:] {
+					if pt, convErr := strconv.Atoi(value); convErr == nil && pt >= 0 && pt <= 127 {
+						parsed.payloads = append(parsed.payloads, pt)
 					}
 				}
 			} else {
 				inAudio = false
 			}
+			beforeMedia = false
 		case strings.HasPrefix(line, "m="):
 			inAudio = false
+			beforeMedia = false
 		case strings.HasPrefix(line, "c=IN IP4 "):
 			candidate := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, "c=IN IP4 ")))
 			if len(candidate) > 0 {
 				if inAudio {
 					audioIP = candidate[0]
-				} else if sessionIP == "" {
+				} else if beforeMedia && sessionIP == "" {
 					sessionIP = candidate[0]
 				}
 			}
 		case inAudio && strings.HasPrefix(line, "a=rtpmap:"):
 			rest := strings.TrimPrefix(line, "a=rtpmap:")
-			p := strings.SplitN(rest, " ", 2)
-			if len(p) == 2 {
-				if n, err := strconv.Atoi(p[0]); err == nil {
-					rtpmap[n] = strings.ToUpper(strings.SplitN(p[1], "/", 2)[0])
+			parts := strings.SplitN(rest, " ", 2)
+			if len(parts) == 2 {
+				if pt, convErr := strconv.Atoi(parts[0]); convErr == nil {
+					parsed.rtpmap[pt] = strings.ToUpper(strings.SplitN(parts[1], "/", 2)[0])
 				}
 			}
 		}
+	}
+	if port < 1 || port > 65535 || len(parsed.payloads) == 0 {
+		return parsedAudioSDP{}, errors.New("has no usable audio media")
 	}
 	ipText := audioIP
 	if ipText == "" {
 		ipText = sessionIP
 	}
-	if ipText == "" || port == 0 {
-		return Codec{}, nil, errors.New("SIP answer has no usable audio address")
+	if ipText == "" || ipText == "0.0.0.0" {
+		return parsedAudioSDP{}, errors.New("has no usable audio address")
 	}
 	ip := net.ParseIP(ipText)
 	if ip == nil {
-		resolved, err := net.ResolveIPAddr("ip4", ipText)
-		if err != nil || resolved.IP == nil {
-			return Codec{}, nil, fmt.Errorf("resolve SIP RTP address %q: %w", ipText, err)
+		resolved, resolveErr := net.ResolveIPAddr("ip4", ipText)
+		if resolveErr != nil || resolved.IP == nil {
+			return parsedAudioSDP{}, fmt.Errorf("cannot resolve RTP address %q: %w", ipText, resolveErr)
 		}
 		ip = resolved.IP
 	}
-	for _, pt := range payloads {
-		name := rtpmap[pt]
-		if name == "" {
-			if pt == 8 {
-				name = "PCMA"
-			}
-			if pt == 0 {
-				name = "PCMU"
-			}
-		}
-		if name == "PCMA" || name == "PCMU" {
-			return Codec{Name: strings.ToLower(name), PayloadType: uint8(pt)}, &net.UDPAddr{IP: ip, Port: port}, nil
+	parsed.remote = &net.UDPAddr{IP: ip, Port: port}
+	return parsed, nil
+}
+
+func codecForPayload(pt int, rtpmap map[int]string) (Codec, bool) {
+	name := rtpmap[pt]
+	if name == "" {
+		switch pt {
+		case 8:
+			name = "PCMA"
+		case 0:
+			name = "PCMU"
 		}
 	}
-	return Codec{}, nil, errors.New("SIP answer did not select PCMA/PCMU")
+	if name != "PCMA" && name != "PCMU" {
+		return Codec{}, false
+	}
+	return Codec{Name: strings.ToLower(name), PayloadType: uint8(pt)}, true
 }
 
 func param(h, name string) string {

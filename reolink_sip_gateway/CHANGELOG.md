@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.0
+
+- Neuer, standardmäßig deaktivierter Schalter **Eingehende SIP-Anrufe zulassen** (`call.incoming_calls_enabled`). Er steht im Block **Anruf** direkt nach dem Reolink-Besucher-Sensor; danach folgen Entprellung, Klingeldauer und maximale Gesprächsdauer.
+- Die registrierte Gateway-Nebenstelle kann angerufen und automatisch mit genau der bereits konfigurierten Doorbell beziehungsweise dem festen NVR-Kanal verbunden werden. Der bisherige Visitor→ausgehender-SIP-Anruf bleibt unverändert.
+- Eingehende `INVITE` werden ausschließlich von IP-Adresse und UDP-Port des konfigurierten SIP-Registrars akzeptiert. Deaktivierte Eingangsannahme ergibt `403`, ein paralleler Wählvorgang oder Dialog `486 Busy Here` und ein nicht unterstütztes SDP-Angebot `488 Not Acceptable Here`.
+- PCMA/PCMU wird aus dem SDP-Angebot gemäß Codecpräferenz ausgewählt; RTP bleibt dynamisch. Eingehende und ausgehende Gespräche verwenden dieselbe `media.Session`, dieselben Reolink-Profile und denselben AEC-/v0.6-Pufferpfad.
+- Das Gateway sendet zunächst `100 Trying` und startet Reolink-Talkback sowie Kameraempfang vor der automatischen Annahme. `200 OK` wird erst nach `media.Session.Ready()` gesendet; ein Vorbereitungsfehler führt zu `480 Temporarily Unavailable` statt zu einem angenommenen stummen Gespräch.
+- SIP-UAS-Zustandsmaschine für `INVITE`, `ACK`, `CANCEL` und `BYE`: dialogstabile Tags, Wiederholung erfolgreicher UDP-Antworten bis zum `ACK`, ACK-Timeout, `200`/`487` bei Abbruch vor Annahme sowie sauberer lokaler und entfernter Gesprächsabbau.
+- Ausgehender Wählvorgang, wartender eingehender Anruf und aktives Gespräch reservieren denselben Call-Slot. Klingelereignisse während eines Gesprächs werden weiter protokolliert und ignoriert; mehr als ein Gespräch gleichzeitig ist ausgeschlossen.
+- Ingress-Status ergänzt die letzte Anrufrichtung. DTMF, Kameraauswahl, PIN und Türöffner bleiben ausdrücklich späteren Versionen vorbehalten.
+- Konfigurationsadapter, Fixtures, deutsche/englische Übersetzungen und Dokumentation auf den neuen Schalter erweitert. Fehlt er bei einem Update, gilt sicher `false`; die bestehende Gruppierungsmigration und alle gespeicherten Werte bleiben erhalten.
+- Neue Unit-/Integrationstests decken Codecwahl, Opt-in, Registrar-Vertrauensgrenze, Annahme/ACK/BYE, `CANCEL`, Besetztfall und Runtime-Abbildung ab. App-, Gateway-, SIP-/RTSP-User-Agent- und CI-Buildversion sind 0.7.0.
+
 ## 0.6.0
 
 - SIP→Baichuan-Talkback erhält einen füllstands- und trendabhängigen elastischen Block-Playout: maximal 2 % Zeitdehnung bei knapper Versorgung und maximal 3 % Zeitstauchung zum Abbau eines Rückstands oder einer vorübergehend erhaltenen Reserve.

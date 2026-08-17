@@ -25,6 +25,7 @@
   },
   "call": {
     "visitor_entity": "binary_sensor.reolink_video_doorbell_visitor",
+    "incoming_calls_enabled": false,
     "debounce_seconds": 3,
     "ring_timeout_seconds": 30,
     "max_call_duration_seconds": 300

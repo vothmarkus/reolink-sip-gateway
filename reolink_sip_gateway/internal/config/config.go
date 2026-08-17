@@ -45,6 +45,7 @@ type Config struct {
 	SIPLocalPort                   int    `json:"sip_local_port"`
 	SIPDisplayName                 string `json:"sip_display_name"`
 	SIPCodecPreference             string `json:"sip_codec_preference"`
+	IncomingCallsEnabled           bool   `json:"incoming_calls_enabled"`
 	RingTimeoutSeconds             int    `json:"ring_timeout_seconds"`
 	MaxCallDurationSeconds         int    `json:"max_call_duration_seconds"`
 	DebounceSeconds                int    `json:"debounce_seconds"`
@@ -82,6 +83,7 @@ func Defaults() Config {
 		SIPLocalPort:                   5070,
 		SIPDisplayName:                 "Haustür",
 		SIPCodecPreference:             "pcma",
+		IncomingCallsEnabled:           false,
 		RingTimeoutSeconds:             30,
 		MaxCallDurationSeconds:         300,
 		DebounceSeconds:                3,

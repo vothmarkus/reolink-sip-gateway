@@ -23,6 +23,9 @@ func TestDefaultsAreUserFriendlyV050(t *testing.T) {
 	if cfg.HAPollInterval() != time.Second || cfg.FFmpegPath() != "/usr/bin/ffmpeg" || BaichuanReceiveStream != "sub" {
 		t.Fatalf("unexpected fixed runtime defaults")
 	}
+	if cfg.IncomingCallsEnabled {
+		t.Fatal("incoming calls must remain opt-in for upgrades and fresh installs")
+	}
 }
 
 func TestDryRunDoesNotRequireCredentials(t *testing.T) {
