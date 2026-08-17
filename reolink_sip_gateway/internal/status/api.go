@@ -15,9 +15,9 @@ import (
 const APIVersion = 1
 
 var (
-	ErrCallBusy         = errors.New("another call is active")
-	ErrSIPUnavailable   = errors.New("SIP is unavailable")
-	ErrNoActiveCall     = errors.New("no call is active")
+	ErrCallBusy           = errors.New("another call is active")
+	ErrSIPUnavailable     = errors.New("SIP is unavailable")
+	ErrNoActiveCall       = errors.New("no call is active")
 	ErrCommandUnavailable = errors.New("gateway commands are not ready")
 )
 
@@ -42,11 +42,11 @@ type ServerOptions struct {
 }
 
 type APIInfo struct {
-	APIVersion    int      `json:"api_version"`
+	APIVersion     int      `json:"api_version"`
 	GatewayVersion string   `json:"gateway_version"`
-	InstanceID    string   `json:"instance_id"`
-	Name          string   `json:"name"`
-	Capabilities  []string `json:"capabilities"`
+	InstanceID     string   `json:"instance_id"`
+	Name           string   `json:"name"`
+	Capabilities   []string `json:"capabilities"`
 }
 
 type APIStatus struct {
@@ -88,18 +88,18 @@ type APICallStatus struct {
 }
 
 type APIMediaStatus struct {
-	ConfiguredReolinkMode  string     `json:"configured_reolink_mode"`
-	ActiveReolinkMode      string     `json:"active_reolink_mode,omitempty"`
-	Profile                string     `json:"profile,omitempty"`
-	ReceiveMode            string     `json:"receive_mode,omitempty"`
-	ReceiveDetails         string     `json:"receive_details,omitempty"`
-	TalkbackMode           string     `json:"talkback_mode,omitempty"`
-	TalkbackDetails        string     `json:"talkback_details,omitempty"`
-	EchoCancellation       string     `json:"echo_cancellation,omitempty"`
-	CalibratedDelayMS      int        `json:"calibrated_delay_ms"`
-	CurrentDelayMS         int        `json:"current_delay_ms"`
-	CalibrationStatus      string     `json:"calibration_status,omitempty"`
-	LastCalibration        *time.Time `json:"last_calibration,omitempty"`
+	ConfiguredReolinkMode string     `json:"configured_reolink_mode"`
+	ActiveReolinkMode     string     `json:"active_reolink_mode,omitempty"`
+	Profile               string     `json:"profile,omitempty"`
+	ReceiveMode           string     `json:"receive_mode,omitempty"`
+	ReceiveDetails        string     `json:"receive_details,omitempty"`
+	TalkbackMode          string     `json:"talkback_mode,omitempty"`
+	TalkbackDetails       string     `json:"talkback_details,omitempty"`
+	EchoCancellation      string     `json:"echo_cancellation,omitempty"`
+	CalibratedDelayMS     int        `json:"calibrated_delay_ms"`
+	CurrentDelayMS        int        `json:"current_delay_ms"`
+	CalibrationStatus     string     `json:"calibration_status,omitempty"`
+	LastCalibration       *time.Time `json:"last_calibration,omitempty"`
 }
 
 type APIControls struct {

@@ -172,7 +172,7 @@ func (s *Store) Serve(ctx context.Context, options ServerOptions) error {
 		// SSE responses remain open. All non-streaming handlers return small,
 		// bounded responses and ReadHeaderTimeout still protects acceptance.
 		WriteTimeout: 0,
-		IdleTimeout:       30 * time.Second,
+		IdleTimeout:  30 * time.Second,
 	}
 	stopped := make(chan struct{})
 	go func() {
