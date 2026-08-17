@@ -1,8 +1,8 @@
-# Prüfprotokoll 0.5.14
+# Prüfprotokoll 1.0.0
 
 ## Ziel
 
-0.5.0 automatisiert die in 0.4.3 hardwarebestätigte native WebRTC-AEC und reduziert die Benutzerkonfiguration. Zu prüfen sind daher vor allem Migration, Startkalibrierung, vollständige Profilwahl und die korrigierte Statistikdiagnose.
+1.0.0 ergänzt ausgehandeltes RFC-4733-DTMF und flüchtige Integrationsereignisse. Zu prüfen sind SDP-Aushandlung, Event-Deduplizierung, die klare Trennung von DTMF und Status sowie unveränderte Audio-, AEC- und Call-Control-Pfade.
 
 ## Softwareprüfungen vor Release
 
@@ -17,9 +17,71 @@
 - YAML-/JSON-Prüfung von App-Konfiguration und Übersetzungen
 - identische fünf Gruppen und Feldmengen in `options`, `schema`, DE, EN und Testkonfiguration
 - Bash-Syntaxprüfung des s6-Startskripts
-- Versionsprüfung 0.5.14 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
+- Versionsprüfung 1.0.0 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
 - Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
 - expliziter Test der nativen Statistikbits 0…7
+
+## Ergänzungen 1.0.0
+
+- Ausgehendes SDP bietet `telephone-event/8000` auf PT 101 an; nur eine passende Antwort aktiviert DTMF. Eingehendes SDP spiegelt einen gültigen dynamischen 8-kHz-Payloadtyp.
+- Terminale RFC-4733-Pakete für `0`–`9`, `*`, `#`, `A`–`D` ergeben genau ein Ereignis; Startpakete, Wiederholungen, reservierte Bits, Null-Dauer, unbekannte Codes und falsche Clockrate werden nicht veröffentlicht.
+- Beide Talkback-Pfade trennen DTMF vor G.711 ab. Nur Pakete vom ausgehandelten RTP-Port sind zulässig; DTMF darf weder symmetrisches RTP retargeten noch den Audio-Watchdog zurücksetzen.
+- SSE `dtmf` besitzt keine ID und ändert keine Statusrevision. Nutzdaten enthalten Dauer, Richtung, normalisierte Gegenstelle, SIP-Call-ID, Zeit und Instanz-ID. Eingehend wird der Anrufer, ausgehend das konfigurierte Ziel gemeldet; Ziffern dürfen nicht im Gatewaylog erscheinen.
+- OpenAPI und `info.capabilities` enthalten `DTMFEvent` beziehungsweise `dtmf_events`. Es gibt weiterhin keine neue App-Option.
+
+## Ergänzungen 0.9.0
+
+- Identitätstest erzeugt UUID und 256-Bit-Token einmalig, prüft stabile Wiederverwendung und Dateirechte `0600`; manipulierte ungültige Werte müssen fail-closed zum Fehler führen.
+- Alle `/api/v1`-Routen verlangen einen gültigen Bearer-Header. Fehlender/falscher Token ergibt `401`, öffentliche Quelladressen ergeben auch mit Token `403`; interne Fehlertexte dürfen keine Details oder Secrets spiegeln.
+- `info` liefert exakt API-Version 1, Gateway-Version, UUID und die Fähigkeiten `call_status`, `caller_number`, `events`, `hangup`, `test_call`.
+- `status` bildet aktuelle und letzte Call-Daten getrennt ab. Ein aktiver eingehender Call setzt Richtung, aktuelle/letzte Nummer, Codec und Auflegen-Verfügbarkeit; Testanruf ist währenddessen nicht verfügbar.
+- Store-Revision und `updated_at` ändern sich nur bei einer realen Feldänderung. SSE liefert sofort den vollständigen aktuellen Snapshot und danach jeweils den neuesten vollständigen Snapshot; langsame Abonnenten blockieren den Gatewaypfad nicht.
+- Testanruf ergibt `202`, `409` bei belegtem Call-Slot und `503` vor Runtimebereitschaft beziehungsweise ohne SIP-Registrierung. Auflegen ergibt `202`, im Leerlauf idempotent `204`.
+- Controller-Test belegt: nur ein Runner gleichzeitig, Cancel erreicht den Call-Kontext, `ending` wird vor Cancel veröffentlicht und der Slot wird erst nach vollständigem Runner-Ende freigegeben.
+- Besuchertrigger, eingehender Anruf und API-Testanruf laufen durch denselben Controller. Ein API-Auflegen während des ausgehenden INVITE muss `CANCEL` beziehungsweise nach Dialogaufbau `BYE` auslösen; bei eingehender Vorbereitung folgt eine kontrollierte Ablehnung, bei aktivem Dialog `BYE`.
+- OpenAPI-Datei gegen einen 3.1-Parser validieren und Antwort-Fixtures der Companion-Integration gegen dieselben Schemas testen.
+- Keine neue Option: `options`, `schema`, DE, EN und Runtime-Fixtures bleiben gegenüber 0.8 unverändert. Alle 0.8-Whitelist-/Hinweiston-/Watchdog-, 0.7-UAS-, 0.6-Elastic- und AEC-Regressionen bleiben grün.
+
+## Ergänzungen 0.8.0
+
+- Exakte UI-Reihenfolge in `options`, `schema`, DE, EN und Fixture: Besucher-Sensor, eingehende Anrufe, erlaubte Anrufer, Hinweiston, Entprellung, Klingeldauer, RTP-Verbindungswächter, maximale Gesprächsdauer.
+- Fresh-Install-/Upgrade-Normalisierung ergibt `incoming_allowed_callers: ["*"]`, `incoming_connection_tone_enabled: true` und `rtp_inactivity_timeout_seconds: 15`; explizite Werte erreichen den flachen Runtime-Snapshot unverändert.
+- Aktivierte eingehende Anrufe mit leerer Liste sowie `*` zusammen mit weiteren Einträgen werden als Konfigurationsfehler abgewiesen.
+- Caller-ID-Normalisierung deckt SIP-/TEL-URI, Displayname, Prozentkodierung, Leerzeichen, Bindestriche, Punkte, Schrägstriche und Klammern ab. Es gibt weder Rufnummernsuffix-Matching noch automatische Landesvorwahlumrechnung.
+- Ein gültiges Registrar-`INVITE` außerhalb der Whitelist erhält `403 Forbidden` und erreicht weder Anwendungs-Call-Queue noch SDP-/Medienaufbau.
+- Der 256-ms-Hinweis ist samplegenau der Anfang des unveränderten 1,024-s-Kalibrierungsmarkers. Beide getesteten Raten 8/16 kHz enden mit einer ausgeblendeten Nullkante.
+- Der Hinweiston läuft nur bei eingehenden Calls, nur bei aktivierter Option und über den bereits ausgehandelten Reolink-Talkback vor `media.Session.Ready()`/`200 OK`. Der AEC-Renderabgriff liegt weiterhin am tatsächlichen RTSP-/ADPCM-Write.
+- RTP-Watchdog startet mit dem Medienempfang, wird ausschließlich durch gültige Pakete des ausgehandelten Payloadtyps zurückgesetzt und liefert bei Ablauf den erkennbaren Fehler `ErrRTPInactivity`.
+- Watchdog-Ablauf beendet `media.Session`; die Anrufsteuerung versucht anschließend ein lokales SIP-`BYE`. Maximaldauer, entfernter `BYE` und normaler Kontextabbruch bleiben unverändert.
+- Alle v0.7-SIP-UAS-, AEC-, Kamera-Smoother- und v0.6-Elastic-Regressionsprüfungen bleiben grün. 0.8 enthält keine Home-Assistant-Entitäten und kein DTMF.
+
+## Ergänzungen 0.7.0
+
+- `incoming_calls_enabled` steht in `options`, `schema`, DE, EN und Testkonfiguration direkt nach `visitor_entity`; Entprellung, Klingeldauer und maximale Gesprächsdauer folgen in dieser Reihenfolge.
+- Fresh-Install- und Upgrade-Normalisierung ergeben `incoming_calls_enabled: false`; ein explizites `true` erreicht den flachen Runtime-Snapshot unverändert.
+- Bei deaktivierter Option wird ein `INVITE` mit `403 Forbidden` abgewiesen. Absender-IP und UDP-Port müssen exakt dem aufgelösten konfigurierten Registrar entsprechen.
+- Ein gültiges SDP-Angebot mit PCMA und PCMU berücksichtigt die konfigurierte Präferenz; ein Angebot ohne unterstütztes G.711-Audio erhält `488 Not Acceptable Here`.
+- Ein angenommener Dialog liefert zunächst `100 Trying`, danach ein getaggtes `200 OK` mit dynamischem lokalem RTP-Port und genau dem ausgewählten Codec.
+- `ACK` stoppt die kontrollierte Wiederholung des `200 OK`; `BYE` erhält `200 OK` und beendet den Call. Ein ausbleibendes `ACK` beendet den Medienweg kontrolliert.
+- `CANCEL` vor der Annahme erhält `200 OK`; das ursprüngliche `INVITE` endet mit `487 Request Terminated` und kann danach nicht mehr angenommen werden.
+- Ein zweites `INVITE` während eines reservierten oder aktiven Dialogs erhält `486 Busy Here`. Ausgehender Wählvorgang und eingehender Dialog reservieren denselben SIP-Call-Slot race-frei.
+- Die Anwendung wartet vor `200 OK` auf `media.Session.Ready()`. Fehler beim Reolink-Aufbau führen zu `480 Temporarily Unavailable`, nicht zu einem angenommenen stummen Gespräch.
+- Eingehende und ausgehende Calls verwenden dieselbe `media.Session`; AEC, Startup-Kalibrierung, Kamera-PLL und elastischer v0.6-Talkback bleiben ohne Parallelimplementierung erhalten.
+- DTMF, Mehrkameraauswahl, PIN und Türöffner sind nicht Teil des 0.7.0-Produktionspfads.
+
+## Ergänzungen 0.6.0
+
+- Exakt fälliger FIFO-Block bleibt samplegenau und verbraucht weder mehr noch weniger Samples.
+- Kleine Unterdeckung wird ohne Stille auf volle Blocklänge gedehnt; das Verhältnis bleibt bei mindestens 0,98.
+- Größere Unterdeckung nutzt höchstens 2 % Dehnung, weist die verbleibende Stille separat aus und endet über eine 5-ms-Half-Hann-Kante exakt bei null.
+- Vollständiger Leerlauf nach Nutzsignal erzeugt ausschließlich einen kausalen, höchstens 5 ms langen abklingenden Rand und anschließend null.
+- Wiederkehrendes Signal wird über 5 ms eingeblendet; der Playout wartet dafür nicht auf künftige Samples.
+- Hochwasser wird mit höchstens 3 % Stauchung abgebaut. Ein negativer Zulauftrend löst eine begrenzte vorbeugende Dehnung aus; die dabei erhaltene Reserve wird nach normalisiertem Zulauf wieder abgebaut.
+- Drop-oldest-Überlauf plant genau einen kausalen 5-ms-Grenz-Splice ein, ohne Blocklänge, Verbrauchszeitpunkt oder Schreibkadenz zu verändern.
+- Rohfehlmenge (`fifo_raw_shortage_samples`) und nach Korrektur verbleibende Stille (`fifo_underrun_samples`) werden getrennt gezählt; FIFO-Tiefe, Verhältnisse, Korrekturen und Übergänge sind im Abschlusslog sichtbar.
+- Reolink-FIFO bleibt auf vier Blöcke begrenzt. Es gibt keine neue Konfigurationsoption und keinen zusätzlichen Vorpuffer oder Lookahead.
+- ADPCM wird weiterhin vor dem AEC-Referenzabgriff erzeugt; `ObserveBaichuanPlayout` bleibt unmittelbar nach dem tatsächlichen Write. Kamera-PLL, Startkalibrierung, fester Coarse-Delay, AEC3 und deaktivierter Live-Tracker bleiben unverändert.
+
 ## Ergänzungen 0.5.14
 
 - Exakte UI-Reihenfolge ist in `options`, `schema`, DE, EN und `options.valid.json` identisch: SIP-Ports am Blockende, Entprellung direkt nach Visitor, Passivmodus vor Log-Level.
@@ -99,9 +161,9 @@ Zusätzlich zu den 0.5.0-Regressionsprüfungen:
 - `icon.png` als 128×128-PNG und `logo.png` als PNG prüfen.
 - eingebettetes Ingress-Logo per Go-Test auf PNG-Signatur prüfen.
 - sicherstellen, dass `internal/media`, `native/aec-helper/main.cc`, `internal/calibration`, `internal/startup` und `Dockerfile` gegenüber 0.5.0 bytegleich bleiben.
-- Historischer 0.5.1-Patchtest; für 0.5.14 gilt die aktuelle gruppierte 24-Feld-Konfiguration aus `config.yaml`.
+- Historischer 0.5.1-Patchtest; für 0.6.0 gilt weiterhin die gruppierte 24-Feld-Konfiguration aus `config.yaml`.
 
-## Erster Hardwaretest 0.5.x
+## Erster Hardwaretest 0.6.0
 
 Empfohlen:
 
@@ -131,6 +193,8 @@ Für einen ersten Call 60–120 s sprechen und im Debug-Log prüfen:
 - `missing_render_frames` wächst nach der initialen Long-Delay-Füllphase nicht weiter.
 - Kamera-Smoother: keine Hard-Drops/Underruns/Timeline-Rebases im Normalfall.
 - SIP→Baichuan: keine Sequence Gaps/Reorder/Late-Duplicates.
+- SIP→Baichuan: `elastic_ratio_min` nicht kleiner als 0,98 und `elastic_ratio_max` nicht größer als 1,03; `fifo_underrun_samples` darf nur die nach der Korrektur tatsächlich verbleibende Stille zählen.
+- Bei einem bekannten kurzen Zulaufloch soll `fifo_raw_shortage_samples` steigen, während `fifo_underrun_samples` kleiner bleibt oder null ist. Fades/Splices dürfen nur an den zugehörigen Unter-/Überlaufgrenzen zählen.
 - `native_stats_mask` und einzelne `native_*`-Felder sind jetzt konsistent.
 - `recent_erle_db` bleibt über den Gesprächsverlauf stabil und korrespondiert mit dem Höreindruck.
 

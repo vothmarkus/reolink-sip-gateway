@@ -1,26 +1,29 @@
-# Reolink SIP Gateway 0.5.14 – Dokumentation
+# Reolink SIP Gateway 1.0.0 – Dokumentation
 
 ## Zweck
 
-**0.5.14** übernimmt den Visitor-Hotfix aus 0.5.13 unverändert und verbessert ausschließlich Reihenfolge und sichtbare Beschriftungen der Home-Assistant-Konfiguration. Die fünf internen Konfigurationsgruppen bleiben unverändert; der letzte Block heißt sichtbar **Betrieb & Diagnose**. Schlüssel, Defaults, Schematypen, Gruppenpfade, Migration und Runtime-Vertrag bleiben unverändert.
+**1.0.0** ergänzt die lokale, authentifizierte Schnittstelle um ausgehandeltes RFC-4733-DTMF. Ein abgeschlossener Tastendruck wird als flüchtiges Ereignis an die separate Home-Assistant-Integration übergeben; Status, Testanruf und Auflegen bleiben unverändert.
 
-Das Branding verwendet jetzt PNG-Transparenz für den Außenbereich von `icon.png`, `logo.png` und dem eingebetteten Ingress-Logo. Der Go-Modulpfad entspricht dem öffentlichen Repository `github.com/vothmarkus/reolink-sip-gateway`.
+Die fünf internen Konfigurationsgruppen und der flache Runtime-Vertrag bleiben bestehen. 1.0 fügt keine neue Benutzeroption hinzu; es gibt weiterhin nur eine konfigurierte Kamera und höchstens ein aktives Gespräch. Die App bleibt ohne Companion-Integration vollständig funktionsfähig und erzeugt selbst keine HA-Entities oder Automationen.
 
-Audio-/AEC-/Baichuan-/Kalibrierungslogik wird in 0.5.14 nicht funktional verändert.
+Das bestehende Branding verwendet PNG-Transparenz für den Außenbereich von `icon.png`, `logo.png` und dem eingebetteten Ingress-Logo. Der Go-Modulpfad entspricht dem öffentlichen Repository `github.com/vothmarkus/reolink-sip-gateway`.
 
-Die Home-Assistant-App überwacht einen Reolink-Besucher-Binärsensor. Bei Klingeln wird ein SIP-Ziel angerufen und nach Annahme bidirektionales Audio zwischen SIP und Reolink Doorbell hergestellt.
+Der in 0.6.0 eingeführte elastische SIP→Baichuan-Talkback-Playout bleibt ebenso unverändert wie Kamera→SIP-Smoother/PLL, Startup-Kalibrierung, fester AEC-Coarse-Delay, AEC3, der deaktivierte Go-Live-Tracker und der native Helper.
+
+Die Home-Assistant-App überwacht einen Reolink-Besucher-Binärsensor. Bei Klingeln wird ein SIP-Ziel angerufen. Bei aktivierter Eingangsoption kann zusätzlich die registrierte SIP-Nebenstelle angerufen werden. Beide Richtungen verwenden danach denselben bidirektionalen Audio- und AEC-Pfad zwischen SIP und Reolink Doorbell.
 
 ## Startablauf
 
-Bei einem normalen Start führt 0.5.0 die folgenden Schritte aus:
+Bei einem normalen Start führt das Gateway die folgenden Schritte aus:
 
 1. Konfiguration lesen und validieren.
-2. Status-/Ingress-Seite starten.
-3. Bei `reolink_mode: auto` ein vollständiges Reolink-Medienprofil erkennen.
-4. Bei aktivierter AEC die akustische Reolink-Latenz automatisch messen.
-5. Erfolgreiche Kalibrierung persistent speichern bzw. bei Messfehler einen passenden Cache oder 1450 ms verwenden.
-6. SIP registrieren.
-7. Home-Assistant-Klingelereignisse primär per WebSocket überwachen; REST bleibt interner Fallback.
+2. Persistente API-Instanz-ID und API-Token laden beziehungsweise beim ersten Start sicher erzeugen.
+3. Status-/Ingress-Seite, Healthcheck und Integrations-API starten; Steuerbefehle bleiben bis zum fertigen Runtimeaufbau gesperrt.
+4. Bei `reolink_mode: auto` ein vollständiges Reolink-Medienprofil erkennen.
+5. Bei aktivierter AEC die akustische Reolink-Latenz automatisch messen.
+6. Erfolgreiche Kalibrierung persistent speichern bzw. bei Messfehler einen passenden Cache oder 1450 ms verwenden.
+7. SIP registrieren und bei aktivierter Option eingehende Anrufe mit der konfigurierten Anruferregel bereitstellen.
+8. Home-Assistant-Klingelereignisse primär per WebSocket überwachen; REST bleibt interner Fallback.
 
 `dry_run: true` verhindert SIP-Anrufe und den hörbaren Kalibrierungsmarker. Bei explizitem `standalone` oder `nvr` kann die Statusseite trotzdem den vorgesehenen Medienweg anzeigen.
 
@@ -41,6 +44,19 @@ Die App erkennt beim Start genau ein Profil. Zuerst wird geprüft, ob der konfig
 - Telefon → Doorbell: SIP G.711 → PCM → Reolink IMA-ADPCM → Baichuan Live Talk.
 
 Der Baichuan-Empfang verwendet fest das `sub`-Profil. Die bisherigen unabhängigen Optionen `connection_mode`, `receive_mode` und `baichuan_receive_stream` existieren nicht mehr.
+
+## Elastischer SIP→Baichuan-Talkback-Puffer
+
+Der Talkback-FIFO bleibt auf vier ausgehandelte Reolink-Blöcke begrenzt und verwirft bei Überlauf weiterhin die ältesten Samples. 0.6.0 ändert ausschließlich, wie der jeweils fällige Block aus den aktuell vorhandenen Samples erzeugt wird:
+
+- Bei knapper beziehungsweise fallender Versorgung werden höchstens 2 % weniger Samples verbraucht und auf die volle Blocklänge gedehnt.
+- Bei wachsendem Rückstand oder einer nach Dehnung verbliebenen Reserve werden höchstens 3 % mehr Samples verbraucht und auf die Blocklänge gestaucht.
+- Eine darüber hinausgehende Unterdeckung bleibt echte Stille. Der letzte gültige Signalrand und die spätere Rückkehr erhalten je eine kausale 5-ms-Half-Hann-Blende.
+- Nach einem unvermeidbaren Drop-oldest-Überlauf verbindet ein kausaler 5-ms-Splice die letzte Ausgabe mit dem neuen FIFO-Anfang.
+
+Der Regler arbeitet ohne Lookahead. Er wartet nicht auf das nächste RTP-Paket, führt keinen zusätzlichen Startpuffer ein, vergrößert den FIFO nicht und verändert weder Blockgröße noch Baichuan-Schreibtakt. Eine kleine durch Dehnung gerettete Reserve wird bei normalisiertem Zulauf per sanfter Stauchung wieder abgebaut und kann daher keine dauerhafte Zusatzlatenz erzeugen.
+
+Die AEC-Referenz bleibt playout-synchron: Erst nach der elastischen Verarbeitung wird der Block als IMA-ADPCM kodiert und geschrieben; aus genau diesem kodierten Block wird zum tatsächlichen Schreibzeitpunkt die Renderreferenz rekonstruiert. Der AEC sieht somit dasselbe Signal wie der Reolink-Lautsprecherpfad.
 
 ## Automatische akustische Kalibrierung
 
@@ -129,6 +145,49 @@ Der SIP-Signalisierungsport bleibt über `sip_local_port` konfigurierbar. Für j
 
 PCMA, PCMU und `auto` bleiben als Codecpräferenz verfügbar.
 
+### DTMF-Aushandlung und Erkennung
+
+Ausgehende SDP-Angebote enthalten zusätzlich Payloadtyp 101 als
+`telephone-event/8000`. Eine SDP-Antwort muss genau diesen Payloadtyp bestätigen;
+andernfalls bleibt DTMF für das Gespräch deaktiviert. Bei eingehenden Anrufen
+übernimmt die Antwort einen angebotenen dynamischen Payloadtyp zwischen 96 und
+127, sofern dessen Clockrate 8 kHz beträgt.
+
+Beide Talkback-Wege trennen ausgehandelte Telephone-Event-Pakete vor der
+G.711-Audiodekodierung ab. Ein Ereignis entsteht erst beim Endbit und genau
+einmal pro Kombination aus SSRC, RTP-Zeitstempel und Eventcode. Unterstützt
+werden `0`–`9`, `*`, `#` und `A`–`D`; hörbare In-Band-Töne werden nicht
+analysiert. DTMF-Pakete setzen den Audio-Inaktivitätswächter bewusst nicht
+zurück.
+
+## Eingehende SIP-Anrufe
+
+`incoming_calls_enabled: true` aktiviert automatische Anrufe an die registrierte Gateway-Nebenstelle. Bei einer FRITZ!Box wird die interne Nummer des als IP-Telefon eingerichteten Gateway-Kontos gewählt, beispielsweise `**620`; maßgeblich ist die tatsächlich unter **Telefonie → Telefoniegeräte** angezeigte Nummer.
+
+Der Aufbau erfolgt kontrolliert:
+
+1. Das Gateway akzeptiert `INVITE` ausschließlich von IP-Adresse und UDP-Port des konfigurierten SIP-Registrars.
+2. Der SIP-User aus dem `From`-Header wird normalisiert und gegen `incoming_allowed_callers` geprüft. Ein nicht erlaubter Anrufer erhält `403 Forbidden`, bevor SDP, Call-Slot oder Kameraressourcen belegt werden.
+3. Das SDP-Angebot muss eine nutzbare IPv4-RTP-Adresse sowie PCMA oder PCMU enthalten. Die konfigurierte Codecpräferenz entscheidet, wenn beide angeboten werden.
+4. Das Gateway sendet `100 Trying`, reserviert einen dynamischen RTP-Port und startet den festen Reolink-Talkback.
+5. Bei `incoming_connection_tone_enabled: true` werden über diesen realen Talkback die ersten vier Symbole des Kalibrierungsmarkers abgespielt. Der Hinweis dauert 256 ms und wird nicht ausgewertet oder als neue Kalibrierung gespeichert.
+6. Anschließend wird der Kameraempfang vorbereitet. Erst wenn beide Medienrichtungen bereit sind, folgt die automatische Annahme mit `200 OK` und dem ausgewählten G.711-Codec.
+7. Kann der Medienweg nicht vorbereitet werden, erhält der Anrufer `480 Temporarily Unavailable`. Ein zweiter Anruf während eines laufenden oder gerade aufgebauten Gesprächs erhält `486 Busy Here`.
+
+`ACK`, `CANCEL` und `BYE` werden dialogbezogen verarbeitet. Ein erfolgreiches `200 OK` wird über UDP bis zum `ACK` kontrolliert wiederholt; bleibt das `ACK` aus, wird der Medienweg beendet. Ein `CANCEL` vor der Annahme beantwortet das Gateway mit `200 OK` und beendet das ursprüngliche `INVITE` mit `487 Request Terminated`.
+
+Die Vertrauensprüfung auf den Registrar verhindert direkte Anrufe von anderen LAN-Teilnehmern, unterscheidet aber nicht zwischen internen und von der Telefonanlage weitergeleiteten externen Gesprächen. Sollen ausschließlich interne FRITZ!Box-Anrufe angenommen werden, darf dem Gateway-IP-Telefon keine externe eingehende Rufnummer zugewiesen sein.
+
+### Anruferliste
+
+`incoming_allowed_callers` ist eine Liste. Der Eintrag `*` behält das 0.7-Verhalten „alle vom Registrar vermittelten Anrufer“ bei und darf nicht mit weiteren Einträgen kombiniert werden. Ohne `*` wird exakt gegen den SIP-User verglichen. Bei Rufnummern werden Leerzeichen, Bindestriche, Punkte, Schrägstriche und Klammern entfernt; `+49123…` und `0123…` bleiben bewusst verschiedene Identitäten. Interne Sterncodes wie `**620` sowie benannte SIP-User werden unterstützt. Eine leere Liste ist bei aktivierter Anrufannahme ungültig.
+
+### RTP-Verbindungswächter
+
+`rtp_inactivity_timeout_seconds` gilt für ein- und ausgehende Gespräche. Nach Medienstart beginnt ein Timer, der ausschließlich durch syntaktisch gültige RTP-Pakete mit dem ausgehandelten PCMA-/PCMU-Payloadtyp zurückgesetzt wird. Bleiben solche Pakete aus, beendet das Gateway die Medien und sendet nach Möglichkeit selbst ein `BYE`. Der Standard beträgt 15 Sekunden; zulässig sind 5 bis 120 Sekunden. Stille Audionutzlast zählt als RTP-Aktivität, weshalb normale Gesprächspausen den Wächter nicht auslösen.
+
+Die Begleit-Integration stellt Status/Anrufer sowie Testanruf/Auflegen bereit und löst für DTMF ausschließlich `reolink_sip_gateway_dtmf` aus. Ziffernfolgen, PINs, Mehrkameraauswahl und Türöffner sind keine Gateway-Funktion und werden bei Bedarf als Home-Assistant-Automation umgesetzt.
+
 ## FFmpeg
 
 FFmpeg ist Bestandteil des Containerimages und wird fest über `/usr/bin/ffmpeg` verwendet. Eine Benutzeroption `ffmpeg_path` ist nicht erforderlich.
@@ -137,6 +196,13 @@ FFmpeg ist Bestandteil des Containerimages und wird fest über `/usr/bin/ffmpeg`
 
 - `info`: Start, Moduserkennung, Kalibrierungsergebnis, SIP-Registrierung, Call-Auf-/Abbau und relevante Warnungen/Fehler.
 - `debug`: zusätzlich SIP-Pakete, RTSP/Baichuan-Diagnose, RTP/Jitter, Puffer/Smoother, AEC-Tracker, eigene ERLE und native WebRTC-Statistik.
+
+Das Debug-Abschlusslog `Baichuan live audio bridge stopped` enthält für den elastischen Talkback unter anderem:
+
+- `fifo_raw_shortage_samples` vor und `fifo_underrun_samples` nach der elastischen Korrektur,
+- `fifo_playout_min_ms`, `fifo_playout_avg_ms` und `fifo_playout_max_ms`,
+- Stretch-/Compress-Blöcke und -Samples sowie minimales, aktuelles und maximales Verhältnis,
+- `elastic_supply_trend_samples`, Fade-in/-out-Zähler und `elastic_overflow_splices`.
 
 Die bisherigen Schalter `debug_sip`, `debug_rtsp`, `debug_baichuan` sind entfernt.
 
@@ -154,11 +220,35 @@ Die bisherigen Schalter `debug_sip`, `debug_rtsp`, `debug_baichuan` sind entfern
 
 ## Ingress-Status
 
-Die Statusseite zeigt den konfigurierten und aktiven Modus, Medienprofil, Kalibrierungsstatus, kalibrierten Startwert, aktuellen Trackerwert, Suchfenster/-grenzen, WebRTC-Filter, SIP-/HA-Status und aktive Call-Medien. Zeitangaben werden kompakt formatiert; noch nicht vorhandene Zeitpunkte erscheinen als Gedankenstrich.
+Die Statusseite zeigt den konfigurierten und aktiven Modus, Medienprofil, Kalibrierungsstatus, kalibrierten Startwert, aktuellen Trackerwert, Suchfenster/-grenzen, WebRTC-Filter, SIP-/HA-Status, aktuelle/letzte Anrufrichtung, aktuelle/letzte anrufende Nummer und aktive Call-Medien. Zeitangaben werden kompakt formatiert; noch nicht vorhandene Zeitpunkte erscheinen als Gedankenstrich. Ein eigener administrativer Abschnitt zeigt den internen Add-on-Hostnamen und das Token für die Einrichtung der Companion-Integration. Die Integration erzeugt daraus selbst `http://<Hostname>:18099/api/v1`.
+
+## Home-Assistant-Integrations-API v1
+
+Die API läuft zusammen mit Statusseite und Healthcheck auf Port `18099`. Der vollständige OpenAPI-3.1-Vertrag liegt unter `docs/api-v1.openapi.yaml`. Die API-Versionsnummer ist unabhängig von der App-Version; 1.0.0 erweitert API-Version 1 additiv.
+
+- `GET /api/v1/info`: API-/Gateway-Version, stabile Installations-UUID und Fähigkeiten.
+- `GET /api/v1/status`: vollständiger Gateway-, SIP-, Call-, Medien- und Befehlsstatus.
+- `GET /api/v1/events`: Server-Sent Events vom Typ `status` und `dtmf`; das erste Ereignis ist immer der aktuelle vollständige Snapshot. Ein `dtmf`-Ereignis enthält Ziffer, Dauer, Anrufrichtung, exakt normalisierte Gegenstelle (`remote_number`), SIP-Dialog-ID (`call_id`), Empfangszeit und Installations-ID. Die Gegenstelle ist bei eingehenden Anrufen der Anrufer und bei ausgehenden Anrufen das konfigurierte SIP-Ziel. Das Ereignis besitzt keine SSE-ID, ändert keine Statusrevision und wird nicht wiederholt. 15-Sekunden-Kommentare dienen als Keepalive.
+- `POST /api/v1/calls/test`: normaler ausgehender Anruf zum vorhandenen `sip_destination`; `202` bei Annahme, `409` bei belegtem Call-Slot und `503` bei nicht registriertem SIP beziehungsweise noch nicht bereiter Runtime.
+- `POST /api/v1/calls/hangup`: beendet Wähl-, Vorbereitungs- oder Gesprächsphase beider Richtungen; im Leerlauf bestätigt `204` die idempotente Wirkung.
+
+Beim ersten normalen Start entstehen `/data/integration-api-instance-id` und `/data/integration-api-token`. Beide Dateien werden mit Rechten `0600` angelegt und über App-Updates sowie Backups erhalten. Das Token besteht aus 256 Zufallsbits und wird nicht protokolliert. Jeder `/api/v1`-Aufruf benötigt `Authorization: Bearer <token>`; zusätzlich sind nur Loopback-, private und Link-Local-Quelladressen zugelassen. Healthcheck und bestehende Ingress-Routen behalten ihre bisherigen Zugriffseigenschaften.
+
+Der Status unterscheidet aktuelle und letzte Werte: `call.direction` und `call.caller_number` werden nach dem Gespräch geleert, während `call.last_direction` und `call.last_caller_number` erhalten bleiben. Die letzte anrufende Nummer wird nur durch einen zugelassenen eingehenden Anruf aktualisiert. Diagnosen und Fehlerantworten enthalten niemals Token oder Zugangsdaten.
 
 ## Update von älteren Versionen
 
-0.5.14 übernimmt den in 0.5.10 abgeschlossenen Migrationszustand und den Visitor-Hotfix aus 0.5.13 unverändert. Bereits gespeicherte `sip_registrar`-, `reolink_username`- und manuelle `visitor_entity`-Werte bleiben bestehen; Defaults gelten nur, wenn die jeweilige Option noch nicht vorhanden ist.
+1.0.0 ergänzt ausschließlich die additive DTMF-Aushandlung und den flüchtigen
+Ereignistyp. Es gibt keine neue Option oder Konfigurationsmigration. Die bereits
+unter 0.9.0 erzeugte API-Identität und das Token bleiben unverändert erhalten.
+
+0.9.0 ergänzt ausschließlich automatisch verwaltete Dateien unter `/data` und die API auf dem bereits verwendeten Statusport. Es gibt keine neue Option und keine Migration bestehender Einstellungen. Die Identität wird einmal erzeugt und bleibt danach stabil; eine ungültig veränderte Identitätsdatei führt aus Sicherheitsgründen zu einem klaren Startfehler statt zu stiller Tokenrotation.
+
+0.8.0 ergänzt `call.incoming_allowed_callers`, `call.incoming_connection_tone_enabled` und `call.rtp_inactivity_timeout_seconds`. Für bestehende 0.7-Installationen wird `incoming_allowed_callers: ["*"]` verwendet, sodass die bereits bewusst aktivierte Anrufannahme beim Update funktional erhalten bleibt. Der Hinweiston ist standardmäßig aktiv, der RTP-Wächter verwendet 15 Sekunden. Vorhandene Werte und der abgeschlossene Gruppierungsmigrationsmarker bleiben unangetastet.
+
+0.7.0 ergänzte `call.incoming_calls_enabled`. Fehlt der Schalter in einer älteren Konfiguration, gilt weiterhin der sichere Standard `false`; ein Update aktiviert daher niemals unbeabsichtigt die automatische Annahme.
+
+0.6.0 übernimmt den in 0.5.10 abgeschlossenen Migrationszustand, den Visitor-Hotfix aus 0.5.13 und die Darstellung aus 0.5.14 unverändert. Bereits gespeicherte `sip_registrar`-, `reolink_username`- und manuelle `visitor_entity`-Werte bleiben bestehen; Defaults gelten nur, wenn die jeweilige Option noch nicht vorhanden ist. Es gibt keine neue oder geänderte Option für den elastischen Talkback-Puffer.
 
 0.5.10 übernimmt bei einem direkten Upgrade von älteren 0.5.x-Ständen bestehende flache Optionen sowie frühere Kanal-Aliase einmalig in die fünf gruppierten UI-Blöcke. Solange der persistente Migrationsmarker noch fehlt, gewinnen die alten flachen Werte bewusst gegen eventuell bereits vom Supervisor materialisierte Gruppen-Defaults. Nach erfolgreicher Migration bzw. sobald bereits eine reine gruppierte Konfiguration erkannt wurde, wird der Marker gesetzt. Ab dann sind ausschließlich die gruppierten Werte maßgeblich und normale Starts führen keinen Supervisor-Options-Write mehr aus. `nvr_channel_number` bleibt in der UI 1-basiert; der private Runtime-Snapshot wird vor Programmstart wieder im bewährten flachen Format erzeugt. Das nicht mehr wirksame `echo_cancellation_search_window_ms` bleibt aus den gespeicherten Home-Assistant-Optionen entfernt.
 

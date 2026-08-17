@@ -7,18 +7,21 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vothmarkus/reolink-sip-gateway/internal/config"
+	"github.com/vothmarkus/reolink-sip-gateway/internal/rtp"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/sip"
 )
 
 type fakeTalkback struct{ mode string }
 
-func (f *fakeTalkback) Run(context.Context, *net.UDPConn, *sip.Call, *audioControls) error {
+func (f *fakeTalkback) Run(context.Context, *net.UDPConn, *sip.Call, *audioControls, func(rtp.Packet) bool) error {
 	return nil
 }
-func (f *fakeTalkback) Close(context.Context) error { return nil }
-func (f *fakeTalkback) Info() TalkbackInfo          { return TalkbackInfo{Mode: f.mode} }
+func (f *fakeTalkback) PlayPCM(context.Context, []int16, *audioControls) error { return nil }
+func (f *fakeTalkback) Close(context.Context) error                            { return nil }
+func (f *fakeTalkback) Info() TalkbackInfo                                     { return TalkbackInfo{Mode: f.mode} }
 
 func TestConfiguredTalkbackUsesStartupResolvedProfile(t *testing.T) {
 	errRTSP := errors.New("no ONVIF backchannel")
@@ -109,5 +112,32 @@ func TestValidateBaichuanTalkProfile(t *testing.T) {
 				t.Fatalf("validate error=%v, wantErr=%v", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestPlayPCMBlocksPadsAndWaitsForFinalPlayout(t *testing.T) {
+	input := []int16{1, 2, 3, 4, 5}
+	var blocks [][]int16
+	started := time.Now()
+	err := playPCMBlocks(context.Background(), input, 4, 15*time.Millisecond, nil, nil, func(block []int16) error {
+		blocks = append(blocks, append([]int16(nil), block...))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("blocks=%d want=2", len(blocks))
+	}
+	if got := blocks[0]; len(got) != 4 || got[0] != 1 || got[1] != 2 || got[2] != 3 || got[3] != 4 {
+		t.Fatalf("first block=%v", got)
+	}
+	if got := blocks[1]; len(got) != 4 || got[0] != 5 || got[1] != 0 || got[2] != 0 || got[3] != 0 {
+		t.Fatalf("padded block=%v", got)
+	}
+	// Two 15 ms blocks must be allowed to play before the incoming call is
+	// reported ready and answered. Leave a small margin for timer granularity.
+	if elapsed := time.Since(started); elapsed < 25*time.Millisecond {
+		t.Fatalf("playout returned too early after %s", elapsed)
 	}
 }

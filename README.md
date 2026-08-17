@@ -1,22 +1,32 @@
 # Reolink SIP Gateway for Home Assistant
 
-Community Home Assistant app that turns a Reolink Video Doorbell event into a SIP call and bridges bidirectional audio between the SIP endpoint and the doorbell.
+Community Home Assistant app that bridges bidirectional audio between a Reolink Video Doorbell and SIP. A Home Assistant visitor event can place a call, and the registered gateway extension can optionally be called directly.
 
 > **Community project:** This repository is not affiliated with, endorsed by, or supported by Reolink or the Home Assistant project.
 
 ## Current release
 
-**v0.5.14** is a presentation-only update on top of the v0.5.13 visitor hotfix. It improves the Home Assistant configuration order and advanced-field labels while keeping all option keys, defaults, migration behavior and runtime paths unchanged. The hardware-proven audio/AEC path remains untouched.
+**v1.0.0** adds negotiated RFC 4733 DTMF to the stable local integration API. Each completed keypress is published as one transient event with its normalized remote party and SIP call ID for Home Assistant automations; the gateway does not interpret digit sequences, PINs or actions. The machine-readable contract is [`docs/api-v1.openapi.yaml`](docs/api-v1.openapi.yaml).
+
+Visitor events, incoming INVITEs and API test calls now enter one shared call controller, preserving the single-call invariant. The integration API does not implement a second media path: incoming and outgoing calls still share the same G.711/RTP, AEC and Reolink implementation introduced and hardware-tested in earlier releases.
 
 Highlights:
 
-- SIP registration and outbound calls using G.711 A-law/µ-law.
+- Versioned `/api/v1` with bearer authentication, a stable installation UUID, complete status snapshots and Server-Sent Events.
+- Negotiated `telephone-event/8000` reception for `0`–`9`, `*`, `#` and `A`–`D`, deduplicated to one event per completed keypress.
+- Integration commands for a configured test call and idempotent hang-up, both routed through the normal call lifecycle.
+- Current/last call direction and normalized current/last incoming caller number in the integration status model.
+- SIP registration plus outbound and opt-in automatically answered incoming calls using G.711 A-law/µ-law.
+- Exact normalized incoming-caller whitelist, with an explicit `*` compatibility setting.
+- Short pre-answer acoustic connection indication using the established coded marker generator.
+- Configurable SIP RTP inactivity watchdog for deterministic cleanup of broken calls.
 - Home Assistant Reolink visitor binary sensor as call trigger, with entity-registry auto-discovery or manual override.
 - Reolink standalone and NVR media profiles.
 - Bidirectional audio via RTSP/ONVIF or Reolink Baichuan, depending on profile.
 - Native WebRTC AudioProcessing echo cancellation.
 - Automatic acoustic startup-delay calibration.
 - Fixed calibrated coarse AEC delay during calls; no competing live Go delay-control loop.
+- Zero-lookahead elastic SIP-to-Baichuan talkback playout with bounded ± correction and soft residual discontinuities.
 - Five grouped Home Assistant configuration sections: Reolink, SIP, Audio, Call, Operation & diagnostics.
 - Transparent PNG icon/logo without the former white outer canvas.
 - `sip_registrar: auto` resolves the Home Assistant host's IPv4 default gateway at startup; a manual IP/DNS registrar remains supported.
@@ -71,8 +81,13 @@ audio:
 
 call:
   visitor_entity: auto
+  incoming_calls_enabled: false
+  incoming_allowed_callers:
+    - "*"
+  incoming_connection_tone_enabled: true
   debounce_seconds: 3
   ring_timeout_seconds: 30
+  rtp_inactivity_timeout_seconds: 15
   max_call_duration_seconds: 300
 
 diagnostics:
@@ -86,7 +101,19 @@ With `sip_registrar: auto`, the startup adapter reads the Home Assistant host's 
 
 With `visitor_entity: auto`, the adapter queries Home Assistant's compact `config/entity_registry/list_for_display` view and selects the single enabled `binary_sensor` from platform `reolink` with translation key `visitor`. Renamed entity IDs are therefore supported. If none or more than one are enabled, startup asks for an explicit manual entity instead of guessing. Existing manual visitor entities are retained during updates. WebSocket frames and complete messages remain bounded to 16 MiB.
 
+Set **Allow incoming SIP calls** (`incoming_calls_enabled`) in the **Call** section to call the camera through the gateway. With a FRITZ!Box, dial the internal number assigned to the gateway's IP telephone, for example `**620`; use the actual number shown by the FRITZ!Box. The option defaults to `false` so upgrades never begin auto-answering unexpectedly. Signalling is accepted only from the configured registrar IP and UDP port, and the normalized SIP caller user must match `incoming_allowed_callers`. The compatibility value `*` permits every caller; replace it with the telephone numbers or internal extensions that should be accepted. Country-code variants are intentionally not inferred.
+
+Before an accepted incoming call is answered, `incoming_connection_tone_enabled` plays the first four symbols (256 ms) of the existing acoustic marker through the actual Reolink talkback path. `rtp_inactivity_timeout_seconds` then ends either call direction when no valid negotiated RTP audio packet is received for the configured interval. If only internal calls should reach the camera, do not assign external incoming numbers to this IP telephone in the FRITZ!Box, because forwarded external calls also originate from the trusted registrar.
+
+The separate Home Assistant integration consumes API v1 to provide status/caller sensors, test-call/hang-up buttons and the transient `reolink_sip_gateway_dtmf` event. Its `remote_number` is the normalized incoming caller or configured outgoing destination, while `call_id` scopes keypresses to one SIP dialog. All DTMF meaning and actions remain in Home Assistant automations.
+
 The **Passive mode / Passivmodus** toggle in **Operation & diagnostics / Betrieb & Diagnose** keeps the internal key `dry_run` for backwards compatibility. It monitors visitor events but suppresses SIP registration, outbound calls and the audible startup calibration marker.
+
+## Companion integration API
+
+Open the app's Ingress page after startup to copy the internal app hostname and generated API token. The integration builds `http://<app-hostname>:18099/api/v1` itself, verifies API version 1 and uses the stable installation UUID for its device and entity unique IDs. The token is generated once, stored with mode `0600` under `/data`, retained across app updates/backups and never written to the log.
+
+The API is intentionally local: requests require `Authorization: Bearer <token>` and must originate from loopback, a private network or a link-local address. `/api/v1/events` pushes complete snapshots on real state changes and transient `dtmf` events for completed RFC 4733 keypresses. DTMF events have no SSE ID, do not alter status revisions and are not replayed; clients should still reconcile reconstructable state with `/api/v1/status` after reconnecting. The existing ingress-only `/api/status` remains available for the status page but is not the integration contract.
 
 ## Echo cancellation
 

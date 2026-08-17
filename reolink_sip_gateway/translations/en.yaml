@@ -67,17 +67,29 @@ configuration:
         description: Enables WebRTC noise suppression using the fixed, proven moderate profile.
   call:
     name: Call
-    description: Doorbell trigger and time limits for outgoing calls.
+    description: Doorbell trigger, incoming SIP calls and call time limits.
     fields:
       visitor_entity:
         name: Reolink visitor sensor
         description: “auto” automatically uses the enabled visitor/doorbell sensor from the Reolink integration. If multiple Reolink doorbells are present, enter the desired binary_sensor entity manually.
+      incoming_calls_enabled:
+        name: Allow incoming SIP calls
+        description: Automatically answers calls to the registered SIP extension and connects them to the configured Reolink camera. Only calls from the configured SIP registrar and caller list are accepted.
+      incoming_allowed_callers:
+        name: Allowed callers
+        description: List of permitted telephone numbers or internal SIP usernames. Spaces, hyphens, periods, slashes and parentheses in telephone numbers are ignored when matching. “*” allows every caller and must be the only entry; country codes are not converted automatically.
+      incoming_connection_tone_enabled:
+        name: Acoustic connection indication
+        description: Plays a short 256 ms excerpt of the proven acoustic calibration marker at the doorbell before answering a phone-to-camera call.
       debounce_seconds:
         name: Doorbell debounce
         description: Additional visitor events within this interval are ignored.
       ring_timeout_seconds:
         name: Ring timeout
         description: Time before an unanswered call is cancelled.
+      rtp_inactivity_timeout_seconds:
+        name: RTP connection watchdog
+        description: Ends a call when no valid RTP audio packet has been received from the peer for this interval. Normal conversation pauses do not trigger it while RTP transmission continues.
       max_call_duration_seconds:
         name: Maximum call duration
         description: Safety limit for one call.

@@ -2,6 +2,7 @@ package media
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync"
 	"testing"
@@ -87,6 +88,320 @@ func TestPhoneAudioBufferBoundsLatencyOnOverflow(t *testing.T) {
 	}
 }
 
+func TestElasticTalkbackStretchesSmallShortageWithoutSilence(t *testing.T) {
+	const blockSamples = 1024
+	fifo := newSampleFIFO(blockSamples * 4)
+	fifo.Push(constantPCM(1010, 12000))
+	playout := newElasticTalkbackPlayout(16000)
+
+	result := playout.Pop(fifo, blockSamples)
+	if len(result.block) != blockSamples {
+		t.Fatalf("block=%d want %d", len(result.block), blockSamples)
+	}
+	if result.consumed != 1010 || result.validOutput != blockSamples || result.missing != 0 {
+		t.Fatalf("unexpected elastic result: %+v", result)
+	}
+	if result.stretched != 14 || result.compressed != 0 {
+		t.Fatalf("stretch/compression=%d/%d want 14/0", result.stretched, result.compressed)
+	}
+	if result.ratioPPM < elasticRatioScale-elasticMaxStretchPPM || result.ratioPPM > elasticRatioScale {
+		t.Fatalf("ratio=%d outside allowed stretch range", result.ratioPPM)
+	}
+	if fifo.Len() != 0 {
+		t.Fatalf("fifo retained %d samples; elastic playout introduced hidden buffering", fifo.Len())
+	}
+	for i, sample := range result.block {
+		if sample != 12000 {
+			t.Fatalf("constant signal changed at sample %d: %d", i, sample)
+		}
+	}
+}
+
+func TestElasticTalkbackExactBlockPassesThrough(t *testing.T) {
+	const blockSamples = 160
+	input := make([]int16, blockSamples)
+	for i := range input {
+		input[i] = int16(i*257 - 20000)
+	}
+	fifo := newSampleFIFO(blockSamples * 4)
+	fifo.Push(input)
+	playout := newElasticTalkbackPlayout(8000)
+
+	result := playout.Pop(fifo, blockSamples)
+	if result.consumed != blockSamples || result.missing != 0 || result.stretched != 0 || result.compressed != 0 || result.ratioPPM != elasticRatioScale {
+		t.Fatalf("exact block was unnecessarily corrected: %+v", result)
+	}
+	for i := range input {
+		if result.block[i] != input[i] {
+			t.Fatalf("sample %d=%d want %d", i, result.block[i], input[i])
+		}
+	}
+}
+
+func TestElasticTalkbackCapsStretchAndFadesHardUnderrun(t *testing.T) {
+	const blockSamples = 1024
+	fifo := newSampleFIFO(blockSamples * 4)
+	fifo.Push(constantPCM(766, 12000))
+	playout := newElasticTalkbackPlayout(16000)
+
+	result := playout.Pop(fifo, blockSamples)
+	wantValid := 766 * elasticRatioScale / (elasticRatioScale - elasticMaxStretchPPM)
+	if result.validOutput != wantValid || result.missing != blockSamples-wantValid {
+		t.Fatalf("valid/missing=%d/%d want %d/%d", result.validOutput, result.missing, wantValid, blockSamples-wantValid)
+	}
+	if result.ratioPPM < elasticRatioScale-elasticMaxStretchPPM {
+		t.Fatalf("hard underrun escaped 2%% stretch bound: ratio=%d", result.ratioPPM)
+	}
+	if !result.fadeOut {
+		t.Fatal("hard underrun did not receive a fade-out")
+	}
+	if got := result.block[result.validOutput-1]; got != 0 {
+		t.Fatalf("last valid sample=%d want 0 at silence boundary", got)
+	}
+	if got := result.block[result.validOutput]; got != 0 {
+		t.Fatalf("first missing sample=%d want silence", got)
+	}
+
+	fifo.Push(constantPCM(blockSamples, -12000))
+	recovery := playout.Pop(fifo, blockSamples)
+	if !recovery.fadeIn || recovery.missing != 0 {
+		t.Fatalf("recovery did not fade in cleanly: %+v", recovery)
+	}
+	if recovery.block[0] != 0 {
+		t.Fatalf("recovery starts at %d want 0", recovery.block[0])
+	}
+	fadeSamples := len(playout.fadeInQ15)
+	if got := recovery.block[fadeSamples-1]; got != -12000 {
+		t.Fatalf("recovery did not reach full signal at sample %d: %d", fadeSamples-1, got)
+	}
+}
+
+func TestElasticTalkbackShortHardUnderrunStillReachesSilence(t *testing.T) {
+	// The valid signal is shorter than the nominal 5 ms / 80-sample window.
+	// The window must be contracted to the available edge instead of leaving a
+	// discontinuity where the padded silence begins.
+	const blockSamples = 40
+	fifo := newSampleFIFO(blockSamples * 4)
+	fifo.Push(constantPCM(10, 12000))
+	playout := newElasticTalkbackPlayout(16000)
+
+	result := playout.Pop(fifo, blockSamples)
+	if !result.fadeOut || result.validOutput >= len(playout.fadeInQ15) {
+		t.Fatalf("short edge did not exercise contracted window: %+v", result)
+	}
+	if result.block[0] != 12000 {
+		t.Fatalf("short edge did not preserve its causal start: %d", result.block[0])
+	}
+	if result.block[result.validOutput-1] != 0 || result.block[result.validOutput] != 0 {
+		t.Fatalf("short fade did not meet silence continuously: %v", result.block)
+	}
+}
+
+func TestElasticTalkbackFullUnderrunUsesCausalDecayingTail(t *testing.T) {
+	const blockSamples = 1024
+	fifo := newSampleFIFO(blockSamples * 4)
+	fifo.Push(constantPCM(blockSamples, 5000))
+	playout := newElasticTalkbackPlayout(16000)
+	first := playout.Pop(fifo, blockSamples)
+	if first.missing != 0 || first.block[len(first.block)-1] != 5000 {
+		t.Fatalf("unexpected priming block: %+v", first)
+	}
+
+	underflow := playout.Pop(fifo, blockSamples)
+	if !underflow.fadeOut || underflow.missing != blockSamples {
+		t.Fatalf("full underflow did not use bounded tail: %+v", underflow)
+	}
+	if underflow.block[0] != 5000 {
+		t.Fatalf("tail boundary jumped from 5000 to %d", underflow.block[0])
+	}
+	fadeSamples := len(playout.fadeInQ15)
+	if underflow.block[fadeSamples-1] != 0 {
+		t.Fatalf("tail did not end at zero: %d", underflow.block[fadeSamples-1])
+	}
+	for i, sample := range underflow.block[fadeSamples:] {
+		if sample != 0 {
+			t.Fatalf("post-tail sample %d=%d want silence", i+fadeSamples, sample)
+		}
+	}
+}
+
+func TestElasticTalkbackCompressesHighQueueWithinLimit(t *testing.T) {
+	const blockSamples = 1024
+	fifo := newSampleFIFO(blockSamples * 4)
+	fifo.Push(constantPCM(blockSamples*4, 9000))
+	playout := newElasticTalkbackPlayout(16000)
+
+	result := playout.Pop(fifo, blockSamples)
+	wantConsumed := maximumElasticInput(blockSamples)
+	if result.consumed != wantConsumed || result.validOutput != blockSamples {
+		t.Fatalf("consumed/output=%d/%d want %d/%d", result.consumed, result.validOutput, wantConsumed, blockSamples)
+	}
+	if result.compressed != wantConsumed-blockSamples || result.stretched != 0 {
+		t.Fatalf("compression/stretch=%d/%d", result.compressed, result.stretched)
+	}
+	if result.ratioPPM > elasticRatioScale+elasticMaxCompressionPPM {
+		t.Fatalf("ratio=%d escaped 3%% compression bound", result.ratioPPM)
+	}
+	if result.depthAfter != blockSamples*4-wantConsumed {
+		t.Fatalf("post depth=%d want %d", result.depthAfter, blockSamples*4-wantConsumed)
+	}
+}
+
+func TestElasticTalkbackUsesSupplyTrendAndRepaysTemporaryReserve(t *testing.T) {
+	const blockSamples = 1024
+	fifo := newSampleFIFO(blockSamples * 4)
+	playout := newElasticTalkbackPlayout(16000)
+	fifo.Push(constantPCM(blockSamples+200, 7000))
+	first := playout.Pop(fifo, blockSamples)
+	if first.missing != 0 {
+		t.Fatalf("priming block underrun: %+v", first)
+	}
+
+	// The next interval supplies 150 samples less than nominal, but the FIFO is
+	// still just above one complete block. The trend-aware controller must react
+	// before a hard underrun and leave a small temporary reserve.
+	fifo.Push(constantPCM(blockSamples-150, 7000))
+	guarded := playout.Pop(fifo, blockSamples)
+	if guarded.depthBefore < blockSamples || guarded.consumed != minimumElasticInput(blockSamples) {
+		t.Fatalf("negative supply trend was not guarded: %+v", guarded)
+	}
+	if guarded.missing != 0 || guarded.stretched == 0 || guarded.depthAfter == 0 {
+		t.Fatalf("trend guard did not preserve a bounded reserve: %+v", guarded)
+	}
+	reserve := guarded.depthAfter
+
+	// Once nominal supply resumes, gentle compression must pay the reserve back
+	// instead of turning the elastic correction into persistent added latency.
+	for i := 0; i < 200; i++ {
+		fifo.Push(constantPCM(blockSamples, 7000))
+		result := playout.Pop(fifo, blockSamples)
+		if result.ratioPPM < elasticRatioScale-elasticMaxStretchPPM || result.ratioPPM > elasticRatioScale+elasticMaxCompressionPPM {
+			t.Fatalf("iteration %d ratio=%d outside limits", i, result.ratioPPM)
+		}
+	}
+	if fifo.Len() >= reserve {
+		t.Fatalf("temporary reserve was not repaid: after=%d initial=%d", fifo.Len(), reserve)
+	}
+}
+
+func TestElasticTalkbackOverflowGetsZeroLookaheadSplice(t *testing.T) {
+	const blockSamples = 1024
+	fifo := newSampleFIFO(blockSamples * 4)
+	playout := newElasticTalkbackPlayout(16000)
+	fifo.Push(constantPCM(blockSamples, 10000))
+	priming := playout.Pop(fifo, blockSamples)
+	if priming.block[len(priming.block)-1] != 10000 {
+		t.Fatalf("priming tail=%d want 10000", priming.block[len(priming.block)-1])
+	}
+
+	playout.MarkOverflow()
+	fifo.Push(constantPCM(blockSamples, -10000))
+	spliced := playout.Pop(fifo, blockSamples)
+	if !spliced.overflowSplice {
+		t.Fatal("overflow did not schedule a boundary splice")
+	}
+	if spliced.block[0] != 10000 {
+		t.Fatalf("splice boundary=%d want previous output 10000", spliced.block[0])
+	}
+	fadeSamples := len(playout.fadeInQ15)
+	if spliced.block[fadeSamples-1] != -10000 {
+		t.Fatalf("splice did not reach new signal: %d", spliced.block[fadeSamples-1])
+	}
+	if spliced.consumed != blockSamples || spliced.depthAfter != 0 {
+		t.Fatalf("splice changed timing/consumption: %+v", spliced)
+	}
+}
+
+func TestElasticTalkbackConsumptionBoundsAtEveryQueueDepth(t *testing.T) {
+	for _, blockSamples := range []int{40, 160, 1024} {
+		for depth := 0; depth <= blockSamples*4; depth++ {
+			fifo := newSampleFIFO(blockSamples * 4)
+			fifo.Push(constantPCM(depth, 1000))
+			playout := newElasticTalkbackPlayout(16000)
+
+			result := playout.Pop(fifo, blockSamples)
+			if len(result.block) != blockSamples {
+				t.Fatalf("block=%d depth=%d output=%d", blockSamples, depth, len(result.block))
+			}
+			if result.consumed > depth || result.consumed > maximumElasticInput(blockSamples) {
+				t.Fatalf("block=%d depth=%d over-consumed: %+v", blockSamples, depth, result)
+			}
+			if result.validOutput+result.missing != blockSamples {
+				t.Fatalf("block=%d depth=%d invalid output accounting: %+v", blockSamples, depth, result)
+			}
+			if fifo.Len() != depth-result.consumed {
+				t.Fatalf("block=%d depth=%d fifo=%d consumed=%d", blockSamples, depth, fifo.Len(), result.consumed)
+			}
+			if depth >= minimumElasticInput(blockSamples) && result.missing != 0 {
+				t.Fatalf("block=%d depth=%d avoidable silence: %+v", blockSamples, depth, result)
+			}
+			if result.consumed > 0 && (result.ratioPPM < elasticRatioScale-elasticMaxStretchPPM || result.ratioPPM > elasticRatioScale+elasticMaxCompressionPPM) {
+				t.Fatalf("block=%d depth=%d ratio=%d outside bounds", blockSamples, depth, result.ratioPPM)
+			}
+		}
+	}
+}
+
+func TestPhoneAudioBufferReportsAvoidedAndRemainingUnderrunSeparately(t *testing.T) {
+	bridge, err := newPhoneAudioBuffer(g711.PCMU, 8000, 160)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge.PopBlock(160)
+	if st := bridge.Stats(); st.FIFOPlayoutBlocks != 0 || st.FIFORawShortage != 0 || st.FIFOUnderrunSamples != 0 {
+		t.Fatalf("pre-audio silence polluted playout diagnostics: %+v", st)
+	}
+	payload := make([]byte, 158)
+	for i := range payload {
+		payload[i] = 0x80
+	}
+	bridge.Push(sequencedPacket{packet: rtp.Packet{PayloadType: 0, Sequence: 1, Timestamp: 0, SSRC: 1, Payload: payload}, reset: true})
+	block := bridge.PopBlock(160)
+	if len(block) != 160 {
+		t.Fatalf("block=%d want 160", len(block))
+	}
+	st := bridge.Stats()
+	if st.FIFORawShortage != 2 || st.FIFOUnderrunSamples != 0 {
+		t.Fatalf("raw/remaining shortage=%d/%d want 2/0", st.FIFORawShortage, st.FIFOUnderrunSamples)
+	}
+	if st.ElasticStretchBlocks != 1 || st.ElasticStretchedSamples != 2 {
+		t.Fatalf("elastic stats unexpected: %+v", st)
+	}
+}
+
+func TestResamplePCMBlockPreservesEndpoints(t *testing.T) {
+	got := resamplePCMBlock([]int16{0, 1000}, 5)
+	want := []int16{0, 250, 500, 750, 1000}
+	if len(got) != len(want) {
+		t.Fatalf("got %d samples want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("sample %d=%d want %d; all=%v", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestHalfHannWindowHasExactMonotonicEndpoints(t *testing.T) {
+	window := makeHalfHannQ15(80)
+	if len(window) != 80 || window[0] != 0 || window[len(window)-1] != pcmGainScale {
+		t.Fatalf("unexpected half-Hann endpoints: %v ... %v", window[:2], window[len(window)-2:])
+	}
+	for i := 1; i < len(window); i++ {
+		if window[i] < window[i-1] {
+			t.Fatalf("window decreased at %d: %d < %d", i, window[i], window[i-1])
+		}
+	}
+}
+
+func constantPCM(samples int, value int16) []int16 {
+	pcm := make([]int16, samples)
+	for i := range pcm {
+		pcm[i] = value
+	}
+	return pcm
+}
+
 type mockADPCMWriter struct {
 	mu     sync.Mutex
 	blocks [][]byte
@@ -134,7 +449,7 @@ func TestBaichuanAudioBridgeMockSIPRTPToADPCM(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- runBaichuanAudioBridge(ctx, gateway, call, writer, 16000, 320, nil, nil, peerDone, nil)
+		done <- runBaichuanAudioBridge(ctx, gateway, call, writer, 16000, 320, nil, nil, nil, peerDone, nil, 0)
 	}()
 
 	payload := make([]byte, 160)
@@ -202,7 +517,7 @@ func TestReceivePhoneRTPRetargetsOnlyValidatedMedia(t *testing.T) {
 	sequencer := newRTPSequencer(defaultReorderWindow)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- receivePhoneRTP(ctx, gateway, call, bridge, sequencer) }()
+	go func() { done <- receivePhoneRTP(ctx, gateway, call, bridge, sequencer, nil, 0) }()
 
 	// Malformed traffic from the correct PBX IP but a different source port must
 	// not be allowed to retarget the symmetric RTP destination.
@@ -241,6 +556,109 @@ func TestReceivePhoneRTPRetargetsOnlyValidatedMedia(t *testing.T) {
 	}
 }
 
+func TestReceivePhoneRTPAcceptsDTMFOnlyFromNegotiatedPortWithoutRetargeting(t *testing.T) {
+	gateway, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gateway.Close()
+	phone, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer phone.Close()
+	alternate, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer alternate.Close()
+
+	call := &sip.Call{
+		Codec:          sip.Codec{Name: g711.PCMU, PayloadType: 0},
+		TelephoneEvent: &sip.TelephoneEvent{PayloadType: 101, ClockRate: 8000},
+		RemoteRTP:      phone.LocalAddr().(*net.UDPAddr),
+	}
+	bridge, err := newPhoneAudioBuffer(g711.PCMU, 8000, 160)
+	if err != nil {
+		t.Fatal(err)
+	}
+	received := make(chan rtp.Packet, 2)
+	handle := func(packet rtp.Packet) bool {
+		if packet.PayloadType != call.TelephoneEvent.PayloadType {
+			return false
+		}
+		received <- packet
+		return true
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- receivePhoneRTP(ctx, gateway, call, bridge, newRTPSequencer(defaultReorderWindow), handle, 0)
+	}()
+
+	packet := rtp.Marshal(rtp.Packet{PayloadType: 101, Sequence: 1, Timestamp: 1000, SSRC: 4, Payload: []byte{5, 0x80, 0x03, 0x20}})
+	if _, err := alternate.WriteToUDP(packet, gateway.LocalAddr().(*net.UDPAddr)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-received:
+		t.Fatal("DTMF from an unnegotiated source port was accepted")
+	case <-time.After(40 * time.Millisecond):
+	}
+	if got := call.RemoteRTPAddr().Port; got != phone.LocalAddr().(*net.UDPAddr).Port {
+		t.Fatalf("DTMF retargeted RTP port to %d", got)
+	}
+
+	if _, err := phone.WriteToUDP(packet, gateway.LocalAddr().(*net.UDPAddr)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-received:
+		if got.PayloadType != 101 {
+			t.Fatalf("unexpected telephone-event packet: %#v", got)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("DTMF from the negotiated source port was not accepted")
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil && err != context.Canceled {
+			t.Fatalf("receiver shutdown: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("receiver did not stop")
+	}
+}
+
+func TestReceivePhoneRTPWatchdogEndsAbandonedCall(t *testing.T) {
+	gateway, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gateway.Close()
+	phone, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer phone.Close()
+
+	call := &sip.Call{Codec: sip.Codec{Name: g711.PCMA, PayloadType: 8}, RemoteRTP: phone.LocalAddr().(*net.UDPAddr)}
+	bridge, err := newPhoneAudioBuffer(g711.PCMA, 8000, 160)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	err = receivePhoneRTP(context.Background(), gateway, call, bridge, newRTPSequencer(defaultReorderWindow), nil, 60*time.Millisecond)
+	if !errors.Is(err, ErrRTPInactivity) {
+		t.Fatalf("watchdog result=%v", err)
+	}
+	if elapsed := time.Since(started); elapsed < 50*time.Millisecond || elapsed > 400*time.Millisecond {
+		t.Fatalf("watchdog elapsed=%s", elapsed)
+	}
+}
+
 func TestBaichuanAudioBridgeProducesSilenceDuringVADUnderrun(t *testing.T) {
 	gateway, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
@@ -258,7 +676,7 @@ func TestBaichuanAudioBridgeProducesSilenceDuringVADUnderrun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- runBaichuanAudioBridge(ctx, gateway, call, writer, 16000, 320, nil, nil, make(chan struct{}), nil)
+		done <- runBaichuanAudioBridge(ctx, gateway, call, writer, 16000, 320, nil, nil, nil, make(chan struct{}), nil, 0)
 	}()
 
 	select {
@@ -315,7 +733,7 @@ func TestBaichuanAudioBridgeAECReferenceIsTappedAtEncodedPlayout(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- runBaichuanAudioBridge(ctx, gateway, call, writer, 16000, 320, controls, nil, make(chan struct{}), nil)
+		done <- runBaichuanAudioBridge(ctx, gateway, call, writer, 16000, 320, controls, nil, nil, make(chan struct{}), nil, 0)
 	}()
 
 	payload := make([]byte, 160)

@@ -1,5 +1,60 @@
 # Changelog
 
+## 1.0.0
+
+- SIP-SDP handelt RFC-4733-DTMF als `telephone-event/8000` aus. Ausgehende Angebote verwenden Payloadtyp 101; bei eingehenden Angeboten wird ein gültiger dynamischer Payloadtyp gespiegelt. Fehlt die Aushandlung, bleibt der bisherige G.711-Audiopfad unverändert und es werden keine DTMF-Ereignisse erzeugt.
+- Beide produktiven SIP→Reolink-Pfade erkennen terminale RFC-4733-Pakete vor der Audiodekodierung. Wiederholte Endpakete werden anhand SSRC, RTP-Zeitstempel und Eventcode dedupliziert; unterstützt werden `0`–`9`, `*`, `#` und `A`–`D`.
+- `/api/v1/events` überträgt zusätzlich flüchtige SSE-Ereignisse vom Typ `dtmf` mit Ziffer, Tastendauer, Anrufrichtung, exakt normalisierter Gegenstelle, SIP-Call-ID, Empfangszeitpunkt und Installations-ID. `remote_number` bezeichnet bei eingehenden Anrufen den Anrufer und bei ausgehenden Anrufen das konfigurierte SIP-Ziel. DTMF verändert weder Statusrevision noch Snapshot, besitzt keine SSE-ID und wird nach Verbindungsabbrüchen nicht wiederholt.
+- Die API-Fähigkeit `dtmf_events` und das zugehörige Schema wurden additiv in den OpenAPI-3.1-Vertrag aufgenommen. Die API-Version bleibt 1.
+- Ziffern werden nicht protokolliert und es gibt keine neue App-Option, PIN-Auswertung, Ziffernfolge, Kameraauswahl oder Türöffnerlogik. Die Bedeutung eines Tastendrucks liegt ausschließlich in der Companion-Integration beziehungsweise einer Home-Assistant-Automation.
+- Unit-, SIP-Integrations- und SSE-Tests decken Aushandlung, gültige/ungültige Eventcodes, Dauerumrechnung, Endpaket-Deduplizierung, Metadaten und die Trennung vom Statusmodell ab. App-, Gateway-, SIP-/RTSP-User-Agent- und CI-Buildversion sind 1.0.0.
+
+## 0.9.0
+
+- Versionierte lokale Integrations-API unter `/api/v1` ergänzt. `info` liefert stabile Instanz-ID, Gateway-/API-Version und Fähigkeiten; `status` liefert einen vollständigen strukturierten Snapshot.
+- Server-Sent-Events unter `/api/v1/events` übertragen bei jeder tatsächlichen Zustandsänderung sofort einen vollständigen Status. Revisionen sind monoton, langsame Clients erhalten stets den neuesten Snapshot und ein periodischer Keepalive hält die Verbindung erkennbar offen.
+- `POST /api/v1/calls/test` startet einen ausgehenden Anruf zum bereits konfigurierten SIP-Ziel. `POST /api/v1/calls/hangup` beendet ein- oder ausgehende Gespräche und ist im Leerlauf idempotent.
+- Besucherereignisse, eingehende SIP-Anrufe und API-Testanrufe verwenden nun einen gemeinsamen threadsicheren Call-Controller. Genau ein Gespräch bleibt erlaubt; Auflegen bricht auch Wähl- und Medienvorbereitungsphasen über denselben Call-Kontext sauber ab.
+- Statusmodell um aktuelle/letzte Anrufrichtung, aktuelle und letzte normalisierte eingehende Nummer, Verfügbarkeit der beiden Befehle sowie Änderungszeit/Revision erweitert. Die letzte eingehende Nummer bleibt nach Gesprächsende für die geplante HA-Entity erhalten.
+- Pro Installation werden eine nicht geheime UUID und ein zufälliges 256-Bit-API-Token unter `/data` angelegt und mit `0600` geschützt. Die Ingress-Seite zeigt Add-on-Hostname und Token für den Config Flow; die Integration erzeugt daraus intern die feste API-Adresse. API-Aufrufe benötigen Bearer-Authentifizierung und werden zusätzlich auf lokale/private Quellnetze begrenzt.
+- Maschinenlesbarer OpenAPI-3.1-Vertrag unter `docs/api-v1.openapi.yaml`. Die API-Version bleibt unabhängig von der App-Version, damit DTMF in 1.0 additiv ergänzt werden kann.
+- Keine neue Home-Assistant-Option und keine Änderung an Audio, AEC, Kalibrierung, Baichuan, RTSP oder RTP-Playout. App-, Gateway-, SIP-/RTSP-User-Agent- und CI-Buildversion sind 0.9.0.
+
+## 0.8.0
+
+- Neue Whitelist `call.incoming_allowed_callers` für eingehende SIP-Anrufe. Sie wird nach der Registrar-Vertrauensprüfung, aber vor SDP-Auswertung, Dialogreservierung und Kameraaufbau geprüft; nicht zugelassene Anrufer erhalten `403 Forbidden`.
+- Rufnummern werden ohne Leerzeichen, Bindestriche, Punkte, Schrägstriche und Klammern verglichen; interne Sterncodes und benannte SIP-Benutzer werden unterstützt. Landesvorwahlvarianten werden bewusst nicht geraten. `*` erhält das bisherige 0.7-Verhalten und muss allein in der Liste stehen; eine leere Liste schlägt bei aktivierter Anrufannahme sicher fehl.
+- Neuer, standardmäßig aktiver akustischer Verbindungshinweis: Vor der Annahme eines erlaubten eingehenden Anrufs spielt der echte Reolink-Talkbackpfad die ersten vier Symbole des bestehenden Kalibrierungsmarkers für 256 ms ab. Die 1,024-s-Startkalibrierung und ihre Signalfolge bleiben unverändert.
+- Neuer RTP-Verbindungswächter für beide Anrufrichtungen. Bleiben nach Medienstart gültige Pakete mit dem ausgehandelten PCMA-/PCMU-Payloadtyp aus, beendet das Gateway das Gespräch und sendet nach Möglichkeit selbst ein SIP-`BYE`; Stille innerhalb weiterlaufender RTP-Pakete gilt weiterhin als Aktivität.
+- `call.rtp_inactivity_timeout_seconds` ist von 5 bis 120 Sekunden einstellbar und steht standardmäßig auf 15 Sekunden. `call.incoming_connection_tone_enabled` erlaubt das gezielte Abschalten des Hinweistons.
+- Reihenfolge im Block **Anruf**: Besucher-Sensor, eingehende Anrufe, erlaubte Anrufer, Hinweiston, Entprellung, Klingeldauer, RTP-Verbindungswächter und maximale Gesprächsdauer. Konfigurationsadapter, Fixtures sowie deutsche und englische Übersetzungen übernehmen bestehende 0.7-Konfigurationen kompatibel.
+- Neue Unit-/Integrationstests decken Normalisierung und Ablehnung der Anrufer, die bitgleiche Markervorsilbe, den RTP-Timeout und die Runtime-Abbildung ab. Der bestehende AEC-/elastische v0.6-Medienpfad bleibt unverändert. Home-Assistant-Entitäten folgen in 0.9, DTMF in 1.0.
+- App-, Gateway-, SIP-/RTSP-User-Agent- und CI-Buildversion sind 0.8.0.
+
+## 0.7.0
+
+- Neuer, standardmäßig deaktivierter Schalter **Eingehende SIP-Anrufe zulassen** (`call.incoming_calls_enabled`). Er steht im Block **Anruf** direkt nach dem Reolink-Besucher-Sensor; danach folgen Entprellung, Klingeldauer und maximale Gesprächsdauer.
+- Die registrierte Gateway-Nebenstelle kann angerufen und automatisch mit genau der bereits konfigurierten Doorbell beziehungsweise dem festen NVR-Kanal verbunden werden. Der bisherige Visitor→ausgehender-SIP-Anruf bleibt unverändert.
+- Eingehende `INVITE` werden ausschließlich von IP-Adresse und UDP-Port des konfigurierten SIP-Registrars akzeptiert. Deaktivierte Eingangsannahme ergibt `403`, ein paralleler Wählvorgang oder Dialog `486 Busy Here` und ein nicht unterstütztes SDP-Angebot `488 Not Acceptable Here`.
+- PCMA/PCMU wird aus dem SDP-Angebot gemäß Codecpräferenz ausgewählt; RTP bleibt dynamisch. Eingehende und ausgehende Gespräche verwenden dieselbe `media.Session`, dieselben Reolink-Profile und denselben AEC-/v0.6-Pufferpfad.
+- Das Gateway sendet zunächst `100 Trying` und startet Reolink-Talkback sowie Kameraempfang vor der automatischen Annahme. `200 OK` wird erst nach `media.Session.Ready()` gesendet; ein Vorbereitungsfehler führt zu `480 Temporarily Unavailable` statt zu einem angenommenen stummen Gespräch.
+- SIP-UAS-Zustandsmaschine für `INVITE`, `ACK`, `CANCEL` und `BYE`: dialogstabile Tags, Wiederholung erfolgreicher UDP-Antworten bis zum `ACK`, ACK-Timeout, `200`/`487` bei Abbruch vor Annahme sowie sauberer lokaler und entfernter Gesprächsabbau.
+- Ausgehender Wählvorgang, wartender eingehender Anruf und aktives Gespräch reservieren denselben Call-Slot. Klingelereignisse während eines Gesprächs werden weiter protokolliert und ignoriert; mehr als ein Gespräch gleichzeitig ist ausgeschlossen.
+- Ingress-Status ergänzt die letzte Anrufrichtung. DTMF, Kameraauswahl, PIN und Türöffner bleiben ausdrücklich späteren Versionen vorbehalten.
+- Konfigurationsadapter, Fixtures, deutsche/englische Übersetzungen und Dokumentation auf den neuen Schalter erweitert. Fehlt er bei einem Update, gilt sicher `false`; die bestehende Gruppierungsmigration und alle gespeicherten Werte bleiben erhalten.
+- Neue Unit-/Integrationstests decken Codecwahl, Opt-in, Registrar-Vertrauensgrenze, Annahme/ACK/BYE, `CANCEL`, Besetztfall und Runtime-Abbildung ab. App-, Gateway-, SIP-/RTSP-User-Agent- und CI-Buildversion sind 0.7.0.
+
+## 0.6.0
+
+- SIP→Baichuan-Talkback erhält einen füllstands- und trendabhängigen elastischen Block-Playout: maximal 2 % Zeitdehnung bei knapper Versorgung und maximal 3 % Zeitstauchung zum Abbau eines Rückstands oder einer vorübergehend erhaltenen Reserve.
+- Restunterläufe werden nicht kaschiert oder verzögert: fehlende Samples bleiben Stille, der gültige Signalrand und die spätere Rückkehr werden jedoch kausal über 5 ms mit einer Half-Hann-Fensterfunktion aus- beziehungsweise eingeblendet.
+- Nach unvermeidbarem Drop-oldest-Überlauf verbindet ein kausaler 5-ms-Splice den letzten ausgegebenen Samplewert mit dem neuen FIFO-Anfang und reduziert dadurch harte Sprünge.
+- Keine neue Signalwartezeit: kein Lookahead, kein zusätzlicher Startpuffer, kein größerer FIFO, keine zusätzliche Timerperiode und keine Änderung an ausgehandelter Blockgröße oder Baichuan-Schreibkadenz. Der bestehende FIFO bleibt auf vier Reolink-Blöcke begrenzt.
+- Debug-Abschlussstatistik unterscheidet rohe Fehlmenge von verbleibender Stille und ergänzt FIFO-Füllstandsbereich/-mittel, Stretch-/Compress-Zähler und -Verhältnisse, Versorgungstrend, Blenden und Überlauf-Splices.
+- AEC-Renderreferenz bleibt nach der IMA-ADPCM-Kodierung am tatsächlichen Reolink-Write. Kamera→SIP-Playout-PLL, Startup-Kalibrierungsmarker, fester Coarse-Delay, AEC3, deaktivierter Go-Live-Tracker und native WebRTC-Verarbeitung bleiben unverändert.
+- Synthetische Regressionstests decken kleine und harte Unterläufe, vollständigen Leerlauf, Trendreaktion und Reserveabbau, Hochwasser-Kompression, Überlauf-Splice, Verhältnisgrenzen, Fensterkanten, FIFO-Statistik und bestehende ADPCM/AEC-Write-Semantik ab.
+- Home-Assistant-Optionen, Gruppierung, Defaults und Migration bleiben unverändert; App-, Gateway-, SIP-/RTSP-User-Agent- und Container-Buildversion werden auf 0.6.0 angehoben.
+
 ## 0.5.14
 
 - Konfigurationsseite logisch neu sortiert: SIP-Zugang und Rufparameter zuerst, anschließend Codec sowie die als „erweitert“ gekennzeichneten SIP-Ports; Klingelentprellung direkt nach dem Besucher-Sensor; Passivmodus vor Protokollstufe.

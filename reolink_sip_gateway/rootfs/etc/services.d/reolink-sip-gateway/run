@@ -1,7 +1,8 @@
 #!/usr/bin/with-contenv bashio
 set -euo pipefail
 
-# v0.5.14 keeps the v0.5.13 visitor hotfix and improves the grouped Home Assistant option presentation.
+# v1.0.0 retains the grouped Home Assistant configuration and extends the local,
+# authenticated integration API with transient RFC 4733 DTMF events.
 # The Go gateway still receives the same flat runtime configuration used by
 # v0.5.7-v0.5.9. Grouped UI values are flattened immediately before exec.
 #
@@ -105,9 +106,13 @@ normalize_public_options() {
           },
           call: {
             visitor_entity: current("call"; "visitor_entity"; "auto"),
+            incoming_calls_enabled: current("call"; "incoming_calls_enabled"; false),
+            incoming_allowed_callers: current("call"; "incoming_allowed_callers"; ["*"]),
+            incoming_connection_tone_enabled: current("call"; "incoming_connection_tone_enabled"; true),
+            debounce_seconds: current("call"; "debounce_seconds"; 3),
             ring_timeout_seconds: current("call"; "ring_timeout_seconds"; 30),
-            max_call_duration_seconds: current("call"; "max_call_duration_seconds"; 300),
-            debounce_seconds: current("call"; "debounce_seconds"; 3)
+            rtp_inactivity_timeout_seconds: current("call"; "rtp_inactivity_timeout_seconds"; 15),
+            max_call_duration_seconds: current("call"; "max_call_duration_seconds"; 300)
           },
           diagnostics: {
             log_level: current("diagnostics"; "log_level"; "info"),
@@ -244,7 +249,7 @@ complete_grouping_migration() {
     # state without writing anything to Supervisor.
     if [[ "${original_canonical}" == "${normalized_canonical}" ]]; then
         : > "${GROUPED_OPTIONS_MARKER}"
-        bashio::log.info "Reolink SIP Gateway v0.5.14 grouped option layout confirmed"
+        bashio::log.info "Reolink SIP Gateway v1.0.0 grouped option layout confirmed"
         return 0
     fi
 
@@ -260,7 +265,7 @@ complete_grouping_migration() {
 
     if supervisor_options_write "${normalized}"; then
         : > "${GROUPED_OPTIONS_MARKER}"
-        bashio::log.info "Reolink SIP Gateway v0.5.14 one-time option grouping migration completed"
+        bashio::log.info "Reolink SIP Gateway v1.0.0 one-time option grouping migration completed"
     else
         bashio::log.warning "Could not persist grouped options; runtime translation remains active and migration will be retried on the next start"
     fi
