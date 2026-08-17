@@ -114,7 +114,8 @@ type APIDTMFEvent struct {
 	Digit         string    `json:"digit"`
 	DurationMS    int       `json:"duration_ms"`
 	CallDirection string    `json:"call_direction"`
-	CallerNumber  string    `json:"caller_number"`
+	RemoteNumber  string    `json:"remote_number"`
+	CallID        string    `json:"call_id"`
 	ReceivedAt    time.Time `json:"received_at"`
 	InstanceID    string    `json:"instance_id"`
 }
@@ -276,7 +277,8 @@ func (s *Store) serveEvents(w http.ResponseWriter, r *http.Request, instanceID s
 		case event := <-dtmfEvents:
 			payload, err := json.Marshal(APIDTMFEvent{
 				APIVersion: APIVersion, Digit: event.Digit, DurationMS: event.DurationMS,
-				CallDirection: event.CallDirection, CallerNumber: event.CallerNumber,
+				CallDirection: event.CallDirection, RemoteNumber: event.RemoteNumber,
+				CallID:     event.CallID,
 				ReceivedAt: event.ReceivedAt, InstanceID: instanceID,
 			})
 			if err != nil {

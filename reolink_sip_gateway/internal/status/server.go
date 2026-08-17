@@ -62,7 +62,8 @@ type dtmfEvent struct {
 	DurationMS    int
 	ReceivedAt    time.Time
 	CallDirection string
-	CallerNumber  string
+	RemoteNumber  string
+	CallID        string
 }
 
 type subscriber struct {
@@ -162,7 +163,12 @@ func (s *Store) cancelSubscriber(id uint64) func() {
 // PublishDTMF fans one completed keypress out to connected SSE clients without
 // mutating the persistent status snapshot or its revision. Call metadata is
 // supplied by the owning call lifetime so teardown cannot erase it first.
-func (s *Store) PublishDTMF(digit string, durationMS int, receivedAt time.Time, callDirection, callerNumber string) {
+func (s *Store) PublishDTMF(
+	digit string,
+	durationMS int,
+	receivedAt time.Time,
+	callDirection, remoteNumber, callID string,
+) {
 	if receivedAt.IsZero() {
 		receivedAt = time.Now()
 	}
@@ -170,7 +176,7 @@ func (s *Store) PublishDTMF(digit string, durationMS int, receivedAt time.Time, 
 	defer s.mu.Unlock()
 	event := dtmfEvent{
 		Digit: digit, DurationMS: durationMS, ReceivedAt: receivedAt.UTC(),
-		CallDirection: callDirection, CallerNumber: callerNumber,
+		CallDirection: callDirection, RemoteNumber: remoteNumber, CallID: callID,
 	}
 	for _, subscriber := range s.subscribers {
 		if subscriber.dtmf == nil {

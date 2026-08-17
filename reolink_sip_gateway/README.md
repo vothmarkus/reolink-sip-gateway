@@ -10,6 +10,8 @@ Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann einen 
 
 `GET /api/v1/status` liefert weiterhin einen vollständigen Snapshot aus Gateway-, SIP-, Gesprächs- und Medienstatus. `GET /api/v1/events` überträgt Statusänderungen sowie DTMF unmittelbar als Server-Sent Events. DTMF verändert den Snapshot und dessen Revision nicht und wird nach einem Verbindungsabbruch nicht nachträglich wiederholt.
 
+Jedes DTMF-Ereignis enthält die exakt normalisierte Gegenstelle als `remote_number` und die SIP-Dialog-ID als `call_id`. Bei eingehenden Anrufen ist die Gegenstelle der Anrufer, bei ausgehenden Anrufen das konfigurierte SIP-Ziel. Damit kann Home Assistant Berechtigungen pro Rufnummer prüfen und Eingaben sicher auf ein einzelnes Gespräch begrenzen.
+
 `POST /api/v1/calls/test` startet einen normalen ausgehenden Anruf zum bereits unter SIP konfigurierten Ziel. `POST /api/v1/calls/hangup` beendet das aktuelle ein- oder ausgehende Gespräch; im Leerlauf ist der Aufruf bewusst folgenlos. Beide Befehle verwenden denselben neuen Call-Controller wie Besucherereignisse und eingehende SIP-Anrufe. Ein zweiter paralleler Gesprächspfad ist damit ausgeschlossen.
 
 Beim ersten Start erzeugt die App unter `/data` eine stabile Instanz-ID und ein zufälliges 256-Bit-API-Token. Interner Add-on-Hostname und Token werden ausschließlich auf der administrativen Ingress-Seite angezeigt; die Companion-Integration erzeugt daraus selbst die feste API-Adresse. Die API erfordert Bearer-Authentifizierung und akzeptiert nur lokale beziehungsweise private Quelladressen. Es gibt keine neue Konfigurationsoption; vorhandene 0.8-Einstellungen bleiben unverändert.

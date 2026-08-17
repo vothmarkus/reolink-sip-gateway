@@ -6,7 +6,7 @@ Community Home Assistant app that bridges bidirectional audio between a Reolink 
 
 ## Current release
 
-**v1.0.0** adds negotiated RFC 4733 DTMF to the stable local integration API. Each completed keypress is published as one transient event for Home Assistant automations; the gateway does not interpret digit sequences, PINs or actions. The machine-readable contract is [`docs/api-v1.openapi.yaml`](docs/api-v1.openapi.yaml).
+**v1.0.0** adds negotiated RFC 4733 DTMF to the stable local integration API. Each completed keypress is published as one transient event with its normalized remote party and SIP call ID for Home Assistant automations; the gateway does not interpret digit sequences, PINs or actions. The machine-readable contract is [`docs/api-v1.openapi.yaml`](docs/api-v1.openapi.yaml).
 
 Visitor events, incoming INVITEs and API test calls now enter one shared call controller, preserving the single-call invariant. The integration API does not implement a second media path: incoming and outgoing calls still share the same G.711/RTP, AEC and Reolink implementation introduced and hardware-tested in earlier releases.
 
@@ -105,7 +105,7 @@ Set **Allow incoming SIP calls** (`incoming_calls_enabled`) in the **Call** sect
 
 Before an accepted incoming call is answered, `incoming_connection_tone_enabled` plays the first four symbols (256 ms) of the existing acoustic marker through the actual Reolink talkback path. `rtp_inactivity_timeout_seconds` then ends either call direction when no valid negotiated RTP audio packet is received for the configured interval. If only internal calls should reach the camera, do not assign external incoming numbers to this IP telephone in the FRITZ!Box, because forwarded external calls also originate from the trusted registrar.
 
-The separate Home Assistant integration consumes API v1 to provide status/caller sensors, test-call/hang-up buttons and the transient `reolink_sip_gateway_dtmf` event. All DTMF meaning and actions remain in Home Assistant automations.
+The separate Home Assistant integration consumes API v1 to provide status/caller sensors, test-call/hang-up buttons and the transient `reolink_sip_gateway_dtmf` event. Its `remote_number` is the normalized incoming caller or configured outgoing destination, while `call_id` scopes keypresses to one SIP dialog. All DTMF meaning and actions remain in Home Assistant automations.
 
 The **Passive mode / Passivmodus** toggle in **Operation & diagnostics / Betrieb & Diagnose** keeps the internal key `dry_run` for backwards compatibility. It monitors visitor events but suppresses SIP registration, outbound calls and the audible startup calibration marker.
 

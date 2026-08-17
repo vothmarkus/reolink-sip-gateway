@@ -64,7 +64,7 @@ The companion integration talks only to the versioned local HTTP API. It cannot 
 
 - `/api/v1/info` is the compatibility handshake: API version, gateway version, stable instance UUID and additive capability names.
 - `/api/v1/status` maps the internal snapshot to a purpose-built v1 DTO. Internal fields may evolve without silently changing the integration contract.
-- `/api/v1/events` carries complete `status` snapshots plus transient `dtmf` events. The store assigns monotonically increasing revisions only when the comparable snapshot actually changes; DTMF has no SSE ID and never changes or replays status. Bounded subscriber queues prevent a slow client from back-pressuring real-time call work.
+- `/api/v1/events` carries complete `status` snapshots plus transient `dtmf` events. Each keypress carries an exact normalized `remote_number` (incoming caller or configured outgoing destination) and the SIP `call_id`, allowing downstream input to remain scoped to one remote party and one call. The store assigns monotonically increasing revisions only when the comparable snapshot actually changes; DTMF has no SSE ID and never changes or replays status. Bounded subscriber queues prevent a slow client from back-pressuring real-time call work.
 - `/api/v1/calls/test` and `/api/v1/calls/hangup` pass requests into a command interface that remains unavailable until startup has completed. Request contexts never become call lifetimes; accepted test calls use the process call context.
 - A 256-bit bearer token protects every v1 route. Constant-time comparison and a private/local source-address boundary protect the command surface; ingress-only legacy routes retain their stricter proxy/loopback rule.
 

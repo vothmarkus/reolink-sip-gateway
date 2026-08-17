@@ -221,7 +221,7 @@ func TestAPIV1EventsPublishesTransientDTMFWithoutChangingRevision(t *testing.T) 
 
 	revision := store.Get().Revision
 	receivedAt := time.Date(2026, 8, 17, 10, 30, 0, 0, time.UTC)
-	store.PublishDTMF("#", 120, receivedAt, "incoming", "**620")
+	store.PublishDTMF("#", 120, receivedAt, "incoming", "**620", "call-123@example.org")
 	event := readSSEEvent(t, reader)
 	if event["event"] != "dtmf" || event["id"] != "" {
 		t.Fatalf("unexpected DTMF SSE envelope: %#v", event)
@@ -231,7 +231,8 @@ func TestAPIV1EventsPublishesTransientDTMFWithoutChangingRevision(t *testing.T) 
 		t.Fatal(err)
 	}
 	if payload.APIVersion != APIVersion || payload.Digit != "#" || payload.DurationMS != 120 ||
-		payload.CallDirection != "incoming" || payload.CallerNumber != "**620" ||
+		payload.CallDirection != "incoming" || payload.RemoteNumber != "**620" ||
+		payload.CallID != "call-123@example.org" ||
 		payload.InstanceID != testInstanceID || !payload.ReceivedAt.Equal(receivedAt) {
 		t.Fatalf("unexpected DTMF payload: %#v", payload)
 	}

@@ -358,7 +358,7 @@ func handleIncomingCall(parent context.Context, cfg config.Config, incoming *sip
 	mediaSession := media.New(cfg, call, rtpConn, ffConn, logger)
 	mediaErr := make(chan error, 1)
 	go func() { mediaErr <- mediaSession.Run(callCtx) }()
-	go forwardMediaEvents(callCtx, mediaSession, store, "incoming", incoming.CallerID())
+	go forwardMediaEvents(callCtx, mediaSession, store, "incoming", incoming.CallerID(), call.CallID)
 
 	var ready media.SessionInfo
 	select {
@@ -525,7 +525,14 @@ func handleCall(parent context.Context, cfg config.Config, sipClient *sip.Client
 	mediaSession := media.New(cfg, call, rtpConn, ffConn, logger)
 	mediaErr := make(chan error, 1)
 	go func() { mediaErr <- mediaSession.Run(callCtx) }()
-	go forwardMediaEvents(callCtx, mediaSession, store, "outgoing", "")
+	go forwardMediaEvents(
+		callCtx,
+		mediaSession,
+		store,
+		"outgoing",
+		sip.CanonicalRemoteNumber(cfg.SIPDestination),
+		call.CallID,
+	)
 	go func() {
 		select {
 		case info := <-mediaSession.Ready():
@@ -585,13 +592,25 @@ func handleCall(parent context.Context, cfg config.Config, sipClient *sip.Client
 	finishCall(store, logger, started, finalErr, "call ended")
 }
 
-func forwardMediaEvents(ctx context.Context, session *media.Session, store *statuspkg.Store, callDirection, callerNumber string) {
+func forwardMediaEvents(
+	ctx context.Context,
+	session *media.Session,
+	store *statuspkg.Store,
+	callDirection, remoteNumber, callID string,
+) {
 	for {
 		select {
 		case update := <-session.AECStatus():
 			store.Update(func(s *statuspkg.Snapshot) { s.CurrentDelayMS = update.CurrentDelayMS })
 		case event := <-session.DTMFEvents():
-			store.PublishDTMF(event.Digit, event.DurationMS, event.ReceivedAt, callDirection, callerNumber)
+			store.PublishDTMF(
+				event.Digit,
+				event.DurationMS,
+				event.ReceivedAt,
+				callDirection,
+				remoteNumber,
+				callID,
+			)
 		case <-ctx.Done():
 			return
 		}

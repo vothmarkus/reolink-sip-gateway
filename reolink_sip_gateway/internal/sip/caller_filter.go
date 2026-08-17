@@ -43,6 +43,13 @@ func (a callerAllowlist) allows(value string) bool {
 	return ok
 }
 
+// CanonicalRemoteNumber returns the normalized SIP/TEL user identity used by
+// both caller authorization and transient call-scoped integration events.
+// It deliberately performs no country-code inference or suffix matching.
+func CanonicalRemoteNumber(value string) string {
+	return canonicalCallerID(value)
+}
+
 func canonicalCallerID(value string) string {
 	value = strings.TrimSpace(extractURI(value))
 	value = strings.Trim(value, "\"")

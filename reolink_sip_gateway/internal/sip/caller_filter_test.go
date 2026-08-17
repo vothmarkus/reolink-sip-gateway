@@ -17,6 +17,13 @@ func TestCanonicalCallerID(t *testing.T) {
 	}
 }
 
+func TestCanonicalRemoteNumberUsesTheAuthorizationIdentity(t *testing.T) {
+	input := `"Example" <sip:%2B49 (123) 456789@fritz.box>;tag=abc`
+	if got, want := CanonicalRemoteNumber(input), "+49123456789"; got != want {
+		t.Fatalf("CanonicalRemoteNumber(%q)=%q want %q", input, got, want)
+	}
+}
+
 func TestCallerAllowlistMatchesExactlyAfterFormattingNormalization(t *testing.T) {
 	allowed := newCallerAllowlist([]string{"0123 456789", "**620", "FrontDoor"})
 	for _, caller := range []string{

@@ -26,7 +26,7 @@
 - Ausgehendes SDP bietet `telephone-event/8000` auf PT 101 an; nur eine passende Antwort aktiviert DTMF. Eingehendes SDP spiegelt einen gültigen dynamischen 8-kHz-Payloadtyp.
 - Terminale RFC-4733-Pakete für `0`–`9`, `*`, `#`, `A`–`D` ergeben genau ein Ereignis; Startpakete, Wiederholungen, reservierte Bits, Null-Dauer, unbekannte Codes und falsche Clockrate werden nicht veröffentlicht.
 - Beide Talkback-Pfade trennen DTMF vor G.711 ab. Nur Pakete vom ausgehandelten RTP-Port sind zulässig; DTMF darf weder symmetrisches RTP retargeten noch den Audio-Watchdog zurücksetzen.
-- SSE `dtmf` besitzt keine ID und ändert keine Statusrevision. Nutzdaten enthalten Dauer, Richtung, Anrufer, Zeit und Instanz-ID; Ziffern dürfen nicht im Gatewaylog erscheinen.
+- SSE `dtmf` besitzt keine ID und ändert keine Statusrevision. Nutzdaten enthalten Dauer, Richtung, normalisierte Gegenstelle, SIP-Call-ID, Zeit und Instanz-ID. Eingehend wird der Anrufer, ausgehend das konfigurierte Ziel gemeldet; Ziffern dürfen nicht im Gatewaylog erscheinen.
 - OpenAPI und `info.capabilities` enthalten `DTMFEvent` beziehungsweise `dtmf_events`. Es gibt weiterhin keine neue App-Option.
 
 ## Ergänzungen 0.9.0

@@ -228,7 +228,7 @@ Die API läuft zusammen mit Statusseite und Healthcheck auf Port `18099`. Der vo
 
 - `GET /api/v1/info`: API-/Gateway-Version, stabile Installations-UUID und Fähigkeiten.
 - `GET /api/v1/status`: vollständiger Gateway-, SIP-, Call-, Medien- und Befehlsstatus.
-- `GET /api/v1/events`: Server-Sent Events vom Typ `status` und `dtmf`; das erste Ereignis ist immer der aktuelle vollständige Snapshot. Ein `dtmf`-Ereignis enthält Ziffer, Dauer, Anrufrichtung, eingehende Nummer, Empfangszeit und Installations-ID. Es besitzt keine SSE-ID, ändert keine Statusrevision und wird nicht wiederholt. 15-Sekunden-Kommentare dienen als Keepalive.
+- `GET /api/v1/events`: Server-Sent Events vom Typ `status` und `dtmf`; das erste Ereignis ist immer der aktuelle vollständige Snapshot. Ein `dtmf`-Ereignis enthält Ziffer, Dauer, Anrufrichtung, exakt normalisierte Gegenstelle (`remote_number`), SIP-Dialog-ID (`call_id`), Empfangszeit und Installations-ID. Die Gegenstelle ist bei eingehenden Anrufen der Anrufer und bei ausgehenden Anrufen das konfigurierte SIP-Ziel. Das Ereignis besitzt keine SSE-ID, ändert keine Statusrevision und wird nicht wiederholt. 15-Sekunden-Kommentare dienen als Keepalive.
 - `POST /api/v1/calls/test`: normaler ausgehender Anruf zum vorhandenen `sip_destination`; `202` bei Annahme, `409` bei belegtem Call-Slot und `503` bei nicht registriertem SIP beziehungsweise noch nicht bereiter Runtime.
 - `POST /api/v1/calls/hangup`: beendet Wähl-, Vorbereitungs- oder Gesprächsphase beider Richtungen; im Leerlauf bestätigt `204` die idempotente Wirkung.
 

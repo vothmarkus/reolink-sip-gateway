@@ -181,7 +181,8 @@ components:
         - digit
         - duration_ms
         - call_direction
-        - caller_number
+        - remote_number
+        - call_id
         - received_at
         - instance_id
       properties:
@@ -200,9 +201,14 @@ components:
         call_direction:
           type: string
           enum: [incoming, outgoing]
-        caller_number:
+        remote_number:
           type: string
-          description: Normalized incoming caller number; empty for outgoing calls
+          description: Exact normalized remote party; incoming caller or configured outgoing destination
+        call_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: SIP dialog Call-ID used to keep keypresses from separate calls isolated
         received_at:
           type: string
           format: date-time
