@@ -24,7 +24,7 @@ import (
 	statuspkg "github.com/vothmarkus/reolink-sip-gateway/internal/status"
 )
 
-const version = "1.1.0"
+const version = "1.1.1"
 
 func main() {
 	configPath := flag.String("config", "/data/options.json", "path to Home Assistant app options JSON")
@@ -78,6 +78,7 @@ func main() {
 	store := statuspkg.New(version)
 	store.Update(func(s *statuspkg.Snapshot) {
 		s.DryRun = cfg.DryRun
+		s.DoorCallEnabled = cfg.DoorCallEnabled
 		s.ParallelCallEnabled = cfg.ParallelCallEnabled
 		s.ConfiguredReolinkMode = cfg.ReolinkMode
 		s.EchoCancellationEnabled = cfg.EchoCancellationEnabled
@@ -157,46 +158,31 @@ func main() {
 	if cfg.DryRun {
 		logger.Info("dry-run enabled; SIP registration, calls and audible startup calibration are disabled")
 	} else {
-		doorSIPClient, err = sip.New(sip.Config{
-			Registrar:          cfg.SIPRegistrar,
-			RegistrarPort:      cfg.SIPRegistrarPort,
-			Username:           cfg.SIPUsername,
-			Password:           cfg.SIPPassword,
-			LocalPort:          cfg.SIPLocalPort,
-			DisplayName:        cfg.SIPDisplayName,
-			CodecPreference:    cfg.SIPCodecPreference,
-			AcceptIncoming:     cfg.IncomingCallsEnabled,
-			AllowedCallers:     cfg.IncomingAllowedCallers,
-			MaxConcurrentCalls: 1,
-			Debug:              cfg.DebugEnabled(),
-		}, logger.With("sip_account", "door"))
-		if err != nil {
-			logger.Error("cannot initialize door SIP account", "error", err)
-			os.Exit(1)
+		if cfg.DoorCallEnabled {
+			doorSIPClient, err = sip.New(doorSIPConfig(cfg), logger.With("sip_account", "door"))
+			if err != nil {
+				logger.Error("cannot initialize door SIP account", "error", err)
+				os.Exit(1)
+			}
+			defer doorSIPClient.Close()
 		}
-		defer doorSIPClient.Close()
 
 		if cfg.ParallelCallEnabled {
-			parallelSIPClient, err = sip.New(sip.Config{
-				Registrar:          cfg.SIPRegistrar,
-				RegistrarPort:      cfg.SIPRegistrarPort,
-				Username:           cfg.ParallelUsername,
-				Password:           cfg.ParallelPassword,
-				LocalPort:          cfg.ParallelLocalPort,
-				DisplayName:        "Reolink Mobilruf",
-				CodecPreference:    cfg.SIPCodecPreference,
-				MaxConcurrentCalls: len(cfg.ParallelDestinations),
-				Debug:              cfg.DebugEnabled(),
-			}, logger.With("sip_account", "mobile"))
+			parallelSIPClient, err = sip.New(parallelSIPConfig(cfg), logger.With("sip_account", "mobile"))
 			if err != nil {
-				doorSIPClient.Close()
+				if doorSIPClient != nil {
+					doorSIPClient.Close()
+				}
 				logger.Error("cannot initialize mobile SIP account", "error", err)
 				os.Exit(1)
 			}
 			defer parallelSIPClient.Close()
 		}
 
-		doorSIPClient.StartRegistration(ctx)
+		if doorSIPClient != nil {
+			doorSIPClient.StartRegistration(ctx)
+			logger.Info("door SIP calling configured", "destination", cfg.SIPDestination, "local_port", cfg.SIPLocalPort)
+		}
 		if parallelSIPClient != nil {
 			parallelSIPClient.StartRegistration(ctx)
 			logger.Info("mobile SIP parallel calling configured", "destination_count", len(cfg.ParallelDestinations), "local_port", cfg.ParallelLocalPort)
@@ -204,6 +190,7 @@ func main() {
 		if cfg.IncomingCallsEnabled {
 			allowAll := len(cfg.IncomingAllowedCallers) == 1 && cfg.IncomingAllowedCallers[0] == "*"
 			logger.Info("incoming SIP call policy active",
+				"account_count", configuredSIPAccountCount(cfg),
 				"allow_all_callers", allowAll,
 				"allowed_caller_count", len(cfg.IncomingAllowedCallers),
 				"connection_tone", cfg.IncomingConnectionToneEnabled,
@@ -215,13 +202,15 @@ func main() {
 			defer t.Stop()
 			for {
 				store.Update(func(s *statuspkg.Snapshot) {
-					s.SIPRegistered = doorSIPClient.Registered()
-					s.LastRegistrationErr = doorSIPClient.LastRegisterError()
+					if doorSIPClient != nil {
+						s.SIPRegistered = doorSIPClient.Registered()
+						s.LastRegistrationErr = doorSIPClient.LastRegisterError()
+					}
 					if parallelSIPClient != nil {
 						s.ParallelSIPRegistered = parallelSIPClient.Registered()
 						s.LastParallelRegistrationErr = parallelSIPClient.LastRegisterError()
 					}
-					if s.State == "starting" && doorSIPClient.Registered() && s.HAConnected {
+					if s.State == "starting" && anySIPRegistered(doorSIPClient, parallelSIPClient) && s.HAConnected {
 						s.State = "idle"
 					}
 				})
@@ -243,7 +232,7 @@ func main() {
 		OnConnection: func(ok bool) {
 			store.Update(func(s *statuspkg.Snapshot) {
 				s.HAConnected = ok
-				if ok && s.State == "starting" && (cfg.DryRun || (doorSIPClient != nil && doorSIPClient.Registered())) {
+				if ok && s.State == "starting" && (cfg.DryRun || anySIPRegistered(doorSIPClient, parallelSIPClient)) {
 					s.State = "idle"
 				}
 			})
@@ -259,7 +248,7 @@ func main() {
 	var calls callcontrol.Controller
 	commands.Configure(
 		func(context.Context) error {
-			if cfg.DryRun || doorSIPClient == nil || !doorSIPClient.Registered() {
+			if cfg.DryRun || !anySIPRegistered(doorSIPClient, parallelSIPClient) {
 				return statuspkg.ErrSIPUnavailable
 			}
 			if err := calls.Start(ctx, func(callCtx context.Context) {
@@ -270,7 +259,9 @@ func main() {
 				}
 				return err
 			}
-			logger.Info("Home Assistant integration test call accepted", "destination", cfg.SIPDestination)
+			logger.Info("Home Assistant integration test call accepted",
+				"door_enabled", cfg.DoorCallEnabled,
+				"mobile_destination_count", len(cfg.ParallelDestinations))
 			return nil
 		},
 		func(context.Context) error {
@@ -295,8 +286,8 @@ func main() {
 
 	var lastTrigger atomic.Int64
 	var incomingCalls <-chan *sip.IncomingInvite
-	if doorSIPClient != nil {
-		incomingCalls = doorSIPClient.IncomingCalls()
+	if cfg.IncomingCallsEnabled {
+		incomingCalls = mergeIncomingCalls(ctx, doorSIPClient, parallelSIPClient)
 	}
 	for {
 		select {
@@ -335,6 +326,96 @@ func main() {
 			}
 		}
 	}
+}
+
+func doorSIPConfig(cfg config.Config) sip.Config {
+	return sip.Config{
+		Registrar:          cfg.SIPRegistrar,
+		RegistrarPort:      cfg.SIPRegistrarPort,
+		Username:           cfg.SIPUsername,
+		Password:           cfg.SIPPassword,
+		LocalPort:          cfg.SIPLocalPort,
+		DisplayName:        cfg.SIPDisplayName,
+		CodecPreference:    cfg.SIPCodecPreference,
+		AcceptIncoming:     cfg.IncomingCallsEnabled,
+		AllowedCallers:     cfg.IncomingAllowedCallers,
+		MaxConcurrentCalls: 1,
+		Debug:              cfg.DebugEnabled(),
+	}
+}
+
+func parallelSIPConfig(cfg config.Config) sip.Config {
+	return sip.Config{
+		Registrar:          cfg.SIPRegistrar,
+		RegistrarPort:      cfg.SIPRegistrarPort,
+		Username:           cfg.ParallelUsername,
+		Password:           cfg.ParallelPassword,
+		LocalPort:          cfg.ParallelLocalPort,
+		DisplayName:        "Reolink Mobilruf",
+		CodecPreference:    cfg.SIPCodecPreference,
+		AcceptIncoming:     cfg.IncomingCallsEnabled,
+		AllowedCallers:     cfg.IncomingAllowedCallers,
+		MaxConcurrentCalls: len(cfg.ParallelDestinations),
+		Debug:              cfg.DebugEnabled(),
+	}
+}
+
+func configuredSIPAccountCount(cfg config.Config) int {
+	count := 0
+	if cfg.DoorCallEnabled {
+		count++
+	}
+	if cfg.ParallelCallEnabled {
+		count++
+	}
+	return count
+}
+
+func anySIPRegistered(clients ...*sip.Client) bool {
+	for _, client := range clients {
+		if client != nil && client.Registered() {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeIncomingCalls(ctx context.Context, clients ...*sip.Client) <-chan *sip.IncomingInvite {
+	sources := make([]<-chan *sip.IncomingInvite, 0, len(clients))
+	for _, client := range clients {
+		if client != nil {
+			sources = append(sources, client.IncomingCalls())
+		}
+	}
+	return mergeIncomingInviteChannels(ctx, sources...)
+}
+
+func mergeIncomingInviteChannels(ctx context.Context, sources ...<-chan *sip.IncomingInvite) <-chan *sip.IncomingInvite {
+	if len(sources) == 0 {
+		return nil
+	}
+	merged := make(chan *sip.IncomingInvite, len(sources))
+	for _, source := range sources {
+		source := source
+		go func() {
+			for {
+				select {
+				case invite, ok := <-source:
+					if !ok {
+						return
+					}
+					select {
+					case merged <- invite:
+					case <-ctx.Done():
+						return
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+	return merged
 }
 
 func handleIncomingCall(parent context.Context, cfg config.Config, incoming *sip.IncomingInvite, store *statuspkg.Store, logger *slog.Logger) {
@@ -647,10 +728,12 @@ func (c *outboundCandidate) Close() {
 
 func outboundDialLegs(cfg config.Config, doorClient, parallelClient *sip.Client, logger *slog.Logger) []callcontrol.DialLeg {
 	legs := make([]callcontrol.DialLeg, 0, 1+len(cfg.ParallelDestinations))
-	if doorClient != nil && doorClient.Registered() {
-		legs = append(legs, newOutboundDialLeg("door", cfg.SIPDestination, doorClient, logger))
-	} else if doorClient != nil {
-		logger.Warn("door SIP call leg skipped because its account is not registered")
+	if cfg.DoorCallEnabled {
+		if doorClient != nil && doorClient.Registered() {
+			legs = append(legs, newOutboundDialLeg("door", cfg.SIPDestination, doorClient, logger))
+		} else if doorClient != nil {
+			logger.Warn("door SIP call leg skipped because its account is not registered")
+		}
 	}
 	if !cfg.ParallelCallEnabled {
 		return legs

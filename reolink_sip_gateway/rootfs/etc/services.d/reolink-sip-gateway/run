@@ -1,8 +1,8 @@
 #!/usr/bin/with-contenv bashio
 set -euo pipefail
 
-# v1.1.0 retains the grouped Home Assistant configuration and adds one optional
-# mobile SIP account with up to three simultaneous outbound destinations.
+# v1.1.1 makes the door account optional and lets both enabled SIP accounts
+# accept incoming calls while preserving the v1.1 mobile fork.
 # The Go gateway still receives the same flat runtime configuration used by
 # v0.5.7-v0.5.9. Grouped UI values are flattened immediately before exec.
 #
@@ -91,13 +91,14 @@ normalize_public_options() {
           },
           sip: {
             sip_registrar: current("sip"; "sip_registrar"; "auto"),
-            sip_registrar_port: current("sip"; "sip_registrar_port"; 5060),
+            door_call_enabled: current("sip"; "door_call_enabled"; true),
             sip_username: current("sip"; "sip_username"; ""),
             sip_password: current("sip"; "sip_password"; ""),
             sip_destination: current("sip"; "sip_destination"; "**610"),
-            sip_local_port: current("sip"; "sip_local_port"; 5070),
             sip_display_name: current("sip"; "sip_display_name"; "Haustür"),
             sip_codec_preference: current("sip"; "sip_codec_preference"; "pcma"),
+            sip_registrar_port: current("sip"; "sip_registrar_port"; 5060),
+            sip_local_port: current("sip"; "sip_local_port"; 5070),
             parallel_call_enabled: current("sip"; "parallel_call_enabled"; false),
             parallel_username: current("sip"; "parallel_username"; ""),
             parallel_password: current("sip"; "parallel_password"; ""),
@@ -254,7 +255,7 @@ complete_grouping_migration() {
     # state without writing anything to Supervisor.
     if [[ "${original_canonical}" == "${normalized_canonical}" ]]; then
         : > "${GROUPED_OPTIONS_MARKER}"
-        bashio::log.info "Reolink SIP Gateway v1.1.0 grouped option layout confirmed"
+        bashio::log.info "Reolink SIP Gateway v1.1.1 grouped option layout confirmed"
         return 0
     fi
 
@@ -270,7 +271,7 @@ complete_grouping_migration() {
 
     if supervisor_options_write "${normalized}"; then
         : > "${GROUPED_OPTIONS_MARKER}"
-        bashio::log.info "Reolink SIP Gateway v1.1.0 one-time option grouping migration completed"
+        bashio::log.info "Reolink SIP Gateway v1.1.1 one-time option grouping migration completed"
     else
         bashio::log.warning "Could not persist grouped options; runtime translation remains active and migration will be retried on the next start"
     fi

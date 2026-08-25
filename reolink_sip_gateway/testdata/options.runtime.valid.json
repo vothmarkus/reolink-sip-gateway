@@ -13,6 +13,7 @@
   "webrtc_high_pass_filter_enabled": true,
   "webrtc_noise_suppression_enabled": true,
   "sip_registrar": "192.168.177.9",
+  "door_call_enabled": true,
   "sip_registrar_port": 5060,
   "sip_username": "621",
   "sip_password": "test-password",

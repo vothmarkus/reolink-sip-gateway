@@ -3,9 +3,10 @@
 ## v1.2: multiple doorbell buttons and routing matrix
 
 The v1.1 SIP fork deliberately accepts a generic list of call legs, but its
-public Home Assistant configuration still has one visitor entity and one door
-destination. v1.2 can extend only the routing layer while retaining the two SIP
-registrations, first-answer-wins controller and single Reolink media session.
+public Home Assistant configuration still has one visitor entity and at most
+one door destination. v1.2 can extend only the routing layer while retaining
+the two optional SIP identities, first-answer-wins controller and single
+Reolink media session.
 
 The planned data model separates reusable mobile targets from doorbell-button
 routes:
@@ -36,7 +37,9 @@ numbers ring for each apartment.
 
 Implementation constraints for v1.2:
 
-- retain one door SIP account and one mobile SIP account;
+- retain at most one door SIP account and one mobile SIP account; routes with a
+  FRITZ!Box door-button destination require the door account, while mobile-only
+  routes remain valid;
 - keep the v1.1 maximum of three simultaneous mobile legs per button event;
 - subscribe to all configured Home Assistant entities and preserve the entity
   ID as the route key;

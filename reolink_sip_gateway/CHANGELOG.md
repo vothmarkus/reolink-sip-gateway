@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.1
+
+- `door_call_enabled` ergänzt. Das Türsprechstellen-Konto bleibt für bestehende Installationen standardmäßig aktiv, kann aber vollständig deaktiviert werden; ein reiner Mobilbetrieb mit einem bis drei Zielen ist nun eine gültige Live-Konfiguration.
+- Bereitschaft, Klingelereignisse und API-Testanrufe benötigen nicht mehr zwingend die Türregistrierung. Mindestens eines der beiden Konten muss im Live-Betrieb aktiviert sein; gleiche lokale Ports sind zulässig, wenn nur ein Konto aktiv ist.
+- `incoming_calls_enabled` gilt jetzt für alle aktivierten SIP-Konten. Beide verwenden dieselbe Registrar-/Anruferprüfung und DTMF-Aushandlung; der erste eingehende Ruf belegt den exklusiven Call-Controller, weitere erhalten `486 Busy Here`.
+- API v1 meldet additiv Aktivierung und Registrierung des Tür-Kontos. Das bestehende Feld `sip.registered` bedeutet nun kompatibel „mindestens ein aktiviertes Konto registriert“, sodass auch Mobile-only für Testanruf und Integration bereit ist.
+- Beschriftungen erklären das erste Konto ausdrücklich als FRITZ!Box-IP-Türsprechanlage und das Türziel als Klingeltaster-Zuordnung, beispielsweise `11` für Klingeltaster 1.
+- Konfigurationsadapter, Upgrade-Defaults, Statusseite, OpenAPI-Vertrag, Tests und Versionskennungen auf 1.1.1 aktualisiert.
+
 ## 1.1.0
 
 - Optionales zweites SIP-Konto am selben Registrar ergänzt. Das bestehende Türsprechstellen-Konto bleibt funktional und für eingehende Anrufe unverändert; das Mobilruf-Konto verwendet eigene Zugangsdaten und standardmäßig den separaten lokalen UDP-Port 5071.

@@ -59,7 +59,7 @@ func TestAPIV1RequiresBearerToken(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &info); err != nil {
 		t.Fatal(err)
 	}
-	if info.APIVersion != APIVersion || info.GatewayVersion != "1.1.0" || info.InstanceID != testInstanceID {
+	if info.APIVersion != APIVersion || info.GatewayVersion != "1.1.1" || info.InstanceID != testInstanceID {
 		t.Fatalf("unexpected info: %#v", info)
 	}
 	if !strings.Contains(strings.Join(info.Capabilities, ","), "dtmf_events") {
@@ -86,6 +86,7 @@ func TestAPIV1StatusMapping(t *testing.T) {
 	started := time.Now().Add(-time.Minute).Round(time.Second)
 	store.Update(func(snapshot *Snapshot) {
 		snapshot.State = "active"
+		snapshot.DoorCallEnabled = true
 		snapshot.SIPRegistered = true
 		snapshot.ParallelCallEnabled = true
 		snapshot.ParallelSIPRegistered = true
@@ -112,8 +113,20 @@ func TestAPIV1StatusMapping(t *testing.T) {
 	if status.Controls.TestCallAvailable {
 		t.Fatal("test call must not be available during a call")
 	}
-	if !status.SIP.Registered || !status.SIP.ParallelCallEnabled || !status.SIP.ParallelRegistered {
+	if !status.SIP.Registered || !status.SIP.DoorCallEnabled || !status.SIP.DoorRegistered || !status.SIP.ParallelCallEnabled || !status.SIP.ParallelRegistered {
 		t.Fatalf("unexpected SIP account status: %#v", status.SIP)
+	}
+}
+
+func TestAPIV1MobileOnlyRegistrationIsAvailable(t *testing.T) {
+	status := newAPIStatus(Snapshot{
+		Version: "1.1.1", State: "idle", ParallelCallEnabled: true, ParallelSIPRegistered: true,
+	})
+	if !status.SIP.Registered || status.SIP.DoorCallEnabled || status.SIP.DoorRegistered || !status.SIP.ParallelRegistered {
+		t.Fatalf("unexpected mobile-only SIP status: %#v", status.SIP)
+	}
+	if !status.Controls.TestCallAvailable {
+		t.Fatalf("mobile-only test call should be available: %#v", status.Controls)
 	}
 }
 
@@ -279,7 +292,7 @@ func TestWriteCommandErrorDoesNotExposeInternalDetails(t *testing.T) {
 
 func newTestAPI(t *testing.T, commands CommandHandler) (*Store, http.Handler) {
 	t.Helper()
-	store := New("1.1.0")
+	store := New("1.1.1")
 	mux := http.NewServeMux()
 	store.registerAPIRoutes(mux, ServerOptions{Token: "test-token", InstanceID: testInstanceID, Commands: commands})
 	return store, mux
