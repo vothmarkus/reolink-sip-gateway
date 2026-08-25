@@ -32,6 +32,61 @@ func TestDefaultsAreUserFriendlyV050(t *testing.T) {
 	if !cfg.IncomingConnectionToneEnabled || cfg.RTPInactivityTimeout() != 15*time.Second {
 		t.Fatalf("unexpected incoming-call safety defaults: %#v", cfg)
 	}
+	if cfg.ParallelCallEnabled || len(cfg.ParallelDestinations) != 0 || cfg.ParallelLocalPort != 5071 {
+		t.Fatalf("unexpected parallel-call defaults: %#v", cfg)
+	}
+}
+
+func TestParallelCallValidationAndNormalization(t *testing.T) {
+	cfg := Defaults()
+	cfg.DryRun = false
+	cfg.ReolinkPassword = "camera-secret"
+	cfg.SIPUsername = "door"
+	cfg.SIPPassword = "door-secret"
+	cfg.ParallelCallEnabled = true
+	cfg.ParallelUsername = "mobile"
+	cfg.ParallelPassword = "mobile-secret"
+	cfg.ParallelDestinations = []string{"0163", "0176", "0151"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid parallel configuration failed: %v", err)
+	}
+
+	for name, mutate := range map[string]func(*Config){
+		"missing destinations":  func(c *Config) { c.ParallelDestinations = nil },
+		"too many destinations": func(c *Config) { c.ParallelDestinations = []string{"1", "2", "3", "4"} },
+		"same local port":       func(c *Config) { c.ParallelLocalPort = c.SIPLocalPort },
+		"missing username":      func(c *Config) { c.ParallelUsername = "" },
+		"missing password":      func(c *Config) { c.ParallelPassword = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := cfg
+			candidate.ParallelDestinations = append([]string(nil), cfg.ParallelDestinations...)
+			mutate(&candidate)
+			if err := candidate.Validate(); err == nil {
+				t.Fatal("expected validation failure")
+			}
+		})
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "options.json")
+	data := `{"parallel_call_enabled":true,"parallel_destinations":[" 0163 ","0176","0163"],"dry_run":true}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"0163", "0176"}
+	if len(loaded.ParallelDestinations) != len(want) {
+		t.Fatalf("normalized destinations=%#v want=%#v", loaded.ParallelDestinations, want)
+	}
+	for i := range want {
+		if loaded.ParallelDestinations[i] != want[i] {
+			t.Fatalf("normalized destinations=%#v want=%#v", loaded.ParallelDestinations, want)
+		}
+	}
 }
 
 func TestIncomingCallerAndRTPWatchdogValidation(t *testing.T) {

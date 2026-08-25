@@ -24,7 +24,7 @@ import (
 	statuspkg "github.com/vothmarkus/reolink-sip-gateway/internal/status"
 )
 
-const version = "1.0.0"
+const version = "1.1.0"
 
 func main() {
 	configPath := flag.String("config", "/data/options.json", "path to Home Assistant app options JSON")
@@ -78,6 +78,7 @@ func main() {
 	store := statuspkg.New(version)
 	store.Update(func(s *statuspkg.Snapshot) {
 		s.DryRun = cfg.DryRun
+		s.ParallelCallEnabled = cfg.ParallelCallEnabled
 		s.ConfiguredReolinkMode = cfg.ReolinkMode
 		s.EchoCancellationEnabled = cfg.EchoCancellationEnabled
 		s.CalibratedDelayMS = cfg.AECInitialDelayMS
@@ -151,28 +152,55 @@ func main() {
 			"media_profile", prepared.MediaProfile)
 	}
 
-	var sipClient *sip.Client
+	var doorSIPClient *sip.Client
+	var parallelSIPClient *sip.Client
 	if cfg.DryRun {
 		logger.Info("dry-run enabled; SIP registration, calls and audible startup calibration are disabled")
 	} else {
-		sipClient, err = sip.New(sip.Config{
-			Registrar:       cfg.SIPRegistrar,
-			RegistrarPort:   cfg.SIPRegistrarPort,
-			Username:        cfg.SIPUsername,
-			Password:        cfg.SIPPassword,
-			LocalPort:       cfg.SIPLocalPort,
-			DisplayName:     cfg.SIPDisplayName,
-			CodecPreference: cfg.SIPCodecPreference,
-			AcceptIncoming:  cfg.IncomingCallsEnabled,
-			AllowedCallers:  cfg.IncomingAllowedCallers,
-			Debug:           cfg.DebugEnabled(),
-		}, logger)
+		doorSIPClient, err = sip.New(sip.Config{
+			Registrar:          cfg.SIPRegistrar,
+			RegistrarPort:      cfg.SIPRegistrarPort,
+			Username:           cfg.SIPUsername,
+			Password:           cfg.SIPPassword,
+			LocalPort:          cfg.SIPLocalPort,
+			DisplayName:        cfg.SIPDisplayName,
+			CodecPreference:    cfg.SIPCodecPreference,
+			AcceptIncoming:     cfg.IncomingCallsEnabled,
+			AllowedCallers:     cfg.IncomingAllowedCallers,
+			MaxConcurrentCalls: 1,
+			Debug:              cfg.DebugEnabled(),
+		}, logger.With("sip_account", "door"))
 		if err != nil {
-			logger.Error("cannot initialize SIP", "error", err)
+			logger.Error("cannot initialize door SIP account", "error", err)
 			os.Exit(1)
 		}
-		defer sipClient.Close()
-		sipClient.StartRegistration(ctx)
+		defer doorSIPClient.Close()
+
+		if cfg.ParallelCallEnabled {
+			parallelSIPClient, err = sip.New(sip.Config{
+				Registrar:          cfg.SIPRegistrar,
+				RegistrarPort:      cfg.SIPRegistrarPort,
+				Username:           cfg.ParallelUsername,
+				Password:           cfg.ParallelPassword,
+				LocalPort:          cfg.ParallelLocalPort,
+				DisplayName:        "Reolink Mobilruf",
+				CodecPreference:    cfg.SIPCodecPreference,
+				MaxConcurrentCalls: len(cfg.ParallelDestinations),
+				Debug:              cfg.DebugEnabled(),
+			}, logger.With("sip_account", "mobile"))
+			if err != nil {
+				doorSIPClient.Close()
+				logger.Error("cannot initialize mobile SIP account", "error", err)
+				os.Exit(1)
+			}
+			defer parallelSIPClient.Close()
+		}
+
+		doorSIPClient.StartRegistration(ctx)
+		if parallelSIPClient != nil {
+			parallelSIPClient.StartRegistration(ctx)
+			logger.Info("mobile SIP parallel calling configured", "destination_count", len(cfg.ParallelDestinations), "local_port", cfg.ParallelLocalPort)
+		}
 		if cfg.IncomingCallsEnabled {
 			allowAll := len(cfg.IncomingAllowedCallers) == 1 && cfg.IncomingAllowedCallers[0] == "*"
 			logger.Info("incoming SIP call policy active",
@@ -187,9 +215,13 @@ func main() {
 			defer t.Stop()
 			for {
 				store.Update(func(s *statuspkg.Snapshot) {
-					s.SIPRegistered = sipClient.Registered()
-					s.LastRegistrationErr = sipClient.LastRegisterError()
-					if s.State == "starting" && sipClient.Registered() && s.HAConnected {
+					s.SIPRegistered = doorSIPClient.Registered()
+					s.LastRegistrationErr = doorSIPClient.LastRegisterError()
+					if parallelSIPClient != nil {
+						s.ParallelSIPRegistered = parallelSIPClient.Registered()
+						s.LastParallelRegistrationErr = parallelSIPClient.LastRegisterError()
+					}
+					if s.State == "starting" && doorSIPClient.Registered() && s.HAConnected {
 						s.State = "idle"
 					}
 				})
@@ -211,7 +243,7 @@ func main() {
 		OnConnection: func(ok bool) {
 			store.Update(func(s *statuspkg.Snapshot) {
 				s.HAConnected = ok
-				if ok && s.State == "starting" && (cfg.DryRun || (sipClient != nil && sipClient.Registered())) {
+				if ok && s.State == "starting" && (cfg.DryRun || (doorSIPClient != nil && doorSIPClient.Registered())) {
 					s.State = "idle"
 				}
 			})
@@ -227,11 +259,11 @@ func main() {
 	var calls callcontrol.Controller
 	commands.Configure(
 		func(context.Context) error {
-			if cfg.DryRun || sipClient == nil || !sipClient.Registered() {
+			if cfg.DryRun || doorSIPClient == nil || !doorSIPClient.Registered() {
 				return statuspkg.ErrSIPUnavailable
 			}
 			if err := calls.Start(ctx, func(callCtx context.Context) {
-				handleCall(callCtx, cfg, sipClient, store, logger)
+				handleCall(callCtx, cfg, doorSIPClient, parallelSIPClient, store, logger)
 			}); err != nil {
 				if errors.Is(err, callcontrol.ErrBusy) {
 					return statuspkg.ErrCallBusy
@@ -263,8 +295,8 @@ func main() {
 
 	var lastTrigger atomic.Int64
 	var incomingCalls <-chan *sip.IncomingInvite
-	if sipClient != nil {
-		incomingCalls = sipClient.IncomingCalls()
+	if doorSIPClient != nil {
+		incomingCalls = doorSIPClient.IncomingCalls()
 	}
 	for {
 		select {
@@ -282,7 +314,7 @@ func main() {
 			lastTrigger.Store(now.UnixNano())
 			store.Update(func(s *statuspkg.Snapshot) { s.LastVisitorEvent = now })
 			if err := calls.Start(ctx, func(callCtx context.Context) {
-				handleCall(callCtx, cfg, sipClient, store, logger)
+				handleCall(callCtx, cfg, doorSIPClient, parallelSIPClient, store, logger)
 			}); err != nil {
 				logger.Warn("visitor trigger ignored because a call is active")
 				continue
@@ -447,7 +479,7 @@ func handleIncomingCall(parent context.Context, cfg config.Config, incoming *sip
 	finishCall(store, logger, started, finalErr, "incoming call ended")
 }
 
-func handleCall(parent context.Context, cfg config.Config, sipClient *sip.Client, store *statuspkg.Store, logger *slog.Logger) {
+func handleCall(parent context.Context, cfg config.Config, doorClient, parallelClient *sip.Client, store *statuspkg.Store, logger *slog.Logger) {
 	started := time.Now()
 	store.Update(func(s *statuspkg.Snapshot) {
 		s.State = "dialing"
@@ -473,47 +505,49 @@ func handleCall(parent context.Context, cfg config.Config, sipClient *sip.Client
 		})
 		return
 	}
-	if sipClient == nil {
-		recordCallError(store, logger, errors.New("SIP client is not initialized"))
+	legs := outboundDialLegs(cfg, doorClient, parallelClient, logger)
+	if len(legs) == 0 {
+		recordCallError(store, logger, errors.New("no configured SIP account is registered"))
 		return
 	}
-	if !sipClient.Registered() {
-		recordCallError(store, logger, errors.New("SIP is not registered"))
-		return
-	}
-
-	// Let the kernel select a free RTP port. The selected port is known before
-	// INVITE and is advertised in SDP, eliminating a user-facing port setting and
-	// avoiding collisions with other local media sessions.
-	rtpConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: sipClient.LocalIP(), Port: 0})
+	ringCtx, cancelRing := context.WithTimeout(parent, cfg.RingTimeout())
+	winner, err := callcontrol.DialFirst(ringCtx, legs)
+	cancelRing()
 	if err != nil {
-		recordCallError(store, logger, fmt.Errorf("reserve SIP RTP port: %w", err))
+		waitForkCleanup(winner.LosersDone, logger)
+		if errors.Is(err, context.Canceled) && parent.Err() != nil {
+			finishCall(store, logger, started, nil, "call canceled")
+			return
+		}
+		recordCallError(store, logger, fmt.Errorf("all SIP call legs failed: %w", err))
 		return
 	}
-	defer rtpConn.Close()
-	rtpPort := rtpConn.LocalAddr().(*net.UDPAddr).Port
+	candidate, ok := winner.Dialog.(*outboundCandidate)
+	if !ok || candidate.call == nil || candidate.rtpConn == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = winner.Dialog.Hangup(ctx)
+		cancel()
+		waitForkCleanup(winner.LosersDone, logger)
+		recordCallError(store, logger, errors.New("SIP fork returned an invalid winning dialog"))
+		return
+	}
+	defer candidate.Close()
+	call := candidate.call
+	rtpConn := candidate.rtpConn
+	logger.Info("SIP fork winner selected", "leg", winner.Leg.ID, "destination", winner.Leg.Destination, "codec", call.Codec.Name)
 
 	var ffConn *net.UDPConn
 	if cfg.ReceiveMode() == "rtsp" {
 		ffConn, err = net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 		if err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = call.Hangup(ctx)
+			cancel()
+			waitForkCleanup(winner.LosersDone, logger)
 			recordCallError(store, logger, fmt.Errorf("reserve local FFmpeg RTP port: %w", err))
 			return
 		}
 		defer ffConn.Close()
-	}
-	logger.Debug("dynamic media ports reserved", "sip_rtp_port", rtpPort, "rtsp_receive", cfg.ReceiveMode() == "rtsp")
-
-	ringCtx, cancelRing := context.WithTimeout(parent, cfg.RingTimeout())
-	call, err := sipClient.Dial(ringCtx, cfg.SIPDestination, rtpPort)
-	cancelRing()
-	if err != nil {
-		if errors.Is(err, context.Canceled) && parent.Err() != nil {
-			finishCall(store, logger, started, nil, "call canceled")
-			return
-		}
-		recordCallError(store, logger, fmt.Errorf("SIP call failed: %w", err))
-		return
 	}
 	store.Update(func(s *statuspkg.Snapshot) {
 		s.State = "connecting_media"
@@ -530,7 +564,7 @@ func handleCall(parent context.Context, cfg config.Config, sipClient *sip.Client
 		mediaSession,
 		store,
 		"outgoing",
-		sip.CanonicalRemoteNumber(cfg.SIPDestination),
+		sip.CanonicalRemoteNumber(winner.Leg.Destination),
 		call.CallID,
 	)
 	go func() {
@@ -589,7 +623,80 @@ func handleCall(parent context.Context, cfg config.Config, sipClient *sip.Client
 		}
 	}
 
+	waitForkCleanup(winner.LosersDone, logger)
 	finishCall(store, logger, started, finalErr, "call ended")
+}
+
+type outboundCandidate struct {
+	call      *sip.Call
+	rtpConn   *net.UDPConn
+	closeOnce sync.Once
+}
+
+func (c *outboundCandidate) Hangup(ctx context.Context) error {
+	err := c.call.Hangup(ctx)
+	c.Close()
+	return err
+}
+
+func (c *outboundCandidate) Close() {
+	c.closeOnce.Do(func() {
+		_ = c.rtpConn.Close()
+	})
+}
+
+func outboundDialLegs(cfg config.Config, doorClient, parallelClient *sip.Client, logger *slog.Logger) []callcontrol.DialLeg {
+	legs := make([]callcontrol.DialLeg, 0, 1+len(cfg.ParallelDestinations))
+	if doorClient != nil && doorClient.Registered() {
+		legs = append(legs, newOutboundDialLeg("door", cfg.SIPDestination, doorClient, logger))
+	} else if doorClient != nil {
+		logger.Warn("door SIP call leg skipped because its account is not registered")
+	}
+	if !cfg.ParallelCallEnabled {
+		return legs
+	}
+	if parallelClient == nil || !parallelClient.Registered() {
+		logger.Warn("mobile SIP call legs skipped because the mobile account is not registered", "destination_count", len(cfg.ParallelDestinations))
+		return legs
+	}
+	for index, destination := range cfg.ParallelDestinations {
+		id := fmt.Sprintf("mobile-%d", index+1)
+		legs = append(legs, newOutboundDialLeg(id, destination, parallelClient, logger))
+	}
+	return legs
+}
+
+func newOutboundDialLeg(id, destination string, client *sip.Client, logger *slog.Logger) callcontrol.DialLeg {
+	return callcontrol.DialLeg{
+		ID: id, Destination: destination,
+		Dial: func(ctx context.Context) (callcontrol.Dialog, error) {
+			rtpConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: client.LocalIP(), Port: 0})
+			if err != nil {
+				return nil, fmt.Errorf("reserve SIP RTP port: %w", err)
+			}
+			rtpPort := rtpConn.LocalAddr().(*net.UDPAddr).Port
+			logger.Debug("SIP fork media port reserved", "leg", id, "destination", destination, "sip_rtp_port", rtpPort)
+			call, err := client.Dial(ctx, destination, rtpPort)
+			if err != nil {
+				_ = rtpConn.Close()
+				return nil, err
+			}
+			return &outboundCandidate{call: call, rtpConn: rtpConn}, nil
+		},
+	}
+}
+
+func waitForkCleanup(done <-chan struct{}, logger *slog.Logger) {
+	if done == nil {
+		return
+	}
+	timer := time.NewTimer(7 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		logger.Warn("SIP fork loser cleanup did not finish before timeout")
+	}
 }
 
 func forwardMediaEvents(

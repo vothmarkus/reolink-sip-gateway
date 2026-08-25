@@ -19,6 +19,7 @@ const (
 	DefaultAECInitialDelayMS    = 1450
 	DefaultAECSearchWindowMS    = 300
 	DefaultRTPInactivitySeconds = 15
+	MaxParallelDestinations     = 3
 	minimumAECSearchWindowMS    = 50
 	maximumAECSearchWindowMS    = 1000
 	MaxSupportedAECDelayMS      = 3000
@@ -46,6 +47,11 @@ type Config struct {
 	SIPLocalPort                   int      `json:"sip_local_port"`
 	SIPDisplayName                 string   `json:"sip_display_name"`
 	SIPCodecPreference             string   `json:"sip_codec_preference"`
+	ParallelCallEnabled            bool     `json:"parallel_call_enabled"`
+	ParallelUsername               string   `json:"parallel_username"`
+	ParallelPassword               string   `json:"parallel_password"`
+	ParallelDestinations           []string `json:"parallel_destinations"`
+	ParallelLocalPort              int      `json:"parallel_local_port"`
 	IncomingCallsEnabled           bool     `json:"incoming_calls_enabled"`
 	IncomingAllowedCallers         []string `json:"incoming_allowed_callers"`
 	IncomingConnectionToneEnabled  bool     `json:"incoming_connection_tone_enabled"`
@@ -87,6 +93,9 @@ func Defaults() Config {
 		SIPLocalPort:                   5070,
 		SIPDisplayName:                 "Haustür",
 		SIPCodecPreference:             "pcma",
+		ParallelCallEnabled:            false,
+		ParallelDestinations:           []string{},
+		ParallelLocalPort:              5071,
 		IncomingCallsEnabled:           false,
 		IncomingAllowedCallers:         []string{"*"},
 		IncomingConnectionToneEnabled:  true,
@@ -149,6 +158,7 @@ func Load(path string) (Config, error) {
 	}
 	cfg.ReolinkMode = strings.ToLower(strings.TrimSpace(cfg.ReolinkMode))
 	cfg.SIPCodecPreference = strings.ToLower(strings.TrimSpace(cfg.SIPCodecPreference))
+	cfg.ParallelDestinations = normalizeListEntries(cfg.ParallelDestinations)
 	cfg.IncomingAllowedCallers = normalizeCallerEntries(cfg.IncomingAllowedCallers)
 	cfg.LogLevel = strings.ToLower(strings.TrimSpace(cfg.LogLevel))
 	cfg.StatusPort = 18099
@@ -195,6 +205,7 @@ func (c Config) Validate() error {
 		"sip_username":        c.SIPUsername,
 		"sip_destination":     c.SIPDestination,
 		"sip_display_name":    c.SIPDisplayName,
+		"parallel_username":   c.ParallelUsername,
 	} {
 		if strings.ContainsAny(value, "\r\n") {
 			errs = append(errs, fmt.Errorf("%s must not contain CR/LF characters", name))
@@ -224,6 +235,41 @@ func (c Config) Validate() error {
 	}
 	if c.SIPCodecPreference != "pcma" && c.SIPCodecPreference != "pcmu" && c.SIPCodecPreference != "auto" {
 		errs = append(errs, errors.New("sip_codec_preference must be pcma, pcmu or auto"))
+	}
+	if c.ParallelLocalPort < 1 || c.ParallelLocalPort > 65535 {
+		errs = append(errs, errors.New("parallel_local_port must be 1..65535"))
+	}
+	if len(c.ParallelDestinations) > MaxParallelDestinations {
+		errs = append(errs, fmt.Errorf("parallel_destinations must contain at most %d entries", MaxParallelDestinations))
+	}
+	for _, destination := range c.ParallelDestinations {
+		destination = strings.TrimSpace(destination)
+		if destination == "" {
+			errs = append(errs, errors.New("parallel_destinations entries must not be empty"))
+			continue
+		}
+		if strings.ContainsAny(destination, "\r\n") {
+			errs = append(errs, errors.New("parallel_destinations must not contain CR/LF characters"))
+		}
+		if len(destination) > 128 {
+			errs = append(errs, errors.New("parallel_destinations entries must not exceed 128 characters"))
+		}
+	}
+	if c.ParallelCallEnabled {
+		if len(c.ParallelDestinations) == 0 {
+			errs = append(errs, errors.New("parallel_destinations must contain at least one destination when parallel calling is enabled"))
+		}
+		if c.ParallelLocalPort == c.SIPLocalPort {
+			errs = append(errs, errors.New("parallel_local_port must differ from sip_local_port"))
+		}
+		if !c.DryRun {
+			if strings.TrimSpace(c.ParallelUsername) == "" {
+				errs = append(errs, errors.New("parallel_username is required when parallel calling is enabled"))
+			}
+			if strings.TrimSpace(c.ParallelPassword) == "" {
+				errs = append(errs, errors.New("parallel_password is required when parallel calling is enabled"))
+			}
+		}
 	}
 	if c.IncomingCallsEnabled && len(c.IncomingAllowedCallers) == 0 {
 		errs = append(errs, errors.New("incoming_allowed_callers must contain at least one caller or * when incoming calls are enabled"))
@@ -308,6 +354,10 @@ func validBinarySensorEntityID(v string) bool {
 }
 
 func normalizeCallerEntries(values []string) []string {
+	return normalizeListEntries(values)
+}
+
+func normalizeListEntries(values []string) []string {
 	result := make([]string, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {

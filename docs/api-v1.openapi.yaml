@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Reolink SIP Gateway Integration API
-  version: 1.1.0
+  version: 1.2.0
   description: >-
     Local API exposed by Reolink SIP Gateway 1.0.0 and newer. The API is
     versioned independently from the gateway release and is intended for the
@@ -136,7 +136,7 @@ components:
           const: 1
         gateway_version:
           type: string
-          examples: [1.0.0]
+          examples: [1.1.0]
         instance_id:
           type: string
           format: uuid
@@ -148,7 +148,7 @@ components:
           uniqueItems: true
           items:
             type: string
-            enum: [call_status, caller_number, dtmf_events, events, hangup, test_call]
+            enum: [call_status, caller_number, dtmf_events, events, hangup, parallel_calls, test_call]
     Status:
       type: object
       additionalProperties: false
@@ -240,11 +240,19 @@ components:
     SIPStatus:
       type: object
       additionalProperties: false
-      required: [registered]
+      required: [registered, parallel_call_enabled, parallel_registered]
       properties:
         registered:
           type: boolean
         last_registration_error:
+          type: string
+        parallel_call_enabled:
+          type: boolean
+          description: Whether the optional second SIP account and mobile destinations are configured
+        parallel_registered:
+          type: boolean
+          description: Registration state of the optional mobile-call SIP account
+        parallel_last_registration_error:
           type: string
     CallStatus:
       type: object

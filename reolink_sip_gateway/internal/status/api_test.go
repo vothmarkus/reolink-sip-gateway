@@ -59,11 +59,14 @@ func TestAPIV1RequiresBearerToken(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &info); err != nil {
 		t.Fatal(err)
 	}
-	if info.APIVersion != APIVersion || info.GatewayVersion != "1.0.0" || info.InstanceID != testInstanceID {
+	if info.APIVersion != APIVersion || info.GatewayVersion != "1.1.0" || info.InstanceID != testInstanceID {
 		t.Fatalf("unexpected info: %#v", info)
 	}
 	if !strings.Contains(strings.Join(info.Capabilities, ","), "dtmf_events") {
 		t.Fatalf("DTMF capability is missing: %#v", info.Capabilities)
+	}
+	if !strings.Contains(strings.Join(info.Capabilities, ","), "parallel_calls") {
+		t.Fatalf("parallel-call capability is missing: %#v", info.Capabilities)
 	}
 }
 
@@ -84,6 +87,8 @@ func TestAPIV1StatusMapping(t *testing.T) {
 	store.Update(func(snapshot *Snapshot) {
 		snapshot.State = "active"
 		snapshot.SIPRegistered = true
+		snapshot.ParallelCallEnabled = true
+		snapshot.ParallelSIPRegistered = true
 		snapshot.CurrentCallDirection = "incoming"
 		snapshot.LastCallDirection = "incoming"
 		snapshot.CurrentCallerNumber = "01631416518"
@@ -106,6 +111,9 @@ func TestAPIV1StatusMapping(t *testing.T) {
 	}
 	if status.Controls.TestCallAvailable {
 		t.Fatal("test call must not be available during a call")
+	}
+	if !status.SIP.Registered || !status.SIP.ParallelCallEnabled || !status.SIP.ParallelRegistered {
+		t.Fatalf("unexpected SIP account status: %#v", status.SIP)
 	}
 }
 
@@ -271,7 +279,7 @@ func TestWriteCommandErrorDoesNotExposeInternalDetails(t *testing.T) {
 
 func newTestAPI(t *testing.T, commands CommandHandler) (*Store, http.Handler) {
 	t.Helper()
-	store := New("1.0.0")
+	store := New("1.1.0")
 	mux := http.NewServeMux()
 	store.registerAPIRoutes(mux, ServerOptions{Token: "test-token", InstanceID: testInstanceID, Commands: commands})
 	return store, mux

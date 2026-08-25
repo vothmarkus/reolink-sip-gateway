@@ -1,16 +1,16 @@
-# Reolink SIP Gateway 1.0.0 – Dokumentation
+# Reolink SIP Gateway 1.1.0 – Dokumentation
 
 ## Zweck
 
-**1.0.0** ergänzt die lokale, authentifizierte Schnittstelle um ausgehandeltes RFC-4733-DTMF. Ein abgeschlossener Tastendruck wird als flüchtiges Ereignis an die separate Home-Assistant-Integration übergeben; Status, Testanruf und Auflegen bleiben unverändert.
+**1.1.0** ergänzt ein optionales zweites SIP-Konto für einen Mobil-Parallelruf. Das vorhandene Konto bleibt als Türsprechstelle bestehen. Das zweite Konto registriert sich an derselben FRITZ!Box und ruft gleichzeitig eine bis drei Mobilnummern an. Der zuerst angenommene Tür- oder Mobilzweig erhält den weiterhin einzigen Reolink-Medienweg.
 
-Die fünf internen Konfigurationsgruppen und der flache Runtime-Vertrag bleiben bestehen. 1.0 fügt keine neue Benutzeroption hinzu; es gibt weiterhin nur eine konfigurierte Kamera und höchstens ein aktives Gespräch. Die App bleibt ohne Companion-Integration vollständig funktionsfähig und erzeugt selbst keine HA-Entities oder Automationen.
+Die fünf internen Konfigurationsgruppen und der flache Runtime-Vertrag bleiben bestehen. 1.1 ergänzt ausschließlich im SIP-Block fünf optionale Mobilruf-Felder; es gibt weiterhin nur eine konfigurierte Kamera und höchstens ein aktives Reolink-Gespräch. Die App bleibt ohne Companion-Integration vollständig funktionsfähig und erzeugt selbst keine HA-Entities oder Automationen.
 
 Das bestehende Branding verwendet PNG-Transparenz für den Außenbereich von `icon.png`, `logo.png` und dem eingebetteten Ingress-Logo. Der Go-Modulpfad entspricht dem öffentlichen Repository `github.com/vothmarkus/reolink-sip-gateway`.
 
 Der in 0.6.0 eingeführte elastische SIP→Baichuan-Talkback-Playout bleibt ebenso unverändert wie Kamera→SIP-Smoother/PLL, Startup-Kalibrierung, fester AEC-Coarse-Delay, AEC3, der deaktivierte Go-Live-Tracker und der native Helper.
 
-Die Home-Assistant-App überwacht einen Reolink-Besucher-Binärsensor. Bei Klingeln wird ein SIP-Ziel angerufen. Bei aktivierter Eingangsoption kann zusätzlich die registrierte SIP-Nebenstelle angerufen werden. Beide Richtungen verwenden danach denselben bidirektionalen Audio- und AEC-Pfad zwischen SIP und Reolink Doorbell.
+Die Home-Assistant-App überwacht einen Reolink-Besucher-Binärsensor. Bei Klingeln werden das Türziel und optional bis zu drei Mobilziele parallel angerufen. Bei aktivierter Eingangsoption kann zusätzlich die registrierte Tür-SIP-Nebenstelle angerufen werden. Gewinner eines ausgehenden Forks und eingehende Anrufe verwenden danach denselben einzelnen bidirektionalen Audio- und AEC-Pfad zwischen SIP und Reolink Doorbell.
 
 ## Startablauf
 
@@ -22,7 +22,7 @@ Bei einem normalen Start führt das Gateway die folgenden Schritte aus:
 4. Bei `reolink_mode: auto` ein vollständiges Reolink-Medienprofil erkennen.
 5. Bei aktivierter AEC die akustische Reolink-Latenz automatisch messen.
 6. Erfolgreiche Kalibrierung persistent speichern bzw. bei Messfehler einen passenden Cache oder 1450 ms verwenden.
-7. SIP registrieren und bei aktivierter Option eingehende Anrufe mit der konfigurierten Anruferregel bereitstellen.
+7. Das Tür-SIP-Konto und optional das Mobilruf-Konto registrieren; eingehende Anrufe bleiben ausschließlich Aufgabe des Tür-Kontos.
 8. Home-Assistant-Klingelereignisse primär per WebSocket überwachen; REST bleibt interner Fallback.
 
 `dry_run: true` verhindert SIP-Anrufe und den hörbaren Kalibrierungsmarker. Bei explizitem `standalone` oder `nvr` kann die Statusseite trotzdem den vorgesehenen Medienweg anzeigen.
@@ -145,6 +145,16 @@ Der SIP-Signalisierungsport bleibt über `sip_local_port` konfigurierbar. Für j
 
 PCMA, PCMU und `auto` bleiben als Codecpräferenz verfügbar.
 
+### Zweites SIP-Konto und Mobil-Parallelruf
+
+`parallel_call_enabled: true` aktiviert ein zweites SIP-Konto am identischen Registrar. In der FRITZ!Box 4050 bleibt das erste Konto als IP-Türsprechanlage eingerichtet; das zweite wird unter **Telefonie → Telefoniegeräte → Neues Gerät → Telefon → LAN/WLAN** als normales IP-Telefon angelegt. Die 4050 ist dabei Registrar und Telefonanlage. Eine vorgeschaltete FRITZ!Box 6690 kann ausschließlich das Kabelmodem bereitstellen.
+
+Das zweite Konto verwendet `parallel_username`, `parallel_password` und den separaten lokalen Signalisierungsport `parallel_local_port` (Standard 5071). Registraradresse, Registrarport und Codecpräferenz werden bewusst vom Tür-Konto gemeinsam genutzt. Gleiche lokale Ports werden abgewiesen.
+
+`parallel_destinations` enthält eine bis drei gleichzeitig zu wählende Nummern. Leerzeichen an den Rändern und doppelte Einträge werden beim Laden entfernt; mehr als drei Ziele sind ungültig. Alle Mobilzweige verwenden dasselbe Konto und damit die in der FRITZ!Box diesem IP-Telefon zugewiesene ausgehende Rufnummer.
+
+Das Gateway startet Tür- und Mobil-`INVITE` parallel. Der erste erfolgreiche `200 OK` wird Gewinner. Noch klingelnde Zweige erhalten `CANCEL`. Ein nahezu gleichzeitig angenommener Verlierer wird zwingend mit `ACK` bestätigt und anschließend mit `BYE` beendet. Für jeden Wählzweig existiert bis zur Gewinnerentscheidung ein eigener dynamischer RTP-Port; nur der Gewinner startet die Kamera-/AEC-Mediensitzung.
+
 ### DTMF-Aushandlung und Erkennung
 
 Ausgehende SDP-Angebote enthalten zusätzlich Payloadtyp 101 als
@@ -224,12 +234,12 @@ Die Statusseite zeigt den konfigurierten und aktiven Modus, Medienprofil, Kalibr
 
 ## Home-Assistant-Integrations-API v1
 
-Die API läuft zusammen mit Statusseite und Healthcheck auf Port `18099`. Der vollständige OpenAPI-3.1-Vertrag liegt unter `docs/api-v1.openapi.yaml`. Die API-Versionsnummer ist unabhängig von der App-Version; 1.0.0 erweitert API-Version 1 additiv.
+Die API läuft zusammen mit Statusseite und Healthcheck auf Port `18099`. Der vollständige OpenAPI-3.1-Vertrag liegt unter `docs/api-v1.openapi.yaml`. Die API-Versionsnummer ist unabhängig von der App-Version; 1.1.0 erweitert API-Version 1 additiv um die Fähigkeit `parallel_calls` und den Registrierungsstatus des zweiten Kontos.
 
 - `GET /api/v1/info`: API-/Gateway-Version, stabile Installations-UUID und Fähigkeiten.
 - `GET /api/v1/status`: vollständiger Gateway-, SIP-, Call-, Medien- und Befehlsstatus.
 - `GET /api/v1/events`: Server-Sent Events vom Typ `status` und `dtmf`; das erste Ereignis ist immer der aktuelle vollständige Snapshot. Ein `dtmf`-Ereignis enthält Ziffer, Dauer, Anrufrichtung, exakt normalisierte Gegenstelle (`remote_number`), SIP-Dialog-ID (`call_id`), Empfangszeit und Installations-ID. Die Gegenstelle ist bei eingehenden Anrufen der Anrufer und bei ausgehenden Anrufen das konfigurierte SIP-Ziel. Das Ereignis besitzt keine SSE-ID, ändert keine Statusrevision und wird nicht wiederholt. 15-Sekunden-Kommentare dienen als Keepalive.
-- `POST /api/v1/calls/test`: normaler ausgehender Anruf zum vorhandenen `sip_destination`; `202` bei Annahme, `409` bei belegtem Call-Slot und `503` bei nicht registriertem SIP beziehungsweise noch nicht bereiter Runtime.
+- `POST /api/v1/calls/test`: normaler ausgehender Tür-/Mobil-Fork zu den konfigurierten Zielen; `202` bei Annahme, `409` bei belegtem Call-Slot und `503` bei nicht registriertem Tür-SIP beziehungsweise noch nicht bereiter Runtime.
 - `POST /api/v1/calls/hangup`: beendet Wähl-, Vorbereitungs- oder Gesprächsphase beider Richtungen; im Leerlauf bestätigt `204` die idempotente Wirkung.
 
 Beim ersten normalen Start entstehen `/data/integration-api-instance-id` und `/data/integration-api-token`. Beide Dateien werden mit Rechten `0600` angelegt und über App-Updates sowie Backups erhalten. Das Token besteht aus 256 Zufallsbits und wird nicht protokolliert. Jeder `/api/v1`-Aufruf benötigt `Authorization: Bearer <token>`; zusätzlich sind nur Loopback-, private und Link-Local-Quelladressen zugelassen. Healthcheck und bestehende Ingress-Routen behalten ihre bisherigen Zugriffseigenschaften.
@@ -237,6 +247,8 @@ Beim ersten normalen Start entstehen `/data/integration-api-instance-id` und `/d
 Der Status unterscheidet aktuelle und letzte Werte: `call.direction` und `call.caller_number` werden nach dem Gespräch geleert, während `call.last_direction` und `call.last_caller_number` erhalten bleiben. Die letzte anrufende Nummer wird nur durch einen zugelassenen eingehenden Anruf aktualisiert. Diagnosen und Fehlerantworten enthalten niemals Token oder Zugangsdaten.
 
 ## Update von älteren Versionen
+
+1.1.0 ergänzt im SIP-Block fünf neue Optionen. Der Mobil-Parallelruf ist standardmäßig deaktiviert; damit bleibt ein Update funktional identisch zu 1.0.0. Fehlende Werte werden am bestehenden gruppiert→flach-Adapter sicher mit `false`, leerer Zugangsdaten-/Zielliste und Port 5071 ergänzt. Die vorhandene API-Identität, DTMF-Aushandlung und sämtliche Reolink-/AEC-Einstellungen bleiben erhalten.
 
 1.0.0 ergänzt ausschließlich die additive DTMF-Aushandlung und den flüchtigen
 Ereignistyp. Es gibt keine neue Option oder Konfigurationsmigration. Die bereits

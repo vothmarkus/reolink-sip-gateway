@@ -1,8 +1,8 @@
-# Prüfprotokoll 1.0.0
+# Prüfprotokoll 1.1.0
 
 ## Ziel
 
-1.0.0 ergänzt ausgehandeltes RFC-4733-DTMF und flüchtige Integrationsereignisse. Zu prüfen sind SDP-Aushandlung, Event-Deduplizierung, die klare Trennung von DTMF und Status sowie unveränderte Audio-, AEC- und Call-Control-Pfade.
+1.1.0 ergänzt ein zweites SIP-Konto und einen First-Answer-Wins-Fork aus Türziel plus maximal drei Mobilzielen. Zu prüfen sind getrennte Registrierungen/Ports, mehrere Dialoge auf demselben Mobilkonto, CANCEL/ACK/BYE-Races und die weiterhin exakt eine Reolink-Mediensitzung.
 
 ## Softwareprüfungen vor Release
 
@@ -17,9 +17,30 @@
 - YAML-/JSON-Prüfung von App-Konfiguration und Übersetzungen
 - identische fünf Gruppen und Feldmengen in `options`, `schema`, DE, EN und Testkonfiguration
 - Bash-Syntaxprüfung des s6-Startskripts
-- Versionsprüfung 1.0.0 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
+- Versionsprüfung 1.1.0 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
 - Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
 - expliziter Test der nativen Statistikbits 0…7
+
+## Ergänzungen 1.1.0
+
+- Fresh Install und Update ergeben `parallel_call_enabled: false`, leere Ziele und lokalen Port 5071. Alle fünf neuen SIP-Felder stehen in identischer Reihenfolge in `options`, `schema`, DE, EN und Fixture und erreichen den flachen Runtime-Snapshot unverändert.
+- Aktivierung verlangt in Live-Betrieb Benutzername, Passwort, ein bis drei Ziele und einen vom Tür-Konto verschiedenen lokalen Port. Ziellisten werden getrimmt/dedupliziert; vier Ziele, CR/LF und überlange Einträge werden abgewiesen.
+- Das Tür-Konto bleibt auf einen Dialog beschränkt. Ein Mobilkonto mit Kapazität drei kann drei parallele ausgehende Dialoge mit unterschiedlichen `Call-ID`/Transaktionen halten; ein vierter Wählversuch wird abgewiesen.
+- Ein schneller Gewinner cancelt alle noch klingelnden Zweige. Der Test modelliert zusätzlich einen `200 OK`, der die Entscheidung kreuzt: Gewinner bleibt aktiv, der verspätete Verlierer erhält genau ein `BYE`.
+- Bestehende SIP-Integrationstests belegen weiterhin ACK auf endgültige Nicht-2xx-Antworten nach `CANCEL`, ACK+BYE bei verspätetem 200, 2xx-Wiederholung, eingehende INVITE/ACK/CANCEL/BYE und den Einzel-Call-Schutz des Tür-Kontos.
+- Jeder Wählzweig reserviert einen eigenen dynamischen RTP-Socket. Nur der Gewinner wird an `media.Session` übergeben; loser sockets werden nach Fehler/CANCEL/BYE geschlossen. Der globale Call-Slot bleibt bis zum begrenzten Loser-Cleanup reserviert.
+- API v1 meldet `parallel_calls`, Aktivierungszustand und zweite Registrierung additiv. Alte Felder und DTMF-Ereignisse bleiben unverändert.
+
+## FRITZ!Box-4050-Hardwaretest 1.1.0
+
+1. FRITZ!Box 4050 als Registrar/Telefonanlage verwenden; FRITZ!Box 6690 bleibt reines Modem.
+2. Tür-Konto als IP-Türsprechanlage und Mobilkonto als normales LAN/WLAN-IP-Telefon anlegen. Lokale Gateway-Ports 5070/5071, Registrarziel jeweils 4050:5060.
+3. Dem Mobilkonto die gewünschte ausgehende Festnetznummer zuweisen und zunächst genau ein Mobilziel konfigurieren. Beide Registrierungen müssen im Gatewaystatus `true` zeigen.
+4. Klingeln: FRITZ!Fon zeigt weiterhin Türruf/Livebild/Öffnen; das Handy erhält einen normalen externen Anruf. Je einmal zuerst FRITZ!Fon und zuerst Handy annehmen. Der Verlierer muss sofort aufhören zu klingeln und nur der Gewinner Audio erhalten.
+5. Zwei, danach drei Mobilziele aktivieren. Alle Ziele müssen parallel klingeln; der erste angenommene Zweig gewinnt. Im Debuglog dürfen keine zweiten Reolink-Mediensitzungen und keine aktiven Restdialoge erscheinen.
+6. Race provozieren, indem zwei Teilnehmer nahezu gleichzeitig annehmen. Der Verlierer muss nach ACK/BYE sauber beendet werden; kein Telefon darf verbunden bleiben oder später Audio erhalten.
+7. Prüfen, wie viele externe Gespräche Anschluss/Provider tatsächlich gleichzeitig erlauben. Eine FRITZ!Box- oder Provider-Ablehnung eines einzelnen Zweigs darf einen anderen erfolgreich angenommenen Zweig nicht verhindern.
+8. Während des Klingelns und während des Gesprächs die Integrationsaktion Auflegen auslösen. Sämtliche Rufzweige beziehungsweise der Gewinner müssen deterministisch beendet werden.
 
 ## Ergänzungen 1.0.0
 

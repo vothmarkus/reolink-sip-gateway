@@ -258,7 +258,7 @@ func (c *Client) handleIncomingInvite(req Message, addr *net.UDPAddr) {
 		prior.resendLastResponse(addr)
 		return
 	}
-	if c.active != nil || c.dialing {
+	if !c.hasCallCapacityLocked() {
 		c.mu.Unlock()
 		_ = c.sendTaggedResponse(req, addr, 486, "Busy Here")
 		return
@@ -295,7 +295,7 @@ func (c *Client) handleIncomingInvite(req Message, addr *net.UDPAddr) {
 	c.mu.Lock()
 	// Re-check after SDP parsing so an outbound call cannot claim the client in
 	// the small window between the first busy check and dialog reservation.
-	if c.active != nil || c.dialing {
+	if !c.hasCallCapacityLocked() {
 		c.mu.Unlock()
 		_ = c.sendTaggedResponse(req, addr, 486, "Busy Here")
 		return
@@ -305,7 +305,7 @@ func (c *Client) handleIncomingInvite(req Message, addr *net.UDPAddr) {
 		prior.resendLastResponse(addr)
 		return
 	}
-	c.active = call
+	c.active[call.CallID] = call
 	c.serverInvites[key] = invite
 	c.mu.Unlock()
 
@@ -327,9 +327,9 @@ func (c *Client) handleIncomingACK(req Message, addr *net.UDPAddr) {
 		return
 	}
 	c.mu.Lock()
-	call := c.active
+	call := c.active[req.Header("call-id")]
 	c.mu.Unlock()
-	if call != nil && call.inbound && req.Header("call-id") == call.CallID && call.incoming != nil {
+	if call != nil && call.inbound && call.incoming != nil {
 		call.incoming.acknowledge(req)
 	}
 }
@@ -406,7 +406,7 @@ func buildResponse(req Message, code int, reason, toTag string, extra []string, 
 	}
 	lines = append(lines, "To: "+to, "Call-ID: "+req.Header("call-id"), "CSeq: "+req.Header("cseq"))
 	lines = append(lines, extra...)
-	lines = append(lines, "Server: ReolinkSIPGateway/1.0.0", fmt.Sprintf("Content-Length: %d", len(body)), "", "")
+	lines = append(lines, "Server: ReolinkSIPGateway/1.1.0", fmt.Sprintf("Content-Length: %d", len(body)), "", "")
 	return append([]byte(strings.Join(lines, "\r\n")), body...)
 }
 

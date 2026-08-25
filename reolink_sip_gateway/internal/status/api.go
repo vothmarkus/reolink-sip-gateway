@@ -27,6 +27,7 @@ var apiCapabilities = []string{
 	"dtmf_events",
 	"events",
 	"hangup",
+	"parallel_calls",
 	"test_call",
 }
 
@@ -73,8 +74,11 @@ type APIGatewayStatus struct {
 }
 
 type APISIPStatus struct {
-	Registered            bool   `json:"registered"`
-	LastRegistrationError string `json:"last_registration_error,omitempty"`
+	Registered                    bool   `json:"registered"`
+	LastRegistrationError         string `json:"last_registration_error,omitempty"`
+	ParallelCallEnabled           bool   `json:"parallel_call_enabled"`
+	ParallelRegistered            bool   `json:"parallel_registered"`
+	ParallelLastRegistrationError string `json:"parallel_last_registration_error,omitempty"`
 }
 
 type APICallStatus struct {
@@ -213,7 +217,11 @@ func newAPIStatus(snapshot Snapshot) APIStatus {
 			HomeAssistantConnected: snapshot.HAConnected, DryRun: snapshot.DryRun,
 			LastVisitorEvent: timePointer(snapshot.LastVisitorEvent), LastError: snapshot.LastError,
 		},
-		SIP: APISIPStatus{Registered: snapshot.SIPRegistered, LastRegistrationError: snapshot.LastRegistrationErr},
+		SIP: APISIPStatus{
+			Registered: snapshot.SIPRegistered, LastRegistrationError: snapshot.LastRegistrationErr,
+			ParallelCallEnabled: snapshot.ParallelCallEnabled, ParallelRegistered: snapshot.ParallelSIPRegistered,
+			ParallelLastRegistrationError: snapshot.LastParallelRegistrationErr,
+		},
 		Call: APICallStatus{
 			Active: active, State: callState, Direction: snapshot.CurrentCallDirection,
 			LastDirection: snapshot.LastCallDirection, CallerNumber: snapshot.CurrentCallerNumber,

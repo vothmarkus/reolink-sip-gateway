@@ -18,16 +18,17 @@ import (
 )
 
 type Config struct {
-	Registrar       string
-	RegistrarPort   int
-	Username        string
-	Password        string
-	LocalPort       int
-	DisplayName     string
-	CodecPreference string
-	AcceptIncoming  bool
-	AllowedCallers  []string
-	Debug           bool
+	Registrar          string
+	RegistrarPort      int
+	Username           string
+	Password           string
+	LocalPort          int
+	DisplayName        string
+	CodecPreference    string
+	AcceptIncoming     bool
+	AllowedCallers     []string
+	MaxConcurrentCalls int
+	Debug              bool
 }
 
 type Client struct {
@@ -37,19 +38,22 @@ type Client struct {
 	registrar *net.UDPAddr
 	localIP   net.IP
 
-	mu              sync.Mutex
-	transactions    map[string]chan Message
-	active          *Call
-	dialing         bool
-	incoming        chan *IncomingInvite
-	serverInvites   map[string]*IncomingInvite
-	allowedCallers  callerAllowlist
-	registerCallID  string
-	registerCSeq    uint32
-	registered      atomic.Bool
-	lastRegisterErr atomic.Value
-	closed          chan struct{}
-	closeOnce       sync.Once
+	mu                 sync.Mutex
+	transactions       map[string]chan Message
+	canceledInvites    map[string]*canceledInvite
+	completedDialogs   map[string]*Call
+	active             map[string]*Call
+	dialing            map[string]struct{}
+	maxConcurrentCalls int
+	incoming           chan *IncomingInvite
+	serverInvites      map[string]*IncomingInvite
+	allowedCallers     callerAllowlist
+	registerCallID     string
+	registerCSeq       uint32
+	registered         atomic.Bool
+	lastRegisterErr    atomic.Value
+	closed             chan struct{}
+	closeOnce          sync.Once
 }
 
 type Message struct {
@@ -61,6 +65,18 @@ type Message struct {
 	Headers    map[string][]string
 	Body       []byte
 	Raw        string
+}
+
+type canceledInvite struct {
+	uri           string
+	branch        string
+	cseq          uint32
+	callID        string
+	fromURI       string
+	toURI         string
+	fromTag       string
+	inviteHeaders []string
+	cancelSent    bool
 }
 
 type Codec struct {
@@ -85,6 +101,7 @@ type Call struct {
 	ToURI          string
 	RemoteTarget   string
 	CallerID       string
+	InviteCSeq     uint32
 	CSeq           uint32
 	Codec          Codec
 	TelephoneEvent *TelephoneEvent
@@ -97,6 +114,10 @@ type Call struct {
 }
 
 func New(cfg Config, logger *slog.Logger) (*Client, error) {
+	maxConcurrentCalls := cfg.MaxConcurrentCalls
+	if maxConcurrentCalls <= 0 {
+		maxConcurrentCalls = 1
+	}
 	reg, err := net.ResolveUDPAddr("udp4", net.JoinHostPort(cfg.Registrar, strconv.Itoa(cfg.RegistrarPort)))
 	if err != nil {
 		return nil, err
@@ -112,7 +133,9 @@ func New(cfg Config, logger *slog.Logger) (*Client, error) {
 		return nil, fmt.Errorf("listen SIP UDP: %w", err)
 	}
 	c := &Client{cfg: cfg, log: logger, conn: conn, registrar: reg, localIP: localIP,
-		transactions: make(map[string]chan Message), incoming: make(chan *IncomingInvite, 4),
+		transactions: make(map[string]chan Message), canceledInvites: make(map[string]*canceledInvite),
+		completedDialogs: make(map[string]*Call), active: make(map[string]*Call), dialing: make(map[string]struct{}),
+		maxConcurrentCalls: maxConcurrentCalls, incoming: make(chan *IncomingInvite, 4),
 		serverInvites: make(map[string]*IncomingInvite), allowedCallers: newCallerAllowlist(cfg.AllowedCallers),
 		registerCallID: randomID() + "@" + localIP.String(), closed: make(chan struct{})}
 	go c.readLoop()
@@ -248,12 +271,13 @@ func (c *Client) register(ctx context.Context, expires int) (int, error) {
 }
 
 func (c *Client) Dial(ctx context.Context, destination string, rtpPort int) (*Call, error) {
+	callID := randomID() + "@" + c.localIP.String()
 	c.mu.Lock()
-	if c.active != nil || c.dialing {
+	if !c.hasCallCapacityLocked() {
 		c.mu.Unlock()
-		return nil, errors.New("another SIP call is active")
+		return nil, errors.New("maximum concurrent SIP calls reached")
 	}
-	c.dialing = true
+	c.dialing[callID] = struct{}{}
 	c.mu.Unlock()
 	established := false
 	defer func() {
@@ -261,7 +285,7 @@ func (c *Client) Dial(ctx context.Context, destination string, rtpPort int) (*Ca
 			return
 		}
 		c.mu.Lock()
-		c.dialing = false
+		delete(c.dialing, callID)
 		c.mu.Unlock()
 	}()
 	toURI := destination
@@ -269,7 +293,6 @@ func (c *Client) Dial(ctx context.Context, destination string, rtpPort int) (*Ca
 		toURI = fmt.Sprintf("sip:%s@%s", destination, c.cfg.Registrar)
 	}
 	fromURI := fmt.Sprintf("sip:%s@%s", c.cfg.Username, c.cfg.Registrar)
-	callID := randomID() + "@" + c.localIP.String()
 	fromTag := randomID()
 	cseq := uint32(1)
 	branch := branchID()
@@ -312,20 +335,20 @@ func (c *Client) Dial(ctx context.Context, destination string, rtpPort int) (*Ca
 		remoteTarget = toURI
 	}
 	call := &Call{client: c, CallID: callID, FromTag: fromTag, ToTag: toTag, FromURI: fromURI, ToURI: toURI,
-		RemoteTarget: remoteTarget, CSeq: cseq, done: make(chan error, 1)}
+		RemoteTarget: remoteTarget, InviteCSeq: cseq, CSeq: cseq, done: make(chan error, 1)}
 	// ACK a successful INVITE before trusting the SDP answer. A 2xx creates a
 	// dialog and must be acknowledged even if the negotiated media later turns
 	// out to be unusable. Set active first so retransmitted 2xx responses can be
 	// re-ACKed by readLoop while we finish media validation.
 	c.mu.Lock()
-	c.active = call
-	c.dialing = false
+	delete(c.dialing, callID)
+	c.active[callID] = call
 	c.mu.Unlock()
 	established = true
 	if err := c.sendACK(call); err != nil {
 		c.mu.Lock()
-		if c.active == call {
-			c.active = nil
+		if c.active[call.CallID] == call {
+			delete(c.active, call.CallID)
 		}
 		c.mu.Unlock()
 		return nil, err
@@ -374,14 +397,8 @@ func (c *Client) sendInviteFinalACK(uri, branch string, cseq uint32, callID, fro
 }
 
 func (c *Client) sendACK(call *Call) error {
-	// CSeq is also advanced by Hangup. Copy it under the same mutex used by
-	// BYE generation so a retransmitted 2xx response cannot race with a local
-	// hangup while we build the ACK.
-	c.mu.Lock()
-	cseq := call.CSeq
-	c.mu.Unlock()
 	branch := branchID()
-	headers := c.baseHeaders("ACK", call.RemoteTarget, branch, cseq, call.CallID, call.FromURI, call.ToURI, call.FromTag, call.ToTag)
+	headers := c.baseHeaders("ACK", call.RemoteTarget, branch, call.InviteCSeq, call.CallID, call.FromURI, call.ToURI, call.FromTag, call.ToTag)
 	msg := buildRequest("ACK", call.RemoteTarget, headers, nil)
 	target, err := c.destinationForURI(call.RemoteTarget)
 	if err != nil {
@@ -409,10 +426,17 @@ func (call *Call) Done() <-chan error { return call.done }
 func (call *Call) finish(err error) {
 	call.doneOnce.Do(func() {
 		call.client.mu.Lock()
-		if call.client.active == call {
-			call.client.active = nil
+		if call.client.active[call.CallID] == call {
+			delete(call.client.active, call.CallID)
+		}
+		rememberDialog := !call.inbound && call.InviteCSeq != 0
+		if rememberDialog {
+			call.client.completedDialogs[call.CallID] = call
 		}
 		call.client.mu.Unlock()
+		if rememberDialog {
+			call.client.expireCompletedDialog(call)
+		}
 		if call.incoming != nil {
 			call.incoming.stopRetransmission()
 		}
@@ -427,9 +451,12 @@ func (c *Client) Close() {
 		c.registered.Store(false)
 		_ = c.conn.Close()
 		c.mu.Lock()
-		call := c.active
+		calls := make([]*Call, 0, len(c.active))
+		for _, call := range c.active {
+			calls = append(calls, call)
+		}
 		c.mu.Unlock()
-		if call != nil {
+		for _, call := range calls {
 			call.finish(errors.New("SIP client closed"))
 		}
 	})
@@ -496,6 +523,11 @@ func (c *Client) transact(ctx context.Context, method, branch string, cseq uint3
 			timer.Reset(interval)
 		case <-deadline.C:
 			if cancelRequested && ctx.Err() != nil {
+				if invite {
+					if response, received := c.transitionCanceledInvite(key, ch, uri, branch, cseq, headers, cancelSent); received {
+						return response, nil
+					}
+				}
 				return Message{}, fmt.Errorf("SIP %s cancellation timed out: %w", method, ctx.Err())
 			}
 			return Message{}, fmt.Errorf("SIP %s transaction timed out", method)
@@ -604,25 +636,15 @@ func (c *Client) readLoop() {
 			key := branch + "|" + method
 			c.mu.Lock()
 			ch := c.transactions[key]
-			c.mu.Unlock()
 			if ch != nil {
 				select {
 				case ch <- m:
 				default:
 				}
-			} else if method == "INVITE" && m.StatusCode >= 200 && m.StatusCode < 300 {
-				// A 2xx to INVITE is retransmitted independently of the INVITE
-				// transaction. Re-ACK it if our first ACK was lost.
-				c.mu.Lock()
-				call := c.active
-				callCSeq := uint32(0)
-				if call != nil {
-					callCSeq = call.CSeq
-				}
-				c.mu.Unlock()
-				if call != nil && !call.inbound && m.Header("call-id") == call.CallID && cseqNumber(m.Header("cseq")) == callCSeq {
-					_ = c.sendACK(call)
-				}
+			}
+			c.mu.Unlock()
+			if ch == nil && method == "INVITE" {
+				c.handleUnmatchedInviteResponse(m)
 			}
 			continue
 		}
@@ -640,9 +662,9 @@ func (c *Client) handleRequest(m Message, addr *net.UDPAddr) {
 		c.handleIncomingCancel(m, addr)
 	case "BYE":
 		c.mu.Lock()
-		call := c.active
+		call := c.active[m.Header("call-id")]
 		c.mu.Unlock()
-		if call == nil || m.Header("call-id") != call.CallID {
+		if call == nil {
 			_ = c.sendResponse(m, addr, 481, "Call/Transaction Does Not Exist")
 			return
 		}
@@ -658,6 +680,189 @@ func (c *Client) handleRequest(m Message, addr *net.UDPAddr) {
 		_ = c.sendResponse(m, addr, 501, "Not Implemented")
 	}
 }
+
+func (c *Client) hasCallCapacityLocked() bool {
+	return len(c.active)+len(c.dialing) < c.maxConcurrentCalls
+}
+
+func (c *Client) rememberCanceledInvite(uri, branch string, cseq uint32, headers []string, cancelSent bool) {
+	invite := newCanceledInvite(uri, branch, cseq, headers, cancelSent)
+	if invite == nil {
+		return
+	}
+	c.mu.Lock()
+	c.canceledInvites[invite.callID] = invite
+	c.mu.Unlock()
+	c.expireCanceledInvite(invite)
+}
+
+// transitionCanceledInvite atomically hands an INVITE from the live transaction
+// map to the cancellation tombstone map. readLoop delivers responses while
+// holding the same mutex, so a response cannot disappear in the hand-off gap.
+func (c *Client) transitionCanceledInvite(key string, transaction <-chan Message, uri, branch string, cseq uint32, headers []string, cancelSent bool) (Message, bool) {
+	invite := newCanceledInvite(uri, branch, cseq, headers, cancelSent)
+	if invite == nil {
+		c.mu.Lock()
+		delete(c.transactions, key)
+		c.mu.Unlock()
+		return Message{}, false
+	}
+
+	var provisionalReceived bool
+	c.mu.Lock()
+	for {
+		select {
+		case response := <-transaction:
+			if response.StatusCode >= 200 {
+				delete(c.transactions, key)
+				c.mu.Unlock()
+				return response, true
+			}
+			provisionalReceived = true
+		default:
+			delete(c.transactions, key)
+			if provisionalReceived && !invite.cancelSent {
+				invite.cancelSent = true
+			}
+			c.canceledInvites[invite.callID] = invite
+			c.mu.Unlock()
+			c.expireCanceledInvite(invite)
+			if provisionalReceived && !cancelSent {
+				if err := c.sendCancel(invite.uri, invite.branch, invite.cseq, invite.inviteHeaders); err != nil && c.log != nil {
+					c.log.Warn("failed to cancel released SIP INVITE", "error", err)
+				}
+			}
+			return Message{}, false
+		}
+	}
+}
+
+func newCanceledInvite(uri, branch string, cseq uint32, headers []string, cancelSent bool) *canceledInvite {
+	callID := requestHeader(headers, "call-id")
+	if callID == "" {
+		return nil
+	}
+	return &canceledInvite{
+		uri: uri, branch: branch, cseq: cseq, callID: callID,
+		fromURI:       extractURI(requestHeader(headers, "from")),
+		toURI:         extractURI(requestHeader(headers, "to")),
+		fromTag:       param(requestHeader(headers, "from"), "tag"),
+		inviteHeaders: append([]string(nil), headers...), cancelSent: cancelSent,
+	}
+}
+
+func (c *Client) expireCanceledInvite(invite *canceledInvite) {
+	go func() {
+		timer := time.NewTimer(32 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-c.closed:
+		case <-timer.C:
+		}
+		c.mu.Lock()
+		if c.canceledInvites[invite.callID] == invite {
+			delete(c.canceledInvites, invite.callID)
+		}
+		c.mu.Unlock()
+	}()
+}
+
+func (c *Client) handleUnmatchedInviteResponse(response Message) {
+	callID := response.Header("call-id")
+	cseq := cseqNumber(response.Header("cseq"))
+	c.mu.Lock()
+	call := c.active[callID]
+	completed := c.completedDialogs[callID]
+	invite := c.canceledInvites[callID]
+	if call != nil {
+		inviteCSeq := call.InviteCSeq
+		c.mu.Unlock()
+		// A 2xx to INVITE is retransmitted independently of the INVITE
+		// transaction. Re-ACK it if our first ACK was lost.
+		if response.StatusCode >= 200 && response.StatusCode < 300 && !call.inbound && cseq == inviteCSeq {
+			_ = c.sendACK(call)
+		}
+		return
+	}
+	if completed != nil {
+		inviteCSeq := completed.InviteCSeq
+		c.mu.Unlock()
+		if response.StatusCode >= 200 && response.StatusCode < 300 && cseq == inviteCSeq {
+			_ = c.sendACK(completed)
+		}
+		return
+	}
+	if invite == nil || invite.cseq != cseq {
+		c.mu.Unlock()
+		return
+	}
+	if response.StatusCode < 200 {
+		shouldCancel := !invite.cancelSent
+		invite.cancelSent = true
+		c.mu.Unlock()
+		if shouldCancel {
+			_ = c.sendCancel(invite.uri, invite.branch, invite.cseq, invite.inviteHeaders)
+		}
+		return
+	}
+	delete(c.canceledInvites, callID)
+	if response.StatusCode < 300 {
+		remoteTarget := extractURI(response.Header("contact"))
+		if remoteTarget == "" {
+			remoteTarget = invite.uri
+		}
+		lateCall := &Call{
+			client: c, CallID: invite.callID, FromTag: invite.fromTag, ToTag: param(response.Header("to"), "tag"),
+			FromURI: invite.fromURI, ToURI: invite.toURI, RemoteTarget: remoteTarget,
+			InviteCSeq: invite.cseq, CSeq: invite.cseq,
+			done: make(chan error, 1),
+		}
+		c.active[callID] = lateCall
+		c.mu.Unlock()
+		if err := c.sendACK(lateCall); err != nil {
+			lateCall.finish(fmt.Errorf("ACK late canceled INVITE: %w", err))
+			return
+		}
+		if c.log != nil {
+			c.log.Warn("late successful SIP dialog is being closed after cancellation", "call_id", callID)
+		}
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			_ = lateCall.Hangup(ctx)
+			cancel()
+		}()
+		return
+	}
+	c.mu.Unlock()
+	_ = c.sendInviteFinalACK(invite.uri, invite.branch, invite.cseq, invite.callID, invite.fromURI, invite.toURI, invite.fromTag, param(response.Header("to"), "tag"))
+}
+
+func (c *Client) expireCompletedDialog(call *Call) {
+	go func() {
+		timer := time.NewTimer(32 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-c.closed:
+		case <-timer.C:
+		}
+		c.mu.Lock()
+		if c.completedDialogs[call.CallID] == call {
+			delete(c.completedDialogs, call.CallID)
+		}
+		c.mu.Unlock()
+	}()
+}
+
+func requestHeader(headers []string, name string) string {
+	prefix := strings.ToLower(name) + ":"
+	for _, header := range headers {
+		if strings.HasPrefix(strings.ToLower(header), prefix) {
+			return strings.TrimSpace(header[len(prefix):])
+		}
+	}
+	return ""
+}
+
 func (c *Client) sendResponse(req Message, addr *net.UDPAddr, code int, reason string) error {
 	lines := []string{fmt.Sprintf("SIP/2.0 %d %s", code, reason)}
 	for _, name := range []string{"via", "from", "to", "call-id", "cseq"} {
@@ -680,7 +885,7 @@ func (c *Client) baseHeaders(method, uri, branch string, cseq uint32, callID, fr
 		fmt.Sprintf("Via: SIP/2.0/UDP %s:%d;branch=%s;rport", c.localIP, c.cfg.LocalPort, branch),
 		"Max-Forwards: 70", fromLine(from), "To: " + to, "Call-ID: " + callID, fmt.Sprintf("CSeq: %d %s", cseq, method),
 		fmt.Sprintf("Contact: <sip:%s@%s:%d;transport=udp>", c.cfg.Username, c.localIP, c.cfg.LocalPort),
-		"User-Agent: ReolinkSIPGateway/1.0.0",
+		"User-Agent: ReolinkSIPGateway/1.1.0",
 	}
 }
 func fromLine(v string) string      { return "From: " + v }

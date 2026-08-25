@@ -6,13 +6,17 @@ Community Home Assistant app that bridges bidirectional audio between a Reolink 
 
 ## Current release
 
-**v1.0.0** adds negotiated RFC 4733 DTMF to the stable local integration API. Each completed keypress is published as one transient event with its normalized remote party and SIP call ID for Home Assistant automations; the gateway does not interpret digit sequences, PINs or actions. The machine-readable contract is [`docs/api-v1.openapi.yaml`](docs/api-v1.openapi.yaml).
+**v1.1.0** adds an optional second SIP registration for mobile parallel calls. The existing account remains the FRITZ!Box IP door station; a second normal IP-phone account on the same registrar can call one to three mobile destinations at the same time. The first answered door or mobile leg wins and receives the single Reolink media path.
+
+Still-ringing losers receive `CANCEL`. If two peers answer across the winner decision, every `200 OK` is acknowledged and the losing dialog is immediately closed with `BYE`. The machine-readable integration contract remains API v1 and is documented in [`docs/api-v1.openapi.yaml`](docs/api-v1.openapi.yaml).
 
 Visitor events, incoming INVITEs and API test calls now enter one shared call controller, preserving the single-call invariant. The integration API does not implement a second media path: incoming and outgoing calls still share the same G.711/RTP, AEC and Reolink implementation introduced and hardware-tested in earlier releases.
 
 Highlights:
 
 - Versioned `/api/v1` with bearer authentication, a stable installation UUID, complete status snapshots and Server-Sent Events.
+- Two independent SIP registrations on separate local UDP ports: door station plus optional normal IP telephone for mobile calls.
+- One to three simultaneous mobile destinations on the second account, with first-answer-wins SIP forking and deterministic CANCEL/ACK/BYE cleanup.
 - Negotiated `telephone-event/8000` reception for `0`–`9`, `*`, `#` and `A`–`D`, deduplicated to one event per completed keypress.
 - Integration commands for a configured test call and idempotent hang-up, both routed through the normal call lifecycle.
 - Current/last call direction and normalized current/last incoming caller number in the integration status model.
@@ -73,6 +77,13 @@ sip:
   sip_codec_preference: pcma
   sip_registrar_port: 5060
   sip_local_port: 5070
+  parallel_call_enabled: true
+  parallel_username: "mobile-call"
+  parallel_password: "change-me"
+  parallel_destinations:
+    - "01630000000"
+    - "01760000000"
+  parallel_local_port: 5071
 
 audio:
   echo_cancellation_enabled: true
@@ -98,6 +109,10 @@ diagnostics:
 `nvr_channel_number` is deliberately **1-based** in the user interface. The startup adapter translates it to the internal Reolink channel representation without exposing the protocol-specific zero-based value.
 
 With `sip_registrar: auto`, the startup adapter reads the Home Assistant host's IPv4 routing table and uses its default-gateway address (commonly the FRITZ!Box). Set an IP address or DNS name instead to override auto-detection. Existing saved registrar values are not replaced during an update.
+
+For a FRITZ!Box 4050 telephone system, configure the original account as an **IP door intercom** and the second account as **Telephone → LAN/WLAN (IP telephone)**. Both registrations use the 4050 registrar address and port 5060, but the gateway listens locally on 5070 and 5071. Assign the required outgoing landline number to the second IP telephone in the FRITZ!Box. `parallel_destinations` accepts at most three unique numbers; all are called simultaneously from that one account. If parallel calling is disabled, the new credentials and destination list are ignored.
+
+The FRITZ!Box 6690 may remain a pure cable modem in this topology; it is not the SIP registrar or telephone system.
 
 With `visitor_entity: auto`, the adapter queries Home Assistant's compact `config/entity_registry/list_for_display` view and selects the single enabled `binary_sensor` from platform `reolink` with translation key `visitor`. Renamed entity IDs are therefore supported. If none or more than one are enabled, startup asks for an explicit manual entity instead of guessing. Existing manual visitor entities are retained during updates. WebSocket frames and complete messages remain bounded to 16 MiB.
 
@@ -156,6 +171,8 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./cmd/gateway
 The Docker image additionally builds a small native C++ helper against Debian's `libwebrtc-audio-processing-1` development package.
 
 See [`reolink_sip_gateway/TESTING.md`](reolink_sip_gateway/TESTING.md) for the release regression checklist and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the media pipeline.
+
+The proposed v1.2 multi-button/entity-to-door-number and per-button mobile-target matrix is recorded in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Reporting issues
 
