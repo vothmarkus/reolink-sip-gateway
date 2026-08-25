@@ -49,7 +49,9 @@ jobs:
           abort "missing DTMF event schema" unless schemas.key?("DTMFEvent");
           capabilities = schemas.fetch("Info").fetch("properties").fetch("capabilities").fetch("items").fetch("enum");
           abort "missing DTMF capability" unless capabilities.include?("dtmf_events");
-          abort "missing parallel-call capability" unless capabilities.include?("parallel_calls")'
+          abort "missing parallel-call capability" unless capabilities.include?("parallel_calls");
+          sip_required = schemas.fetch("SIPStatus").fetch("required");
+          abort "missing optional door-account status" unless sip_required.include?("door_call_enabled") && sip_required.include?("door_registered")'
 
   container:
     runs-on: ubuntu-latest
@@ -58,7 +60,7 @@ jobs:
       - name: Build Home Assistant image
         run: >-
           docker build
-          --build-arg BUILD_VERSION=1.1.0
+          --build-arg BUILD_VERSION=1.1.1
           --build-arg BUILD_ARCH=amd64
           -t reolink-sip-gateway:ci
           reolink_sip_gateway

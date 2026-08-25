@@ -32,7 +32,7 @@ func TestDefaultsAreUserFriendlyV050(t *testing.T) {
 	if !cfg.IncomingConnectionToneEnabled || cfg.RTPInactivityTimeout() != 15*time.Second {
 		t.Fatalf("unexpected incoming-call safety defaults: %#v", cfg)
 	}
-	if cfg.ParallelCallEnabled || len(cfg.ParallelDestinations) != 0 || cfg.ParallelLocalPort != 5071 {
+	if !cfg.DoorCallEnabled || cfg.ParallelCallEnabled || len(cfg.ParallelDestinations) != 0 || cfg.ParallelLocalPort != 5071 {
 		t.Fatalf("unexpected parallel-call defaults: %#v", cfg)
 	}
 }
@@ -89,6 +89,30 @@ func TestParallelCallValidationAndNormalization(t *testing.T) {
 	}
 }
 
+func TestMobileOnlyLiveConfiguration(t *testing.T) {
+	cfg := Defaults()
+	cfg.DryRun = false
+	cfg.ReolinkPassword = "camera-secret"
+	cfg.DoorCallEnabled = false
+	cfg.SIPUsername = ""
+	cfg.SIPPassword = ""
+	cfg.SIPDestination = ""
+	cfg.ParallelCallEnabled = true
+	cfg.ParallelUsername = "mobile"
+	cfg.ParallelPassword = "mobile-secret"
+	cfg.ParallelDestinations = []string{"0163", "0176", "0151"}
+	// No door socket is opened, so its otherwise unused port may be identical.
+	cfg.ParallelLocalPort = cfg.SIPLocalPort
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid mobile-only configuration failed: %v", err)
+	}
+
+	cfg.ParallelCallEnabled = false
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "at least one") {
+		t.Fatalf("live configuration without a SIP account should fail: %v", err)
+	}
+}
+
 func TestIncomingCallerAndRTPWatchdogValidation(t *testing.T) {
 	cfg := Defaults()
 	cfg.IncomingCallsEnabled = true
@@ -130,6 +154,8 @@ func TestDryRunDoesNotRequireCredentials(t *testing.T) {
 	cfg.ReolinkUsername, cfg.ReolinkPassword = "", ""
 	cfg.SIPUsername, cfg.SIPPassword = "", ""
 	cfg.SIPDestination = ""
+	cfg.DoorCallEnabled = false
+	cfg.ParallelCallEnabled = false
 	cfg.DryRun = true
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("dry run should validate: %v", err)

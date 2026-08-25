@@ -1,8 +1,16 @@
-# Reolink SIP Gateway 1.1.0
+# Reolink SIP Gateway 1.1.1
 
-Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann einen SIP-Anruf auslösen; optional lässt sich die registrierte Gateway-Nebenstelle anrufen und direkt mit der Doorbell verbinden.
+Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann SIP-Anrufe auslösen; optional lassen sich die aktivierten Gateway-Nebenstellen anrufen und direkt mit der Doorbell verbinden.
 
 > Community-Projekt. Nicht offiziell von Reolink oder Home Assistant bereitgestellt oder unterstützt.
+
+## 1.1.1: unabhängige SIP-Konten und gemeinsame Anrufannahme
+
+1.1.1 macht auch das bisherige Türsprechstellen-Konto über **Türsprechstellen-Konto aktivieren** optional. Im Live-Betrieb muss mindestens eines der beiden Konten aktiv sein. Dadurch sind sowohl der bisherige Türsprechstellenbetrieb als auch ein reiner Mobilruf zu ein bis drei Zielen und der kombinierte Parallelruf möglich. Der neue Schalter ist bei Updates standardmäßig aktiv, sodass bestehende Installationen unverändert weiterlaufen.
+
+Das Tür-Konto wird in der FRITZ!Box 4050 als **IP-Türsprechanlage** eingerichtet. Das Feld **FRITZ!Box-Türziel / Klingeltaster** bezeichnet die dort konfigurierte Klingeltaste; beispielsweise steht `11` typischerweise für Klingeltaster 1. Die Zuordnung der konkreten FRITZ!Box ist maßgeblich.
+
+**Eingehende SIP-Anrufe auf allen Konten zulassen** gilt für jedes aktivierte Konto. Der erste eingehende Anruf reserviert den einzigen Reolink-Medienweg; ein weiterer gleichzeitiger Anruf an Tür- oder Mobilkonto erhält `486 Busy Here`. RFC-4733-DTMF wird bei erfolgreicher Aushandlung auf beiden Konten und in beiden Anrufrichtungen identisch als Home-Assistant-Ereignis gemeldet.
 
 ## 1.1.0: Türsprechstelle plus Mobil-Parallelruf
 
@@ -140,9 +148,10 @@ reolink:
 
 sip:
   sip_registrar: auto
+  door_call_enabled: true
   sip_username: "..."
   sip_password: "..."
-  sip_destination: "**610"
+  sip_destination: "11"
   sip_display_name: Haustür
   sip_codec_preference: pcma
   sip_registrar_port: 5060
@@ -178,11 +187,11 @@ diagnostics:
 
 Bei `sip_registrar: auto` wird beim Start die IPv4-Default-Gateway-Adresse des Home-Assistant-Hosts verwendet. Ein manueller Registrar überschreibt diese Automatik. Kann kein nutzbares IPv4-Gateway gefunden werden, fordert das Startlog dazu auf, den Registrar manuell einzutragen.
 
-Für den Mobil-Parallelruf wird unter **Telefonie → Telefoniegeräte** ein zweites Gerät vom Typ **Telefon → LAN/WLAN** angelegt. Die FRITZ!Box weist diesem Konto die gewünschte ausgehende Festnetznummer zu. `parallel_destinations` enthält eine bis drei externe Zielnummern; doppelte Einträge werden entfernt. Ein aktiviertes Mobilkonto ohne Zugangsdaten/Ziel oder mit demselben lokalen Port wie das Tür-Konto wird beim Start klar abgewiesen.
+Das erste Konto wird in der FRITZ!Box 4050 als **IP-Türsprechanlage** angelegt. `sip_destination: "11"` bezeichnet dort typischerweise Klingeltaster 1; maßgeblich ist die tatsächliche Zuordnung in der FRITZ!Box. Für den Mobil-Parallelruf wird ein weiteres Gerät vom Typ **Telefon → LAN/WLAN** angelegt. Die FRITZ!Box weist diesem Konto die gewünschte ausgehende Festnetznummer zu. `parallel_destinations` enthält eine bis drei externe Zielnummern; doppelte Einträge werden entfernt. Bei `door_call_enabled: false` sind Zugangsdaten und Ziel des Tür-Kontos nicht erforderlich. Im Live-Betrieb muss mindestens Tür- oder Mobilkonto aktiv sein; identische lokale Ports werden nur abgewiesen, wenn beide Konten aktiv sind.
 
 Bei `visitor_entity: auto` wird genau ein aktivierter Reolink-Besucher-Sensor aus der Home-Assistant-Entity-Registry verwendet. Bei keinem oder mehreren Treffern fordert das Startlog zur manuellen Auswahl auf.
 
-Mit `incoming_calls_enabled: true` nimmt das Gateway Anrufe an seine registrierte SIP-Nebenstelle automatisch an, sobald der konfigurierte Reolink-Medienweg bereit ist. Bei einer FRITZ!Box wird die in **Telefonie → Telefoniegeräte** angezeigte interne Nummer des Gateway-IP-Telefons gewählt.
+Mit `incoming_calls_enabled: true` nimmt das Gateway Anrufe an jedem aktivierten SIP-Konto automatisch an, sobald der konfigurierte Reolink-Medienweg bereit ist. Bei einer FRITZ!Box wird die unter **Telefonie → Telefoniegeräte** angezeigte interne Nummer des gewünschten Kontos gewählt. Der erste Anruf gewinnt den globalen Call-Slot; ein weiterer gleichzeitiger Anruf an eines der Konten erhält `486 Busy Here`. Ausgehandeltes RFC-4733-DTMF wird auf beiden Konten gleich verarbeitet.
 
 RTP-Ports werden automatisch vom Betriebssystem gewählt. FFmpeg liegt fest unter `/usr/bin/ffmpeg`. Die WebRTC-Rauschunterdrückung verwendet bei Aktivierung fest `moderate`. Der Home-Assistant-WebSocket ist der primäre Klingelpfad; der REST-Fallback läuft intern mit festem Einsekundenintervall.
 

@@ -26,23 +26,26 @@ configuration:
         description: TCP port of Reolink Basic Service used in NVR mode, usually 9000.
   sip:
     name: SIP telephony
-    description: Door-station account plus an optional mobile-call account on the same PBX.
+    description: Independently enabled door-station and mobile-call accounts on the same PBX.
     fields:
       sip_registrar:
         name: SIP registrar
         description: “auto” uses the IPv4 default-gateway address of the Home Assistant host (often the FRITZ!Box). Alternatively, enter the SIP registrar IP address or DNS name manually.
+      door_call_enabled:
+        name: Enable door-station account
+        description: Registers the first account as an IP door intercom. When disabled, the gateway can operate with only the mobile-call account and its one to three destinations.
       sip_username:
-        name: SIP username
-        description: Username of the IP telephone account configured in the PBX.
+        name: Door-station account username
+        description: Username of the device configured as an IP door intercom in the FRITZ!Box. Required only when the door-station account is enabled.
       sip_password:
-        name: SIP password
-        description: Password of the SIP account.
+        name: Door-station account password
+        description: Password of the IP door intercom configured in the FRITZ!Box. Required only when the door-station account is enabled.
       sip_destination:
-        name: SIP destination
-        description: Internal number or SIP URI to dial, for example **610.
+        name: FRITZ!Box door destination / button
+        description: Dial destination used by the IP door intercom in the FRITZ!Box. For example, 11 commonly represents doorbell button 1; the FRITZ!Box assignment is authoritative.
       sip_display_name:
-        name: Display name
-        description: Caller name shown on the SIP endpoint.
+        name: Door-station display name
+        description: Caller name shown on the SIP endpoint for a door-station call.
       sip_codec_preference:
         name: Preferred audio codec
         description: PCMA is recommended for European telephony; auto offers PCMA and PCMU.
@@ -50,23 +53,23 @@ configuration:
         name: SIP port (advanced)
         description: UDP port of the SIP registrar, usually 5060.
       sip_local_port:
-        name: Local SIP port (advanced)
-        description: UDP port used for SIP signalling. RTP ports are selected automatically.
+        name: Door-account local SIP port (advanced)
+        description: UDP port used by the door-station account for SIP signalling. RTP ports are selected automatically.
       parallel_call_enabled:
-        name: Enable additional mobile parallel call
-        description: Registers a second normal IP phone on the same FRITZ!Box and calls its mobile destinations together with the door station. The first answered call wins.
+        name: Enable mobile-call account
+        description: Registers a normal IP phone on the same FRITZ!Box and calls up to three mobile destinations simultaneously, alongside an enabled door station or as the only route. The first answered call wins.
       parallel_username:
         name: Mobile-call account username
-        description: Username of the second FRITZ!Box device configured as a normal IP phone. Required only when mobile parallel calling is enabled.
+        description: Username of the FRITZ!Box device configured as a normal IP phone. Required only when the mobile-call account is enabled.
       parallel_password:
         name: Mobile-call account password
-        description: Password of the second IP phone. Required only when mobile parallel calling is enabled.
+        description: Password of the mobile-call IP phone. Required only when the mobile-call account is enabled.
       parallel_destinations:
         name: Mobile-call destinations
         description: One to at most three external numbers called simultaneously. Every leg uses the same mobile-call account and its outgoing number assigned in the FRITZ!Box.
       parallel_local_port:
         name: Mobile-call local SIP port (advanced)
-        description: Separate UDP port for the second SIP account; defaults to 5071 and must differ from the door-station port.
+        description: UDP port for the mobile-call account; defaults to 5071 and must differ from the door-station port when both accounts are enabled.
   audio:
     name: Audio
     description: Echo cancellation and WebRTC audio filters. Reolink latency is calibrated automatically at startup.
@@ -88,8 +91,8 @@ configuration:
         name: Reolink visitor sensor
         description: “auto” automatically uses the enabled visitor/doorbell sensor from the Reolink integration. If multiple Reolink doorbells are present, enter the desired binary_sensor entity manually.
       incoming_calls_enabled:
-        name: Allow incoming SIP calls
-        description: Automatically answers calls to the registered SIP extension and connects them to the configured Reolink camera. Only calls from the configured SIP registrar and caller list are accepted.
+        name: Allow incoming SIP calls on all accounts
+        description: Applies to every enabled SIP account. The first incoming call receives the exclusive Reolink media path; later calls receive 486 Busy Here. Only calls from the registrar and caller list are accepted. RFC 4733 DTMF is negotiated on both accounts.
       incoming_allowed_callers:
         name: Allowed callers
         description: List of permitted telephone numbers or internal SIP usernames. Spaces, hyphens, periods, slashes and parentheses in telephone numbers are ignored when matching. “*” allows every caller and must be the only entry; country codes are not converted automatically.

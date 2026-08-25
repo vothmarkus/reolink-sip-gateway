@@ -6,7 +6,7 @@ Community Home Assistant app that bridges bidirectional audio between a Reolink 
 
 ## Current release
 
-**v1.1.0** adds an optional second SIP registration for mobile parallel calls. The existing account remains the FRITZ!Box IP door station; a second normal IP-phone account on the same registrar can call one to three mobile destinations at the same time. The first answered door or mobile leg wins and receives the single Reolink media path.
+**v1.1.1** makes the FRITZ!Box door-station account optional and applies incoming-call acceptance to both enabled SIP accounts. Existing installations retain the door account by default; mobile-only operation can call one to three destinations without door credentials. The first answered outbound door/mobile leg or first incoming call receives the single Reolink media path; additional incoming calls receive `486 Busy Here`.
 
 Still-ringing losers receive `CANCEL`. If two peers answer across the winner decision, every `200 OK` is acknowledged and the losing dialog is immediately closed with `BYE`. The machine-readable integration contract remains API v1 and is documented in [`docs/api-v1.openapi.yaml`](docs/api-v1.openapi.yaml).
 
@@ -15,7 +15,7 @@ Visitor events, incoming INVITEs and API test calls now enter one shared call co
 Highlights:
 
 - Versioned `/api/v1` with bearer authentication, a stable installation UUID, complete status snapshots and Server-Sent Events.
-- Two independent SIP registrations on separate local UDP ports: door station plus optional normal IP telephone for mobile calls.
+- Up to two independent SIP registrations: an optional door station plus an optional normal IP telephone for mobile calls; at least one is required in live mode.
 - One to three simultaneous mobile destinations on the second account, with first-answer-wins SIP forking and deterministic CANCEL/ACK/BYE cleanup.
 - Negotiated `telephone-event/8000` reception for `0`–`9`, `*`, `#` and `A`–`D`, deduplicated to one event per completed keypress.
 - Integration commands for a configured test call and idempotent hang-up, both routed through the normal call lifecycle.
@@ -70,9 +70,10 @@ reolink:
 
 sip:
   sip_registrar: auto
+  door_call_enabled: true
   sip_username: "doorbell"
   sip_password: "change-me"
-  sip_destination: "**610"
+  sip_destination: "11"
   sip_display_name: "Front Door"
   sip_codec_preference: pcma
   sip_registrar_port: 5060
@@ -110,13 +111,13 @@ diagnostics:
 
 With `sip_registrar: auto`, the startup adapter reads the Home Assistant host's IPv4 routing table and uses its default-gateway address (commonly the FRITZ!Box). Set an IP address or DNS name instead to override auto-detection. Existing saved registrar values are not replaced during an update.
 
-For a FRITZ!Box 4050 telephone system, configure the original account as an **IP door intercom** and the second account as **Telephone → LAN/WLAN (IP telephone)**. Both registrations use the 4050 registrar address and port 5060, but the gateway listens locally on 5070 and 5071. Assign the required outgoing landline number to the second IP telephone in the FRITZ!Box. `parallel_destinations` accepts at most three unique numbers; all are called simultaneously from that one account. If parallel calling is disabled, the new credentials and destination list are ignored.
+For a FRITZ!Box 4050 telephone system, configure the original account as an **IP door intercom** and the mobile account as **Telephone → LAN/WLAN (IP telephone)**. The door destination is the number assigned by the FRITZ!Box door-intercom setup; for example, `11` commonly represents doorbell button 1. Both registrations use the 4050 registrar address and port 5060, but normally listen locally on 5070 and 5071. Assign the required outgoing landline number to the mobile IP telephone. `parallel_destinations` accepts at most three unique numbers. Set `door_call_enabled: false` for mobile-only operation; dormant door credentials are then not required.
 
 The FRITZ!Box 6690 may remain a pure cable modem in this topology; it is not the SIP registrar or telephone system.
 
 With `visitor_entity: auto`, the adapter queries Home Assistant's compact `config/entity_registry/list_for_display` view and selects the single enabled `binary_sensor` from platform `reolink` with translation key `visitor`. Renamed entity IDs are therefore supported. If none or more than one are enabled, startup asks for an explicit manual entity instead of guessing. Existing manual visitor entities are retained during updates. WebSocket frames and complete messages remain bounded to 16 MiB.
 
-Set **Allow incoming SIP calls** (`incoming_calls_enabled`) in the **Call** section to call the camera through the gateway. With a FRITZ!Box, dial the internal number assigned to the gateway's IP telephone, for example `**620`; use the actual number shown by the FRITZ!Box. The option defaults to `false` so upgrades never begin auto-answering unexpectedly. Signalling is accepted only from the configured registrar IP and UDP port, and the normalized SIP caller user must match `incoming_allowed_callers`. The compatibility value `*` permits every caller; replace it with the telephone numbers or internal extensions that should be accepted. Country-code variants are intentionally not inferred.
+Set **Allow incoming SIP calls on all accounts** (`incoming_calls_enabled`) in the **Call** section to call the camera through either enabled gateway account. With a FRITZ!Box, dial the internal number assigned to the desired device. The first incoming call occupies the global media slot; a concurrent call to either account receives `486 Busy Here`. The option defaults to `false` so upgrades never begin auto-answering unexpectedly. Signalling is accepted only from the configured registrar IP and UDP port, and the normalized SIP caller user must match `incoming_allowed_callers`. RFC 4733 DTMF is negotiated and reported identically on both accounts. The compatibility value `*` permits every caller; replace it with the telephone numbers or internal extensions that should be accepted. Country-code variants are intentionally not inferred.
 
 Before an accepted incoming call is answered, `incoming_connection_tone_enabled` plays the first four symbols (256 ms) of the existing acoustic marker through the actual Reolink talkback path. `rtp_inactivity_timeout_seconds` then ends either call direction when no valid negotiated RTP audio packet is received for the configured interval. If only internal calls should reach the camera, do not assign external incoming numbers to this IP telephone in the FRITZ!Box, because forwarded external calls also originate from the trusted registrar.
 

@@ -1,5 +1,5 @@
 name: Reolink SIP Gateway
-version: "1.1.0"
+version: "1.1.1"
 slug: reolink_sip_gateway
 description: Verbindet Reolink-Klingelereignisse und eingehende SIP-Anrufe mit Zwei-Wege-Audio und einer lokalen Integrations-API.
 url: https://github.com/vothmarkus/reolink-sip-gateway
@@ -28,6 +28,7 @@ options:
     baichuan_port: 9000
   sip:
     sip_registrar: auto
+    door_call_enabled: true
     sip_username: ""
     sip_password: ""
     sip_destination: "**610"
@@ -68,6 +69,7 @@ schema:
     baichuan_port: port
   sip:
     sip_registrar: str
+    door_call_enabled: bool
     sip_username: str
     sip_password: password
     sip_destination: str

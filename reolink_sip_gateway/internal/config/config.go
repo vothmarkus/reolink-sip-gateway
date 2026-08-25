@@ -47,6 +47,7 @@ type Config struct {
 	SIPLocalPort                   int      `json:"sip_local_port"`
 	SIPDisplayName                 string   `json:"sip_display_name"`
 	SIPCodecPreference             string   `json:"sip_codec_preference"`
+	DoorCallEnabled                bool     `json:"door_call_enabled"`
 	ParallelCallEnabled            bool     `json:"parallel_call_enabled"`
 	ParallelUsername               string   `json:"parallel_username"`
 	ParallelPassword               string   `json:"parallel_password"`
@@ -93,6 +94,7 @@ func Defaults() Config {
 		SIPLocalPort:                   5070,
 		SIPDisplayName:                 "Haustür",
 		SIPCodecPreference:             "pcma",
+		DoorCallEnabled:                true,
 		ParallelCallEnabled:            false,
 		ParallelDestinations:           []string{},
 		ParallelLocalPort:              5071,
@@ -219,15 +221,15 @@ func (c Config) Validate() error {
 	if c.SIPRegistrarPort < 1 || c.SIPRegistrarPort > 65535 {
 		errs = append(errs, errors.New("sip_registrar_port must be 1..65535"))
 	}
-	if !c.DryRun {
+	if c.DoorCallEnabled && !c.DryRun {
 		if strings.TrimSpace(c.SIPUsername) == "" {
-			errs = append(errs, errors.New("sip_username is required unless dry_run is enabled"))
+			errs = append(errs, errors.New("sip_username is required when the door call is enabled"))
 		}
 		if strings.TrimSpace(c.SIPPassword) == "" {
-			errs = append(errs, errors.New("sip_password is required unless dry_run is enabled"))
+			errs = append(errs, errors.New("sip_password is required when the door call is enabled"))
 		}
 		if strings.TrimSpace(c.SIPDestination) == "" {
-			errs = append(errs, errors.New("sip_destination is required unless dry_run is enabled"))
+			errs = append(errs, errors.New("sip_destination is required when the door call is enabled"))
 		}
 	}
 	if c.SIPLocalPort < 1 || c.SIPLocalPort > 65535 {
@@ -259,7 +261,7 @@ func (c Config) Validate() error {
 		if len(c.ParallelDestinations) == 0 {
 			errs = append(errs, errors.New("parallel_destinations must contain at least one destination when parallel calling is enabled"))
 		}
-		if c.ParallelLocalPort == c.SIPLocalPort {
+		if c.DoorCallEnabled && c.ParallelLocalPort == c.SIPLocalPort {
 			errs = append(errs, errors.New("parallel_local_port must differ from sip_local_port"))
 		}
 		if !c.DryRun {
@@ -270,6 +272,9 @@ func (c Config) Validate() error {
 				errs = append(errs, errors.New("parallel_password is required when parallel calling is enabled"))
 			}
 		}
+	}
+	if !c.DryRun && !c.DoorCallEnabled && !c.ParallelCallEnabled {
+		errs = append(errs, errors.New("at least one of door_call_enabled or parallel_call_enabled must be enabled"))
 	}
 	if c.IncomingCallsEnabled && len(c.IncomingAllowedCallers) == 0 {
 		errs = append(errs, errors.New("incoming_allowed_callers must contain at least one caller or * when incoming calls are enabled"))

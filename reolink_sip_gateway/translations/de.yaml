@@ -26,23 +26,26 @@ configuration:
         description: TCP-Port des Reolink Basic Service für den NVR-Modus; normalerweise 9000.
   sip:
     name: SIP-Telefonie
-    description: Türsprechstellen-Konto sowie optionales Mobilruf-Konto an derselben Telefonanlage.
+    description: Unabhängig aktivierbares Türsprechstellen- und Mobilruf-Konto an derselben Telefonanlage.
     fields:
       sip_registrar:
         name: SIP-Registrar
         description: „auto“ verwendet die IPv4-Gateway-Adresse des Home-Assistant-Hosts (häufig die FRITZ!Box). Alternativ kann die IP-Adresse oder der DNS-Name des SIP-Registrars manuell eingetragen werden.
+      door_call_enabled:
+        name: Türsprechstellen-Konto aktivieren
+        description: Registriert das erste Konto als IP-Türsprechanlage. Bei Deaktivierung kann das Gateway ausschließlich das Mobilruf-Konto und dessen bis zu drei Ziele verwenden.
       sip_username:
-        name: SIP-Benutzername
-        description: Benutzername des in der FRITZ!Box angelegten IP-Telefons.
+        name: Benutzername des Türsprechstellen-Kontos
+        description: Benutzername des in der FRITZ!Box als IP-Türsprechanlage angelegten Geräts. Nur bei aktiviertem Türsprechstellen-Konto erforderlich.
       sip_password:
-        name: SIP-Passwort
-        description: Passwort des SIP-Kontos.
+        name: Passwort des Türsprechstellen-Kontos
+        description: Kennwort der in der FRITZ!Box angelegten IP-Türsprechanlage. Nur bei aktiviertem Türsprechstellen-Konto erforderlich.
       sip_destination:
-        name: SIP-Ziel
-        description: Zu wählende interne Nummer oder SIP-URI, beispielsweise **610.
+        name: FRITZ!Box-Türziel / Klingeltaster
+        description: In der FRITZ!Box für die IP-Türsprechanlage verwendetes Rufziel. Beispielsweise steht 11 typischerweise für Klingeltaster 1; maßgeblich ist die Zuordnung in der FRITZ!Box.
       sip_display_name:
-        name: Anzeigename
-        description: Name, der beim angerufenen SIP-Endgerät erscheinen soll.
+        name: Anzeigename der Türsprechstelle
+        description: Name, der beim Türsprechstellen-Ruf auf dem SIP-Endgerät erscheinen soll.
       sip_codec_preference:
         name: Bevorzugter Audiocodec
         description: PCMA wird für deutsche Telefonanlagen empfohlen; „auto“ bietet PCMA und PCMU an.
@@ -50,23 +53,23 @@ configuration:
         name: SIP-Port (erweitert)
         description: UDP-Port des SIP-Registrars; normalerweise 5060.
       sip_local_port:
-        name: Lokaler SIP-Port (erweitert)
-        description: UDP-Port für die SIP-Signalisierung. RTP-Ports werden automatisch gewählt.
+        name: Lokaler SIP-Port des Tür-Kontos (erweitert)
+        description: UDP-Port des Türsprechstellen-Kontos für die SIP-Signalisierung. RTP-Ports werden automatisch gewählt.
       parallel_call_enabled:
-        name: Zusätzlichen Mobil-Parallelruf aktivieren
-        description: Registriert ein zweites normales IP-Telefon an derselben FRITZ!Box und ruft dessen Mobilziele gleichzeitig mit der Türsprechstelle an. Der zuerst angenommene Ruf gewinnt.
+        name: Mobilruf-Konto aktivieren
+        description: Registriert ein normales IP-Telefon an derselben FRITZ!Box und ruft bis zu drei Mobilziele gleichzeitig an – parallel zur aktiven Türsprechstelle oder als alleiniger Rufweg. Der zuerst angenommene Ruf gewinnt.
       parallel_username:
         name: Benutzername des Mobilruf-Kontos
-        description: Benutzername des zweiten, als normales IP-Telefon eingerichteten FRITZ!Box-Kontos. Nur bei aktiviertem Mobil-Parallelruf erforderlich.
+        description: Benutzername des als normales IP-Telefon eingerichteten FRITZ!Box-Kontos. Nur bei aktiviertem Mobilruf-Konto erforderlich.
       parallel_password:
         name: Passwort des Mobilruf-Kontos
-        description: Kennwort des zweiten IP-Telefons. Nur bei aktiviertem Mobil-Parallelruf erforderlich.
+        description: Kennwort des Mobilruf-IP-Telefons. Nur bei aktiviertem Mobilruf-Konto erforderlich.
       parallel_destinations:
         name: Mobilruf-Ziele
         description: Eine bis maximal drei gleichzeitig anzurufende externe Rufnummern. Alle Zweige verwenden dasselbe Mobilruf-Konto und die ihm in der FRITZ!Box zugewiesene ausgehende Rufnummer.
       parallel_local_port:
         name: Lokaler SIP-Port des Mobilruf-Kontos (erweitert)
-        description: Separater UDP-Port des zweiten SIP-Kontos; standardmäßig 5071 und zwingend verschieden vom Türsprechstellen-Port.
+        description: UDP-Port des Mobilruf-Kontos; standardmäßig 5071 und bei gleichzeitig aktivem Tür-Konto verschieden von dessen Port.
   audio:
     name: Audio
     description: Echounterdrückung und WebRTC-Audiofilter. Die Reolink-Latenz wird beim Start automatisch kalibriert.
@@ -88,8 +91,8 @@ configuration:
         name: Reolink-Besucher-Sensor
         description: „auto“ verwendet automatisch den aktivierten Besucher-/Klingelsensor der Reolink-Integration. Bei mehreren Reolink-Türklingeln muss die gewünschte binary_sensor-Entity manuell eingetragen werden.
       incoming_calls_enabled:
-        name: Eingehende SIP-Anrufe zulassen
-        description: Nimmt Anrufe an die registrierte SIP-Nebenstelle automatisch an und verbindet sie mit der fest konfigurierten Reolink-Kamera. Es werden nur Anrufe vom konfigurierten SIP-Registrar und aus der Anruferliste akzeptiert.
+        name: Eingehende SIP-Anrufe auf allen Konten zulassen
+        description: Gilt für jedes aktivierte SIP-Konto. Der erste eingehende Anruf erhält den exklusiven Reolink-Medienweg; weitere Anrufe werden mit 486 Busy Here abgewiesen. Es werden nur Anrufe vom Registrar und aus der Anruferliste akzeptiert. RFC-4733-DTMF wird auf beiden Konten ausgehandelt.
       incoming_allowed_callers:
         name: Erlaubte Anrufer
         description: Liste zulässiger Rufnummern oder interner SIP-Benutzernamen. Leerzeichen, Bindestriche, Punkte, Schrägstriche und Klammern in Telefonnummern werden beim Vergleich ignoriert. „*“ erlaubt alle Anrufer und muss allein stehen; Landesvorwahlen werden nicht automatisch umgerechnet.

@@ -10,6 +10,7 @@
   },
   "sip": {
     "sip_registrar": "192.168.177.9",
+    "door_call_enabled": true,
     "sip_username": "621",
     "sip_password": "test-password",
     "sip_destination": "**610",

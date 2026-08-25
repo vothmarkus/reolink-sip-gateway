@@ -76,6 +76,8 @@ type APIGatewayStatus struct {
 type APISIPStatus struct {
 	Registered                    bool   `json:"registered"`
 	LastRegistrationError         string `json:"last_registration_error,omitempty"`
+	DoorCallEnabled               bool   `json:"door_call_enabled"`
+	DoorRegistered                bool   `json:"door_registered"`
 	ParallelCallEnabled           bool   `json:"parallel_call_enabled"`
 	ParallelRegistered            bool   `json:"parallel_registered"`
 	ParallelLastRegistrationError string `json:"parallel_last_registration_error,omitempty"`
@@ -204,6 +206,9 @@ func (s *Store) registerAPIRoutes(mux *http.ServeMux, options ServerOptions) {
 func newAPIStatus(snapshot Snapshot) APIStatus {
 	active := snapshot.CurrentCallDirection != ""
 	callCanStart := snapshot.State == "idle" || snapshot.State == "error"
+	doorRegistered := snapshot.DoorCallEnabled && snapshot.SIPRegistered
+	parallelRegistered := snapshot.ParallelCallEnabled && snapshot.ParallelSIPRegistered
+	anyRegistered := doorRegistered || parallelRegistered
 	callState := "idle"
 	if active {
 		callState = snapshot.State
@@ -218,8 +223,9 @@ func newAPIStatus(snapshot Snapshot) APIStatus {
 			LastVisitorEvent: timePointer(snapshot.LastVisitorEvent), LastError: snapshot.LastError,
 		},
 		SIP: APISIPStatus{
-			Registered: snapshot.SIPRegistered, LastRegistrationError: snapshot.LastRegistrationErr,
-			ParallelCallEnabled: snapshot.ParallelCallEnabled, ParallelRegistered: snapshot.ParallelSIPRegistered,
+			Registered: anyRegistered, LastRegistrationError: snapshot.LastRegistrationErr,
+			DoorCallEnabled: snapshot.DoorCallEnabled, DoorRegistered: doorRegistered,
+			ParallelCallEnabled: snapshot.ParallelCallEnabled, ParallelRegistered: parallelRegistered,
 			ParallelLastRegistrationError: snapshot.LastParallelRegistrationErr,
 		},
 		Call: APICallStatus{
@@ -237,7 +243,7 @@ func newAPIStatus(snapshot Snapshot) APIStatus {
 			LastCalibration: timePointer(snapshot.LastCalibration),
 		},
 		Controls: APIControls{
-			TestCallAvailable: !snapshot.DryRun && snapshot.SIPRegistered && !active && callCanStart,
+			TestCallAvailable: !snapshot.DryRun && anyRegistered && !active && callCanStart,
 			HangupAvailable:   active,
 		},
 	}

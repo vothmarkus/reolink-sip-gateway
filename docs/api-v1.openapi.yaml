@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Reolink SIP Gateway Integration API
-  version: 1.2.0
+  version: 1.3.0
   description: >-
     Local API exposed by Reolink SIP Gateway 1.0.0 and newer. The API is
     versioned independently from the gateway release and is intended for the
@@ -136,7 +136,7 @@ components:
           const: 1
         gateway_version:
           type: string
-          examples: [1.1.0]
+          examples: [1.1.1]
         instance_id:
           type: string
           format: uuid
@@ -240,12 +240,20 @@ components:
     SIPStatus:
       type: object
       additionalProperties: false
-      required: [registered, parallel_call_enabled, parallel_registered]
+      required: [registered, door_call_enabled, door_registered, parallel_call_enabled, parallel_registered]
       properties:
         registered:
           type: boolean
+          description: Whether at least one enabled SIP account is registered
         last_registration_error:
           type: string
+          description: Registration error of the legacy door-account status field
+        door_call_enabled:
+          type: boolean
+          description: Whether the door-station SIP account is configured
+        door_registered:
+          type: boolean
+          description: Registration state of the enabled door-station SIP account
         parallel_call_enabled:
           type: boolean
           description: Whether the optional second SIP account and mobile destinations are configured

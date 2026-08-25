@@ -1,8 +1,8 @@
-# Prüfprotokoll 1.1.0
+# Prüfprotokoll 1.1.1
 
 ## Ziel
 
-1.1.0 ergänzt ein zweites SIP-Konto und einen First-Answer-Wins-Fork aus Türziel plus maximal drei Mobilzielen. Zu prüfen sind getrennte Registrierungen/Ports, mehrere Dialoge auf demselben Mobilkonto, CANCEL/ACK/BYE-Races und die weiterhin exakt eine Reolink-Mediensitzung.
+1.1.1 macht Tür- und Mobilkonto unabhängig aktivierbar, wendet die eingehende Anrufannahme auf beide Konten an und behält den First-Answer-Wins-Fork mit maximal drei Mobilzielen. Zu prüfen sind Tür-, Mobil- und Kombibetrieb, der kontenübergreifende Busy-Schutz, DTMF auf beiden Konten, getrennte Registrierungen/Ports, CANCEL/ACK/BYE-Races und weiterhin exakt eine Reolink-Mediensitzung.
 
 ## Softwareprüfungen vor Release
 
@@ -17,9 +17,18 @@
 - YAML-/JSON-Prüfung von App-Konfiguration und Übersetzungen
 - identische fünf Gruppen und Feldmengen in `options`, `schema`, DE, EN und Testkonfiguration
 - Bash-Syntaxprüfung des s6-Startskripts
-- Versionsprüfung 1.1.0 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
+- Versionsprüfung 1.1.1 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
 - Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
 - expliziter Test der nativen Statistikbits 0…7
+
+## Ergänzungen 1.1.1
+
+- `door_call_enabled` steht direkt nach dem Registrar in `options`, `schema`, DE, EN und Fixtures. Fresh Install und Update ergeben `true`, sodass bestehender Türbetrieb unverändert bleibt.
+- Live-Konfigurationen mit nur Türkonto, nur Mobilkonto oder beiden Konten sind gültig. Sind beide Schalter aus, schlägt die Validierung klar fehl. Zugangsdaten und Ziel werden nur für das jeweils aktivierte Konto verlangt; gleiche lokale Ports sind bei nur einem aktiven Konto zulässig.
+- Beide Konten übernehmen `incoming_calls_enabled` und dieselbe Anruferliste. Eingehende INVITEs beider lokalen Ports erreichen denselben globalen Controller: Der erste Anruf gewinnt, ein weiterer erhält `486 Busy Here`.
+- Ausgehandeltes RFC-4733-DTMF wird bei ein- und ausgehenden Gesprächen beider Konten identisch als API-Ereignis ausgegeben.
+- API v1 meldet Aktivierungs- und Registrierungsstatus beider Konten. Das kompatible Feld `sip.registered` ist wahr, sobald mindestens ein aktiviertes Konto registriert ist; damit sind Bereitschaft und Testanruf auch im Mobil-only-Betrieb korrekt.
+- Die deutsche UI beschreibt das erste Konto ausdrücklich als FRITZ!Box-IP-Türsprechanlage und erklärt `sip_destination`, beispielsweise `11` als typischen Klingeltaster 1.
 
 ## Ergänzungen 1.1.0
 
@@ -31,16 +40,19 @@
 - Jeder Wählzweig reserviert einen eigenen dynamischen RTP-Socket. Nur der Gewinner wird an `media.Session` übergeben; loser sockets werden nach Fehler/CANCEL/BYE geschlossen. Der globale Call-Slot bleibt bis zum begrenzten Loser-Cleanup reserviert.
 - API v1 meldet `parallel_calls`, Aktivierungszustand und zweite Registrierung additiv. Alte Felder und DTMF-Ereignisse bleiben unverändert.
 
-## FRITZ!Box-4050-Hardwaretest 1.1.0
+## FRITZ!Box-4050-Hardwaretest 1.1.1
 
 1. FRITZ!Box 4050 als Registrar/Telefonanlage verwenden; FRITZ!Box 6690 bleibt reines Modem.
-2. Tür-Konto als IP-Türsprechanlage und Mobilkonto als normales LAN/WLAN-IP-Telefon anlegen. Lokale Gateway-Ports 5070/5071, Registrarziel jeweils 4050:5060.
+2. Tür-Konto als IP-Türsprechanlage mit passendem Klingeltaster-Ziel anlegen, beispielsweise `11` für Klingeltaster 1; Mobilkonto als normales LAN/WLAN-IP-Telefon anlegen. Lokale Gateway-Ports 5070/5071, Registrarziel jeweils 4050:5060.
 3. Dem Mobilkonto die gewünschte ausgehende Festnetznummer zuweisen und zunächst genau ein Mobilziel konfigurieren. Beide Registrierungen müssen im Gatewaystatus `true` zeigen.
 4. Klingeln: FRITZ!Fon zeigt weiterhin Türruf/Livebild/Öffnen; das Handy erhält einen normalen externen Anruf. Je einmal zuerst FRITZ!Fon und zuerst Handy annehmen. Der Verlierer muss sofort aufhören zu klingeln und nur der Gewinner Audio erhalten.
 5. Zwei, danach drei Mobilziele aktivieren. Alle Ziele müssen parallel klingeln; der erste angenommene Zweig gewinnt. Im Debuglog dürfen keine zweiten Reolink-Mediensitzungen und keine aktiven Restdialoge erscheinen.
 6. Race provozieren, indem zwei Teilnehmer nahezu gleichzeitig annehmen. Der Verlierer muss nach ACK/BYE sauber beendet werden; kein Telefon darf verbunden bleiben oder später Audio erhalten.
 7. Prüfen, wie viele externe Gespräche Anschluss/Provider tatsächlich gleichzeitig erlauben. Eine FRITZ!Box- oder Provider-Ablehnung eines einzelnen Zweigs darf einen anderen erfolgreich angenommenen Zweig nicht verhindern.
 8. Während des Klingelns und während des Gesprächs die Integrationsaktion Auflegen auslösen. Sämtliche Rufzweige beziehungsweise der Gewinner müssen deterministisch beendet werden.
+9. Tür-Konto deaktivieren und dessen Zugangsdaten/Ziel leeren. Mit ein, zwei und drei Mobilzielen prüfen, dass Registrierung, Status, Besuchertrigger und API-Testanruf ohne Tür-Konto funktionieren.
+10. `incoming_calls_enabled` aktivieren und die internen Nummern beider Konten einzeln anrufen. Beide müssen bei freiem Gateway Audio aufbauen. Während eines angenommenen oder noch vorbereiteten Anrufs das andere Konto anrufen; dieser zweite Ruf muss `486 Busy Here` erhalten.
+11. In einem eingehenden und einem ausgehenden Gespräch jedes Kontos DTMF senden. Die Companion-Integration muss für jede Taste genau ein Ereignis mit richtiger Richtung, Gegenstelle und `call_id` erhalten.
 
 ## Ergänzungen 1.0.0
 

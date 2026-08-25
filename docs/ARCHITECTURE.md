@@ -58,11 +58,18 @@ v1.0.0 also adds no option. RFC 4733 reception is enabled only when the SIP
 offer/answer negotiates `telephone-event/8000`; all interpretation remains on
 the Home Assistant side of the API boundary.
 
-v1.1.0 adds one optional second SIP identity on the same registrar. The door
-identity stays limited to one dialog and retains incoming-call handling. The
-mobile identity never accepts incoming calls and permits at most the number of
-configured mobile destinations, hard-limited to three. Separate local UDP
+v1.1.0 added one optional second SIP identity on the same registrar. In that
+release, the door identity stayed limited to one dialog and retained all
+incoming-call handling, while the mobile identity permitted at most the number
+of configured mobile destinations, hard-limited to three. Separate local UDP
 ports keep both registrations and their transactions unambiguous.
+
+v1.1.1 adds `sip.door_call_enabled`, defaulting to `true` for upgrade
+compatibility. Door-only, mobile-only and combined live configurations are
+valid; at least one identity must be enabled. Incoming-call handling is copied
+to every enabled identity, while one application-level controller remains the
+authority for the single Reolink media path. The API's legacy
+`sip.registered` field therefore represents any enabled registered identity.
 
 ## Home Assistant integration boundary
 
@@ -82,7 +89,7 @@ One Store remains the source of truth. The integration can use SSE for low-laten
 
 One visitor event now produces a list of independent call legs:
 
-- one door-station leg on the original SIP account, when registered;
+- zero or one door-station leg on the original SIP account, when enabled and registered;
 - zero to three mobile legs on the optional second account, when enabled and registered.
 
 Every leg reserves its own dynamic RTP socket before sending `INVITE`. A small
@@ -101,7 +108,7 @@ finished or reached its bounded timeout.
 
 The existing outbound path reserves a dynamic RTP socket, places an authenticated `INVITE` after a visitor event and starts the shared media session after the remote endpoint answers.
 
-The optional incoming path acts as a small SIP user agent server on the same registered UDP socket:
+Each enabled account's optional incoming path acts as a small SIP user agent server on its own registered UDP socket:
 
 1. Only an `INVITE` from the configured registrar address and port is eligible.
 2. The normalized SIP `From` user must match the exact caller allowlist before SDP parsing, dialog reservation or camera work.
@@ -109,10 +116,10 @@ The optional incoming path acts as a small SIP user agent server on the same reg
 4. The dialog and its single-call slot are reserved and `100 Trying` is returned.
 5. The application reserves its RTP socket and starts the same Reolink `media.Session` used by outbound calls.
 6. If enabled, the first four symbols of the shared acoustic marker are paced through the opened Reolink talkback before the receive side and SIP answer are exposed.
-7. Only `media.Session.Ready()` permits the `200 OK` SDP answer. Setup failure is returned as `480`; a concurrent call receives `486`.
+7. Only `media.Session.Ready()` permits the `200 OK` SDP answer. Setup failure is returned as `480`; a concurrent call to either account receives `486` from the shared controller.
 8. `ACK`, pre-answer `CANCEL`, in-dialog `BYE`, 2xx retransmission and missing-ACK cleanup close the SIP transaction and media lifetime deterministically.
 
-Visitor events, API test calls and accepted incoming INVITEs enter one threadsafe call controller. Its cancelable context spans dialing, media preparation, the active conversation and cleanup. The slot is released only after the runner returns, so an API hang-up cannot make a second call overlap delayed SIP/RTSP/Baichuan cleanup. The SIP client retains its own dialog-level busy checks as a second boundary.
+Visitor events, API test calls and accepted incoming INVITEs from both accounts enter one threadsafe call controller. Its cancelable context spans dialing, media preparation, the active conversation and cleanup. The first incoming call reserves the slot; a later INVITE on either UDP socket receives `486 Busy Here`. The slot is released only after the runner returns, so an API hang-up cannot make a second call overlap delayed SIP/RTSP/Baichuan cleanup. Each SIP client retains its own dialog-level busy checks as a second boundary. Negotiated RFC 4733 DTMF follows the winning dialog and is handled identically for either account and call direction.
 
 The generic call-leg list is also the intended seam for v1.2 multi-button
 routing. The proposed entity/destination/mobile-target matrix is documented in
