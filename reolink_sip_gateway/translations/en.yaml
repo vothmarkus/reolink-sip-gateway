@@ -26,7 +26,7 @@ configuration:
         description: TCP port of Reolink Basic Service used in NVR mode, usually 9000.
   sip:
     name: SIP telephony
-    description: SIP account, dial destination and signalling parameters.
+    description: Door-station account plus an optional mobile-call account on the same PBX.
     fields:
       sip_registrar:
         name: SIP registrar
@@ -52,6 +52,21 @@ configuration:
       sip_local_port:
         name: Local SIP port (advanced)
         description: UDP port used for SIP signalling. RTP ports are selected automatically.
+      parallel_call_enabled:
+        name: Enable additional mobile parallel call
+        description: Registers a second normal IP phone on the same FRITZ!Box and calls its mobile destinations together with the door station. The first answered call wins.
+      parallel_username:
+        name: Mobile-call account username
+        description: Username of the second FRITZ!Box device configured as a normal IP phone. Required only when mobile parallel calling is enabled.
+      parallel_password:
+        name: Mobile-call account password
+        description: Password of the second IP phone. Required only when mobile parallel calling is enabled.
+      parallel_destinations:
+        name: Mobile-call destinations
+        description: One to at most three external numbers called simultaneously. Every leg uses the same mobile-call account and its outgoing number assigned in the FRITZ!Box.
+      parallel_local_port:
+        name: Mobile-call local SIP port (advanced)
+        description: Separate UDP port for the second SIP account; defaults to 5071 and must differ from the door-station port.
   audio:
     name: Audio
     description: Echo cancellation and WebRTC audio filters. Reolink latency is calibrated automatically at startup.

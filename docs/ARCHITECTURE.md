@@ -58,6 +58,12 @@ v1.0.0 also adds no option. RFC 4733 reception is enabled only when the SIP
 offer/answer negotiates `telephone-event/8000`; all interpretation remains on
 the Home Assistant side of the API boundary.
 
+v1.1.0 adds one optional second SIP identity on the same registrar. The door
+identity stays limited to one dialog and retains incoming-call handling. The
+mobile identity never accepts incoming calls and permits at most the number of
+configured mobile destinations, hard-limited to three. Separate local UDP
+ports keep both registrations and their transactions unambiguous.
+
 ## Home Assistant integration boundary
 
 The companion integration talks only to the versioned local HTTP API. It cannot construct SIP messages, reserve RTP ports, open Reolink sessions or mutate the media pipeline.
@@ -71,6 +77,27 @@ The companion integration talks only to the versioned local HTTP API. It cannot 
 One Store remains the source of truth. The integration can use SSE for low-latency changes and `GET status` after reconnect as reconciliation, without creating a second state machine.
 
 ## SIP call control
+
+### Outbound first-answer-wins fork
+
+One visitor event now produces a list of independent call legs:
+
+- one door-station leg on the original SIP account, when registered;
+- zero to three mobile legs on the optional second account, when enabled and registered.
+
+Every leg reserves its own dynamic RTP socket before sending `INVITE`. A small
+account-level call map keys dialogs by `Call-ID`; the door account capacity is
+one and the mobile-account capacity is at most three. The first fully
+established dialog is selected atomically. Its RTP socket becomes the only
+input to the existing Reolink `media.Session`; no camera or audio path is
+created for a ringing leg.
+
+Selecting the winner cancels the shared dialing context. A leg in provisional
+state sends `CANCEL` and ACKs its final non-2xx response. A `200 OK` that crosses
+the decision is always ACKed because it already created a SIP dialog, then the
+losing dialog receives `BYE`. Loser cleanup runs concurrently with winner media
+startup, while the global call slot remains reserved until that cleanup has
+finished or reached its bounded timeout.
 
 The existing outbound path reserves a dynamic RTP socket, places an authenticated `INVITE` after a visitor event and starts the shared media session after the remote endpoint answers.
 
@@ -86,6 +113,11 @@ The optional incoming path acts as a small SIP user agent server on the same reg
 8. `ACK`, pre-answer `CANCEL`, in-dialog `BYE`, 2xx retransmission and missing-ACK cleanup close the SIP transaction and media lifetime deterministically.
 
 Visitor events, API test calls and accepted incoming INVITEs enter one threadsafe call controller. Its cancelable context spans dialing, media preparation, the active conversation and cleanup. The slot is released only after the runner returns, so an API hang-up cannot make a second call overlap delayed SIP/RTSP/Baichuan cleanup. The SIP client retains its own dialog-level busy checks as a second boundary.
+
+The generic call-leg list is also the intended seam for v1.2 multi-button
+routing. The proposed entity/destination/mobile-target matrix is documented in
+[`ROADMAP.md`](ROADMAP.md); v1.1 deliberately keeps the public configuration to
+one visitor entity and one door destination.
 
 Both live talkback readers attach an RTP watchdog to valid packets of the negotiated codec; expiry returns a media error and the common call controller performs local SIP cleanup. It does not inspect PCM level and therefore does not confuse silence with a broken transport.
 

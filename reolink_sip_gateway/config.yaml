@@ -1,5 +1,5 @@
 name: Reolink SIP Gateway
-version: "1.0.0"
+version: "1.1.0"
 slug: reolink_sip_gateway
 description: Verbindet Reolink-Klingelereignisse und eingehende SIP-Anrufe mit Zwei-Wege-Audio und einer lokalen Integrations-API.
 url: https://github.com/vothmarkus/reolink-sip-gateway
@@ -35,6 +35,11 @@ options:
     sip_codec_preference: pcma
     sip_registrar_port: 5060
     sip_local_port: 5070
+    parallel_call_enabled: false
+    parallel_username: ""
+    parallel_password: ""
+    parallel_destinations: []
+    parallel_local_port: 5071
   audio:
     echo_cancellation_enabled: true
     webrtc_high_pass_filter_enabled: true
@@ -70,6 +75,12 @@ schema:
     sip_codec_preference: list(auto|pcma|pcmu)
     sip_registrar_port: port
     sip_local_port: port
+    parallel_call_enabled: bool
+    parallel_username: str
+    parallel_password: password
+    parallel_destinations:
+      - str(1,128)
+    parallel_local_port: port
   audio:
     echo_cancellation_enabled: bool
     webrtc_high_pass_filter_enabled: bool

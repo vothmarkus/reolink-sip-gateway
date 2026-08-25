@@ -20,6 +20,11 @@
   "sip_local_port": 5070,
   "sip_display_name": "Haustür",
   "sip_codec_preference": "pcma",
+  "parallel_call_enabled": false,
+  "parallel_username": "",
+  "parallel_password": "",
+  "parallel_destinations": [],
+  "parallel_local_port": 5071,
   "incoming_calls_enabled": false,
   "incoming_allowed_callers": [
     "*"

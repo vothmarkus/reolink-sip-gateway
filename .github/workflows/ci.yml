@@ -48,7 +48,8 @@ jobs:
           schemas = spec.fetch("components").fetch("schemas");
           abort "missing DTMF event schema" unless schemas.key?("DTMFEvent");
           capabilities = schemas.fetch("Info").fetch("properties").fetch("capabilities").fetch("items").fetch("enum");
-          abort "missing DTMF capability" unless capabilities.include?("dtmf_events")'
+          abort "missing DTMF capability" unless capabilities.include?("dtmf_events");
+          abort "missing parallel-call capability" unless capabilities.include?("parallel_calls")'
 
   container:
     runs-on: ubuntu-latest
@@ -57,7 +58,7 @@ jobs:
       - name: Build Home Assistant image
         run: >-
           docker build
-          --build-arg BUILD_VERSION=1.0.0
+          --build-arg BUILD_VERSION=1.1.0
           --build-arg BUILD_ARCH=amd64
           -t reolink-sip-gateway:ci
           reolink_sip_gateway

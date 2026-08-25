@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0
+
+- Optionales zweites SIP-Konto am selben Registrar ergänzt. Das bestehende Türsprechstellen-Konto bleibt funktional und für eingehende Anrufe unverändert; das Mobilruf-Konto verwendet eigene Zugangsdaten und standardmäßig den separaten lokalen UDP-Port 5071.
+- `parallel_destinations` ruft eine bis maximal drei normalisierte, eindeutige Mobilnummern gleichzeitig über dasselbe zweite Konto an. Aktivierung, Zugangsdaten, Porttrennung, Eintragslänge und harte Drei-Ziel-Grenze werden fail-fast validiert.
+- SIP-Client von einem einzelnen Dialog auf eine konfigurierbare, `Call-ID`-basierte Dialogmap erweitert. Tür-Konto bleibt auf Kapazität eins, Mobilkonto erhält exakt die konfigurierte Kapazität bis drei; Registrierungs- und Transaktionszustände bleiben pro Konto getrennt.
+- Neuer generischer Fork-Controller wählt atomar den ersten erfolgreichen Tür-/Mobilzweig. Noch klingelnde Verlierer erhalten `CANCEL`; kreuzende oder nahezu gleichzeitige `200 OK` werden stets geACKt und beim Verlierer mit `BYE` abgebaut.
+- Jeder Rufzweig reserviert einen eigenen dynamischen RTP-Socket. Nur der Gewinner startet die bestehende einzelne Reolink-/AEC-Mediensitzung. Loser-Cleanup läuft parallel zum Medienstart, der globale Call-Slot bleibt aber bis zum vollständigen beziehungsweise begrenzt abgewarteten Cleanup reserviert.
+- API v1 additiv um die Fähigkeit `parallel_calls`, Aktivierungszustand sowie Registrierungsstatus/-fehler des zweiten Kontos erweitert. DTMF, eingehende Anrufe und sämtliche bestehenden API-Felder bleiben kompatibel.
+- Gruppierter UI-/Runtime-Adapter, Upgrade-Defaults, deutsche/englische Übersetzungen, Fixtures und Dokumentation um die fünf neuen SIP-Felder ergänzt. Der Mobil-Parallelruf ist standardmäßig aus; ein Update von 1.0.0 ändert daher das Verhalten nicht.
+- Unit-, SIP-Integrations-, Shuffle-, Vet- und Race-Tests decken Gewinnerauswahl, Ring-Cancel, verspäteten Erfolg, drei Dialoge auf einem Account, Kapazitätsgrenze und Optionsmigration ab. App-, Gateway-, SIP-/RTSP-User-Agent- und CI-Buildversion sind 1.1.0.
+
 ## 1.0.0
 
 - SIP-SDP handelt RFC-4733-DTMF als `telephone-event/8000` aus. Ausgehende Angebote verwenden Payloadtyp 101; bei eingehenden Angeboten wird ein gültiger dynamischer Payloadtyp gespiegelt. Fehlt die Aushandlung, bleibt der bisherige G.711-Audiopfad unverändert und es werden keine DTMF-Ereignisse erzeugt.

@@ -48,6 +48,16 @@ assert_key_order "${ROOT}/reolink_sip_gateway/translations/en.yaml" 1 "${CALL_OR
 CALL_JSON_ORDER=('"visitor_entity":' '"incoming_calls_enabled":' '"incoming_allowed_callers":' '"incoming_connection_tone_enabled":' '"debounce_seconds":' '"ring_timeout_seconds":' '"rtp_inactivity_timeout_seconds":' '"max_call_duration_seconds":')
 assert_key_order "${ROOT}/reolink_sip_gateway/testdata/options.valid.json" 1 "${CALL_JSON_ORDER[@]}"
 
+# Door-account fields stay first; the optional second registration follows as
+# one compact mobile parallel-call block in every public representation.
+SIP_ORDER=(sip_registrar: sip_username: sip_password: sip_destination: sip_display_name: sip_codec_preference: sip_registrar_port: sip_local_port: parallel_call_enabled: parallel_username: parallel_password: parallel_destinations: parallel_local_port:)
+assert_key_order "${ROOT}/reolink_sip_gateway/config.yaml" 1 "${SIP_ORDER[@]}"
+assert_key_order "${ROOT}/reolink_sip_gateway/config.yaml" 2 "${SIP_ORDER[@]}"
+assert_key_order "${ROOT}/reolink_sip_gateway/translations/de.yaml" 1 "${SIP_ORDER[@]}"
+assert_key_order "${ROOT}/reolink_sip_gateway/translations/en.yaml" 1 "${SIP_ORDER[@]}"
+SIP_JSON_ORDER=('"sip_registrar":' '"sip_username":' '"sip_password":' '"sip_destination":' '"sip_display_name":' '"sip_codec_preference":' '"sip_registrar_port":' '"sip_local_port":' '"parallel_call_enabled":' '"parallel_username":' '"parallel_password":' '"parallel_destinations":' '"parallel_local_port":')
+assert_key_order "${ROOT}/reolink_sip_gateway/testdata/options.valid.json" 1 "${SIP_JSON_ORDER[@]}"
+
 # Fresh-install defaults exposed by the HA adapter.
 fresh="$(normalize_public_options '{}' false)"
 assert_eq "$(jq -r .reolink.reolink_username <<<"${fresh}")" "admin"
@@ -57,6 +67,9 @@ assert_eq "$(jq -r .call.incoming_calls_enabled <<<"${fresh}")" "false"
 assert_eq "$(jq -c .call.incoming_allowed_callers <<<"${fresh}")" '["*"]'
 assert_eq "$(jq -r .call.incoming_connection_tone_enabled <<<"${fresh}")" "true"
 assert_eq "$(jq -r .call.rtp_inactivity_timeout_seconds <<<"${fresh}")" "15"
+assert_eq "$(jq -r .sip.parallel_call_enabled <<<"${fresh}")" "false"
+assert_eq "$(jq -c .sip.parallel_destinations <<<"${fresh}")" '[]'
+assert_eq "$(jq -r .sip.parallel_local_port <<<"${fresh}")" "5071"
 
 # Direct legacy upgrade: old flat values must beat newly materialized grouped defaults once.
 legacy='{"sip_username":"legacy-user","sip_password":"legacy-pass","nvr_channel":1,"sip":{"sip_username":"","sip_password":""},"reolink":{"nvr_channel_number":1}}'
@@ -83,6 +96,20 @@ assert_eq "$(jq -r .incoming_calls_enabled <<<"${runtime}")" "false"
 assert_eq "$(jq -c .incoming_allowed_callers <<<"${runtime}")" '["*"]'
 assert_eq "$(jq -r .incoming_connection_tone_enabled <<<"${runtime}")" "true"
 assert_eq "$(jq -r .rtp_inactivity_timeout_seconds <<<"${runtime}")" "15"
+assert_eq "$(jq -r .parallel_call_enabled <<<"${runtime}")" "false"
+assert_eq "$(jq -c .parallel_destinations <<<"${runtime}")" '[]'
+assert_eq "$(jq -r .parallel_local_port <<<"${runtime}")" "5071"
+
+# v1.1 second-account settings and all three destinations reach the private
+# flat runtime unchanged. Go performs the final credential/count validation.
+parallel_options="$(jq -c '.sip.parallel_call_enabled=true | .sip.parallel_username="mobile" | .sip.parallel_password="secret" | .sip.parallel_destinations=["0163","0176","0151"] | .sip.parallel_local_port=5071' <<<"${normalized}")"
+build_runtime_options "${parallel_options}"
+runtime="$(cat /tmp/reolink-sip-gateway-runtime-options.json)"
+assert_eq "$(jq -r .parallel_call_enabled <<<"${runtime}")" "true"
+assert_eq "$(jq -r .parallel_username <<<"${runtime}")" "mobile"
+assert_eq "$(jq -r .parallel_password <<<"${runtime}")" "secret"
+assert_eq "$(jq -c .parallel_destinations <<<"${runtime}")" '["0163","0176","0151"]'
+assert_eq "$(jq -r .parallel_local_port <<<"${runtime}")" "5071"
 
 # v0.8 incoming-call controls reach the flat runtime unchanged.
 incoming_options="$(jq -c '.call.incoming_calls_enabled=true | .call.incoming_allowed_callers=["0123 456789","**620"] | .call.incoming_connection_tone_enabled=false | .call.rtp_inactivity_timeout_seconds=25' <<<"${normalized}")"
@@ -169,7 +196,7 @@ WRITES=0
 LAST_WRITE=''
 supervisor_options_write(){ WRITES=$((WRITES+1)); LAST_WRITE="$1"; return 0; }
 
-grouped='{"reolink":{"reolink_host":"10.0.0.2","reolink_username":"u","reolink_password":"p","reolink_mode":"nvr","nvr_channel_number":2,"reolink_rtsp_port":554,"baichuan_port":9000},"sip":{"sip_registrar":"10.0.0.1","sip_registrar_port":5060,"sip_username":"s","sip_password":"x","sip_destination":"100","sip_local_port":5070,"sip_display_name":"Door","sip_codec_preference":"pcma"},"audio":{"echo_cancellation_enabled":true,"webrtc_high_pass_filter_enabled":true,"webrtc_noise_suppression_enabled":true},"call":{"visitor_entity":"binary_sensor.door","incoming_calls_enabled":false,"incoming_allowed_callers":["*"],"incoming_connection_tone_enabled":true,"debounce_seconds":3,"ring_timeout_seconds":30,"rtp_inactivity_timeout_seconds":15,"max_call_duration_seconds":300},"diagnostics":{"log_level":"info","dry_run":false}}'
+grouped='{"reolink":{"reolink_host":"10.0.0.2","reolink_username":"u","reolink_password":"p","reolink_mode":"nvr","nvr_channel_number":2,"reolink_rtsp_port":554,"baichuan_port":9000},"sip":{"sip_registrar":"10.0.0.1","sip_registrar_port":5060,"sip_username":"s","sip_password":"x","sip_destination":"100","sip_local_port":5070,"sip_display_name":"Door","sip_codec_preference":"pcma","parallel_call_enabled":false,"parallel_username":"","parallel_password":"","parallel_destinations":[],"parallel_local_port":5071},"audio":{"echo_cancellation_enabled":true,"webrtc_high_pass_filter_enabled":true,"webrtc_noise_suppression_enabled":true},"call":{"visitor_entity":"binary_sensor.door","incoming_calls_enabled":false,"incoming_allowed_callers":["*"],"incoming_connection_tone_enabled":true,"debounce_seconds":3,"ring_timeout_seconds":30,"rtp_inactivity_timeout_seconds":15,"max_call_duration_seconds":300},"diagnostics":{"log_level":"info","dry_run":false}}'
 printf '%s\n' "${grouped}" > "${OPTIONS_FILE}"
 normalized="$(normalize_public_options "${grouped}" true)"
 assert_eq "$(jq -r .reolink.reolink_username <<<"${normalized}")" "u"

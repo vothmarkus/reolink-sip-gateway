@@ -1,8 +1,18 @@
-# Reolink SIP Gateway 1.0.0
+# Reolink SIP Gateway 1.1.0
 
 Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann einen SIP-Anruf auslösen; optional lässt sich die registrierte Gateway-Nebenstelle anrufen und direkt mit der Doorbell verbinden.
 
 > Community-Projekt. Nicht offiziell von Reolink oder Home Assistant bereitgestellt oder unterstützt.
+
+## 1.1.0: Türsprechstelle plus Mobil-Parallelruf
+
+1.1.0 kann sich mit zwei unabhängigen SIP-Konten an derselben FRITZ!Box registrieren. Das bestehende Konto bleibt unverändert als IP-Türsprechanlage erhalten. Das optionale zweite Konto wird in der FRITZ!Box 4050 als normales IP-Telefon eingerichtet und verwendet einen eigenen lokalen UDP-Port, standardmäßig 5071.
+
+Beim Klingeln ruft das Gateway gleichzeitig das bisherige Türziel und eine Liste aus maximal drei Mobilnummern an. Alle Mobilzweige verwenden dasselbe zweite Konto und damit die diesem IP-Telefon zugewiesene ausgehende Rufnummer. Der erste vollständig angenommene Zweig gewinnt und wird allein mit dem Reolink-Audio verbunden.
+
+Noch klingelnde Verlierer erhalten SIP-`CANCEL`. Treffen zwei `200 OK` nahezu gleichzeitig ein, bestätigt das Gateway beide korrekt mit `ACK` und beendet den Verlierer anschließend mit `BYE`. Der globale Call-Controller lässt weiterhin nur ein einziges Reolink-Gespräch zu; parallel sind lediglich die SIP-Rufaufbauzweige.
+
+Die FRITZ!Box 6690 kann in diesem Aufbau ausschließlich als Kabelmodem arbeiten. Registrar und Telefonanlage ist die FRITZ!Box 4050. Beide SIP-Konten verwenden dieselbe Registrar-IP und denselben Registrar-Port, aber getrennte Zugangsdaten und lokale Ports.
 
 ## 1.0.0: DTMF als reines Home-Assistant-Ereignis
 
@@ -137,6 +147,13 @@ sip:
   sip_codec_preference: pcma
   sip_registrar_port: 5060
   sip_local_port: 5070
+  parallel_call_enabled: true
+  parallel_username: "mobilruf"
+  parallel_password: "..."
+  parallel_destinations:
+    - "0163..."
+    - "0176..."
+  parallel_local_port: 5071
 
 audio:
   echo_cancellation_enabled: true
@@ -160,6 +177,8 @@ diagnostics:
 ```
 
 Bei `sip_registrar: auto` wird beim Start die IPv4-Default-Gateway-Adresse des Home-Assistant-Hosts verwendet. Ein manueller Registrar überschreibt diese Automatik. Kann kein nutzbares IPv4-Gateway gefunden werden, fordert das Startlog dazu auf, den Registrar manuell einzutragen.
+
+Für den Mobil-Parallelruf wird unter **Telefonie → Telefoniegeräte** ein zweites Gerät vom Typ **Telefon → LAN/WLAN** angelegt. Die FRITZ!Box weist diesem Konto die gewünschte ausgehende Festnetznummer zu. `parallel_destinations` enthält eine bis drei externe Zielnummern; doppelte Einträge werden entfernt. Ein aktiviertes Mobilkonto ohne Zugangsdaten/Ziel oder mit demselben lokalen Port wie das Tür-Konto wird beim Start klar abgewiesen.
 
 Bei `visitor_entity: auto` wird genau ein aktivierter Reolink-Besucher-Sensor aus der Home-Assistant-Entity-Registry verwendet. Bei keinem oder mehreren Treffern fordert das Startlog zur manuellen Auswahl auf.
 

@@ -26,7 +26,7 @@ configuration:
         description: TCP-Port des Reolink Basic Service für den NVR-Modus; normalerweise 9000.
   sip:
     name: SIP-Telefonie
-    description: SIP-Konto, Zielrufnummer und Signalisierungsparameter.
+    description: Türsprechstellen-Konto sowie optionales Mobilruf-Konto an derselben Telefonanlage.
     fields:
       sip_registrar:
         name: SIP-Registrar
@@ -52,6 +52,21 @@ configuration:
       sip_local_port:
         name: Lokaler SIP-Port (erweitert)
         description: UDP-Port für die SIP-Signalisierung. RTP-Ports werden automatisch gewählt.
+      parallel_call_enabled:
+        name: Zusätzlichen Mobil-Parallelruf aktivieren
+        description: Registriert ein zweites normales IP-Telefon an derselben FRITZ!Box und ruft dessen Mobilziele gleichzeitig mit der Türsprechstelle an. Der zuerst angenommene Ruf gewinnt.
+      parallel_username:
+        name: Benutzername des Mobilruf-Kontos
+        description: Benutzername des zweiten, als normales IP-Telefon eingerichteten FRITZ!Box-Kontos. Nur bei aktiviertem Mobil-Parallelruf erforderlich.
+      parallel_password:
+        name: Passwort des Mobilruf-Kontos
+        description: Kennwort des zweiten IP-Telefons. Nur bei aktiviertem Mobil-Parallelruf erforderlich.
+      parallel_destinations:
+        name: Mobilruf-Ziele
+        description: Eine bis maximal drei gleichzeitig anzurufende externe Rufnummern. Alle Zweige verwenden dasselbe Mobilruf-Konto und die ihm in der FRITZ!Box zugewiesene ausgehende Rufnummer.
+      parallel_local_port:
+        name: Lokaler SIP-Port des Mobilruf-Kontos (erweitert)
+        description: Separater UDP-Port des zweiten SIP-Kontos; standardmäßig 5071 und zwingend verschieden vom Türsprechstellen-Port.
   audio:
     name: Audio
     description: Echounterdrückung und WebRTC-Audiofilter. Die Reolink-Latenz wird beim Start automatisch kalibriert.

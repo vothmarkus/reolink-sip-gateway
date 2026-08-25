@@ -3,6 +3,7 @@ package sip
 import (
 	"net"
 	"testing"
+	"time"
 )
 
 func TestParseAnswerSDP(t *testing.T) {
@@ -37,6 +38,67 @@ func TestMessageParse(t *testing.T) {
 	if !m.IsResponse || m.StatusCode != 200 || cseqMethod(m.Header("cseq")) != "INVITE" {
 		t.Fatalf("bad %#v", m)
 	}
+}
+
+func TestCanceledInviteTransactionHandoff(t *testing.T) {
+	headers := []string{
+		"From: <sip:mobile@fritz.box>;tag=from-tag",
+		"To: <sip:0163@fritz.box>",
+		"Call-ID: canceled-call@fritz.box",
+	}
+
+	t.Run("buffered final response stays with transaction", func(t *testing.T) {
+		responses := make(chan Message, 2)
+		responses <- Message{StatusCode: 180}
+		responses <- Message{StatusCode: 487}
+		client := &Client{
+			transactions:    map[string]chan Message{"branch|INVITE": responses},
+			canceledInvites: make(map[string]*canceledInvite),
+			closed:          make(chan struct{}),
+		}
+
+		response, received := client.transitionCanceledInvite("branch|INVITE", responses, "sip:0163@fritz.box", "branch", 1, headers, true)
+		if !received || response.StatusCode != 487 {
+			t.Fatalf("expected buffered final response, got received=%t response=%#v", received, response)
+		}
+		if len(client.transactions) != 0 || len(client.canceledInvites) != 0 {
+			t.Fatalf("unexpected handoff state: transactions=%d canceled=%d", len(client.transactions), len(client.canceledInvites))
+		}
+	})
+
+	t.Run("provisional response moves to tombstone", func(t *testing.T) {
+		responses := make(chan Message, 1)
+		responses <- Message{StatusCode: 180}
+		client := &Client{
+			transactions:    map[string]chan Message{"branch|INVITE": responses},
+			canceledInvites: make(map[string]*canceledInvite),
+			closed:          make(chan struct{}),
+		}
+
+		_, received := client.transitionCanceledInvite("branch|INVITE", responses, "sip:0163@fritz.box", "branch", 1, headers, true)
+		if received {
+			t.Fatal("provisional response must not finish the INVITE transaction")
+		}
+		invite := client.canceledInvites["canceled-call@fritz.box"]
+		if len(client.transactions) != 0 || invite == nil || !invite.cancelSent {
+			t.Fatalf("unexpected handoff state: transactions=%d invite=%#v", len(client.transactions), invite)
+		}
+
+		close(client.closed)
+		deadline := time.Now().Add(time.Second)
+		for {
+			client.mu.Lock()
+			remaining := len(client.canceledInvites)
+			client.mu.Unlock()
+			if remaining == 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("canceled INVITE tombstone did not expire on client close")
+			}
+			time.Sleep(time.Millisecond)
+		}
+	})
 }
 
 func TestParseOfferSDPHonorsCodecPreference(t *testing.T) {

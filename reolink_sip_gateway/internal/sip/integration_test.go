@@ -461,6 +461,98 @@ func TestRegisterDialAndRemoteBye(t *testing.T) {
 	}
 }
 
+func TestConfiguredAccountSupportsThreeConcurrentOutgoingDialogs(t *testing.T) {
+	server, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	serverAddr := server.LocalAddr().(*net.UDPAddr)
+	serverErr := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 65535)
+		for {
+			n, addr, err := server.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			message, err := parseMessage(buf[:n])
+			if err != nil {
+				select {
+				case serverErr <- err:
+				default:
+				}
+				return
+			}
+			switch message.Method {
+			case "INVITE":
+				sdp := "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=mock\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 40000 RTP/AVP 8\r\na=rtpmap:8 PCMA/8000\r\n"
+				if err := mockResponse(server, addr, message, 200, "OK", []string{"Contact: <sip:mock@127.0.0.1:" + strconv.Itoa(serverAddr.Port) + ">", "Content-Type: application/sdp"}, []byte(sdp)); err != nil {
+					select {
+					case serverErr <- err:
+					default:
+					}
+					return
+				}
+			case "BYE":
+				_ = mockResponse(server, addr, message, 200, "OK", nil, nil)
+			}
+		}
+	}()
+
+	client, err := New(Config{
+		Registrar: "127.0.0.1", RegistrarPort: serverAddr.Port, Username: "mobile", Password: "secret",
+		LocalPort: freeUDPPort(t), DisplayName: "Mobile", CodecPreference: "pcma", MaxConcurrentCalls: 3,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	type result struct {
+		call *Call
+		err  error
+	}
+	start := make(chan struct{})
+	results := make(chan result, 3)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for index, destination := range []string{"0163", "0176", "0151"} {
+		index, destination := index, destination
+		go func() {
+			<-start
+			call, err := client.Dial(ctx, destination, 30000+index)
+			results <- result{call: call, err: err}
+		}()
+	}
+	close(start)
+	calls := make([]*Call, 0, 3)
+	for range 3 {
+		select {
+		case got := <-results:
+			if got.err != nil {
+				t.Fatal(got.err)
+			}
+			calls = append(calls, got.call)
+		case err := <-serverErr:
+			t.Fatal(err)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	if _, err := client.Dial(ctx, "fourth", 30010); err == nil || !strings.Contains(err.Error(), "maximum concurrent") {
+		t.Fatalf("fourth concurrent call error=%v", err)
+	}
+	for _, call := range calls {
+		hangupCtx, hangupCancel := context.WithTimeout(context.Background(), time.Second)
+		if err := call.Hangup(hangupCtx); err != nil {
+			hangupCancel()
+			t.Fatal(err)
+		}
+		hangupCancel()
+	}
+}
+
 func freeUDPPort(t *testing.T) int {
 	c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
@@ -717,5 +809,93 @@ func TestLate200AfterRingTimeoutIsACKedAndHungUp(t *testing.T) {
 		t.Fatal(err)
 	case <-time.After(time.Second):
 		t.Fatal("late answered dialog was not closed with BYE")
+	}
+}
+
+func TestReleasedCanceledInviteStillCancelsProvisionalAndCleansLate200(t *testing.T) {
+	server, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	serverAddr := server.LocalAddr().(*net.UDPAddr)
+	localPort := freeUDPPort(t)
+	client, err := New(Config{
+		Registrar: "127.0.0.1", RegistrarPort: serverAddr.Port, Username: "mobile", Password: "secret",
+		LocalPort: localPort, DisplayName: "Mobile", CodecPreference: "pcma",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	clientAddr := &net.UDPAddr{IP: client.LocalIP(), Port: localPort}
+
+	uri := "sip:0163@127.0.0.1"
+	branch := branchID()
+	callID := "released-cancel@127.0.0.1"
+	fromURI := "sip:mobile@127.0.0.1"
+	fromTag := "mobile-tag"
+	headers := client.baseHeaders("INVITE", uri, branch, 1, callID, fromURI, uri, fromTag, "")
+	request, err := parseMessage(buildRequest("INVITE", uri, headers, []byte(client.offerSDP(30000))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Model the point after transact released its short cancellation wait.
+	client.rememberCanceledInvite(uri, branch, 1, headers, false)
+
+	if err := mockResponse(server, clientAddr, request, 180, "Ringing", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	gotCancel := false
+	for !gotCancel {
+		message := readAnySIPMessage(t, server, deadline)
+		gotCancel = message.Method == "CANCEL"
+	}
+	sdp := "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=mock\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 40000 RTP/AVP 8\r\na=rtpmap:8 PCMA/8000\r\n"
+	if err := mockResponse(server, clientAddr, request, 200, "OK", []string{"Contact: <sip:mock@127.0.0.1:" + strconv.Itoa(serverAddr.Port) + ">", "Content-Type: application/sdp"}, []byte(sdp)); err != nil {
+		t.Fatal(err)
+	}
+	gotACK, gotBYE := false, false
+	for !gotACK || !gotBYE {
+		message := readAnySIPMessage(t, server, deadline)
+		switch message.Method {
+		case "ACK":
+			if message.Header("call-id") == callID {
+				gotACK = true
+			}
+		case "BYE":
+			if message.Header("call-id") == callID {
+				gotBYE = true
+				if err := mockResponse(server, clientAddr, message, 200, "OK", nil, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+
+	activeDeadline := time.Now().Add(time.Second)
+	for {
+		client.mu.Lock()
+		active := len(client.active)
+		client.mu.Unlock()
+		if active == 0 {
+			break
+		}
+		if time.Now().After(activeDeadline) {
+			t.Fatalf("late dialog remained active: %d", active)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	// Keep ACK responsibility for the INVITE dialog after BYE cleanup as well;
+	// a lost ACK may make the peer retransmit its 200 OK for up to 64*T1.
+	if err := mockResponse(server, clientAddr, request, 200, "OK", []string{"Contact: <sip:mock@127.0.0.1:" + strconv.Itoa(serverAddr.Port) + ">", "Content-Type: application/sdp"}, []byte(sdp)); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		message := readAnySIPMessage(t, server, time.Now().Add(time.Second))
+		if message.Method == "ACK" && message.Header("call-id") == callID {
+			break
+		}
 	}
 }
