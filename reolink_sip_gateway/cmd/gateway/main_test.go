@@ -13,7 +13,7 @@ import (
 
 func TestGatewayCommandsFailClosedUntilConfigured(t *testing.T) {
 	commands := &gatewayCommands{}
-	if err := commands.StartTestCall(context.Background()); !errors.Is(err, statuspkg.ErrCommandUnavailable) {
+	if err := commands.StartTestCall(context.Background(), "wohnung_1"); !errors.Is(err, statuspkg.ErrCommandUnavailable) {
 		t.Fatalf("test call error = %v", err)
 	}
 	if err := commands.Hangup(context.Background()); !errors.Is(err, statuspkg.ErrCommandUnavailable) {
@@ -26,10 +26,16 @@ func TestGatewayCommandsConfigureAndDisable(t *testing.T) {
 	testCalls := 0
 	hangups := 0
 	commands.Configure(
-		func(context.Context) error { testCalls++; return nil },
+		func(_ context.Context, routeID string) error {
+			if routeID != "wohnung_1" {
+				t.Fatalf("route ID=%q", routeID)
+			}
+			testCalls++
+			return nil
+		},
 		func(context.Context) error { hangups++; return nil },
 	)
-	if err := commands.StartTestCall(context.Background()); err != nil {
+	if err := commands.StartTestCall(context.Background(), "wohnung_1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := commands.Hangup(context.Background()); err != nil {
@@ -39,7 +45,7 @@ func TestGatewayCommandsConfigureAndDisable(t *testing.T) {
 		t.Fatalf("callbacks test=%d hangup=%d", testCalls, hangups)
 	}
 	commands.Disable()
-	if err := commands.StartTestCall(context.Background()); !errors.Is(err, statuspkg.ErrCommandUnavailable) {
+	if err := commands.StartTestCall(context.Background(), "wohnung_1"); !errors.Is(err, statuspkg.ErrCommandUnavailable) {
 		t.Fatalf("disabled command error = %v", err)
 	}
 }
@@ -103,5 +109,32 @@ func TestConfiguredSIPAccountCountSupportsMobileOnly(t *testing.T) {
 	cfg.DoorCallEnabled = true
 	if got := configuredSIPAccountCount(cfg); got != 2 {
 		t.Fatalf("dual-account count=%d", got)
+	}
+}
+
+func TestRouteHelpersPreserveStableIDsAndLegacyDefault(t *testing.T) {
+	cfg := config.Defaults()
+	legacy := cfg.ResolvedCallRoutes()
+	if len(legacy) != 1 || legacy[0].ID != config.DefaultRouteID {
+		t.Fatalf("legacy routes=%#v", legacy)
+	}
+	if route, ok := requestedCallRoute(legacy, ""); !ok || route.ID != config.DefaultRouteID {
+		t.Fatalf("legacy default route=%#v ok=%t", route, ok)
+	}
+
+	routes := []config.ResolvedCallRoute{
+		{ID: "wohnung_1", Name: "Wohnung 1", VisitorEntity: "binary_sensor.one", DoorbellNumber: "11"},
+		{ID: "wohnung_2", Name: "Wohnung 2", VisitorEntity: "binary_sensor.two", MobileTargets: []config.MobileTarget{{ID: "maria", Destination: "0176"}}},
+	}
+	subscriptions := routeSubscriptions(routes)
+	if len(subscriptions) != 2 || subscriptions[1].RouteID != "wohnung_2" || subscriptions[1].EntityID != "binary_sensor.two" {
+		t.Fatalf("subscriptions=%#v", subscriptions)
+	}
+	definitions := statusRouteDefinitions(config.Config{DoorCallEnabled: true, ParallelCallEnabled: true}, routes)
+	if !definitions[0].DoorCall || definitions[0].MobileCall || definitions[1].DoorCall || !definitions[1].MobileCall {
+		t.Fatalf("route definitions=%#v", definitions)
+	}
+	if _, ok := requestedCallRoute(routes, "missing"); ok {
+		t.Fatal("unknown route unexpectedly resolved")
 	}
 }

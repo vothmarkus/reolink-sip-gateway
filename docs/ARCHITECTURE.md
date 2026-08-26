@@ -4,7 +4,7 @@
 
 Reolink SIP Gateway connects three domains:
 
-1. Home Assistant supplies the doorbell/visitor trigger and, through the companion integration, consumes status and sends two call-control commands.
+1. Home Assistant supplies one or more doorbell/visitor triggers and, through the companion integration, consumes status and sends route-specific call-control commands.
 2. SIP provides outbound and optional incoming call setup plus telephone audio.
 3. Reolink RTSP/ONVIF or Baichuan provides doorbell receive/talkback audio.
 
@@ -40,7 +40,7 @@ SIP registration + HA visitor subscription
 
 ### Configuration boundary
 
-The Home Assistant UI exposes five groups. The Go runtime deliberately retains the proven flat configuration contract. This keeps UI evolution away from the media implementation.
+The Home Assistant UI exposes five established groups plus the two top-level v1.2 lists `mobile_targets` and `call_routes`. The Go runtime deliberately retains the proven flat configuration contract. This keeps UI evolution away from the media implementation.
 
 v0.5.10 uses a persistent marker for the grouped-layout migration. Before the marker exists, old flat values may take precedence over Supervisor-materialized defaults so direct upgrades preserve user configuration. After migration, grouped values are authoritative and normal starts are read-only with respect to Supervisor options.
 
@@ -71,14 +71,22 @@ to every enabled identity, while one application-level controller remains the
 authority for the single Reolink media path. The API's legacy
 `sip.registered` field therefore represents any enabled registered identity.
 
+v1.2.0 passes the two routing lists through the UI boundary without resolving
+telephone numbers in the shell adapter. Go normalizes and validates the full
+graph, then resolves stable route IDs to runtime call-leg lists. With an empty
+route list it synthesizes the compatible `default` route from the v1.1.1
+visitor entity, door destination and mobile destinations. Explicit routes
+replace only that trigger/target layer; no route contains a camera, NVR
+channel, media, DTMF or opener selector.
+
 ## Home Assistant integration boundary
 
 The companion integration talks only to the versioned local HTTP API. It cannot construct SIP messages, reserve RTP ports, open Reolink sessions or mutate the media pipeline.
 
 - `/api/v1/info` is the compatibility handshake: API version, gateway version, stable instance UUID and additive capability names.
-- `/api/v1/status` maps the internal snapshot to a purpose-built v1 DTO. Internal fields may evolve without silently changing the integration contract.
+- `/api/v1/status` maps the internal snapshot to a purpose-built v1 DTO. Its additive route catalogue exposes only stable IDs, display names and command availability; telephone numbers stay behind the gateway boundary.
 - `/api/v1/events` carries complete `status` snapshots plus transient `dtmf` events. Each keypress carries an exact normalized `remote_number` (incoming caller or configured outgoing destination) and the SIP `call_id`, allowing downstream input to remain scoped to one remote party and one call. The store assigns monotonically increasing revisions only when the comparable snapshot actually changes; DTMF has no SSE ID and never changes or replays status. Bounded subscriber queues prevent a slow client from back-pressuring real-time call work.
-- `/api/v1/calls/test` and `/api/v1/calls/hangup` pass requests into a command interface that remains unavailable until startup has completed. Request contexts never become call lifetimes; accepted test calls use the process call context.
+- `/api/v1/routes/{route_id}/test`, the compatible `/api/v1/calls/test`, and `/api/v1/calls/hangup` pass requests into a command interface that remains unavailable until startup has completed. Request contexts never become call lifetimes; accepted test calls use the process call context. The companion integration creates one stable test-call button for every advertised route.
 - A 256-bit bearer token protects every v1 route. Constant-time comparison and a private/local source-address boundary protect the command surface; ingress-only legacy routes retain their stricter proxy/loopback rule.
 
 One Store remains the source of truth. The integration can use SSE for low-latency changes and `GET status` after reconnect as reconciliation, without creating a second state machine.
@@ -87,7 +95,7 @@ One Store remains the source of truth. The integration can use SSE for low-laten
 
 ### Outbound first-answer-wins fork
 
-One visitor event now produces a list of independent call legs:
+One resolved route produces a list of independent call legs:
 
 - zero or one door-station leg on the original SIP account, when enabled and registered;
 - zero to three mobile legs on the optional second account, when enabled and registered.
@@ -119,12 +127,7 @@ Each enabled account's optional incoming path acts as a small SIP user agent ser
 7. Only `media.Session.Ready()` permits the `200 OK` SDP answer. Setup failure is returned as `480`; a concurrent call to either account receives `486` from the shared controller.
 8. `ACK`, pre-answer `CANCEL`, in-dialog `BYE`, 2xx retransmission and missing-ACK cleanup close the SIP transaction and media lifetime deterministically.
 
-Visitor events, API test calls and accepted incoming INVITEs from both accounts enter one threadsafe call controller. Its cancelable context spans dialing, media preparation, the active conversation and cleanup. The first incoming call reserves the slot; a later INVITE on either UDP socket receives `486 Busy Here`. The slot is released only after the runner returns, so an API hang-up cannot make a second call overlap delayed SIP/RTSP/Baichuan cleanup. Each SIP client retains its own dialog-level busy checks as a second boundary. Negotiated RFC 4733 DTMF follows the winning dialog and is handled identically for either account and call direction.
-
-The generic call-leg list is also the intended seam for v1.2 multi-button
-routing. The proposed entity/destination/mobile-target matrix is documented in
-[`ROADMAP.md`](ROADMAP.md); v1.1 deliberately keeps the public configuration to
-one visitor entity and one door destination.
+All route entities share one Home Assistant trigger subscription but retain independent edge/debounce state. Visitor events carry their route ID into the same threadsafe call controller as route test calls and accepted incoming INVITEs from both accounts. Its cancelable context spans dialing, media preparation, the active conversation and cleanup. The first event reserves the slot; another visitor route is rejected without queueing, while a later INVITE on either UDP socket receives `486 Busy Here`. The slot is released only after the runner returns, so an API hang-up cannot make a second call overlap delayed SIP/RTSP/Baichuan cleanup. Each SIP client retains its own dialog-level busy checks as a second boundary. Negotiated RFC 4733 DTMF follows the winning dialog and is handled identically for either account and call direction; route metadata changes diagnostics, not DTMF semantics.
 
 Both live talkback readers attach an RTP watchdog to valid packets of the negotiated codec; expiry returns a media error and the common call controller performs local SIP cleanup. It does not inspect PCM level and therefore does not confuse silence with a broken transport.
 

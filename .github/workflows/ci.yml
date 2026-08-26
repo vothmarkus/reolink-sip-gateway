@@ -34,7 +34,9 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Race detector
-        run: go test -race ./...
+        # Serialize packages so the calibration pacing test measures its fake
+        # real-time source instead of contention from concurrent race builds.
+        run: go test -race -p 1 ./...
       - name: Static amd64 build
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/reolink-sip-gateway ./cmd/gateway
       - name: Configuration adapter regression
@@ -44,12 +46,14 @@ jobs:
           ruby -e 'require "yaml";
           spec = YAML.load_file("../docs/api-v1.openapi.yaml");
           abort "unexpected OpenAPI version" unless spec["openapi"] == "3.1.0";
-          abort "missing API paths" unless spec.fetch("paths").keys.sort == ["/calls/hangup", "/calls/test", "/events", "/info", "/status"];
+          abort "missing API paths" unless spec.fetch("paths").keys.sort == ["/calls/hangup", "/calls/test", "/events", "/info", "/routes/{route_id}/test", "/status"];
           schemas = spec.fetch("components").fetch("schemas");
           abort "missing DTMF event schema" unless schemas.key?("DTMFEvent");
           capabilities = schemas.fetch("Info").fetch("properties").fetch("capabilities").fetch("items").fetch("enum");
           abort "missing DTMF capability" unless capabilities.include?("dtmf_events");
           abort "missing parallel-call capability" unless capabilities.include?("parallel_calls");
+          abort "missing route-test capability" unless capabilities.include?("route_test_calls");
+          abort "missing route status schema" unless schemas.key?("RouteStatus");
           sip_required = schemas.fetch("SIPStatus").fetch("required");
           abort "missing optional door-account status" unless sip_required.include?("door_call_enabled") && sip_required.include?("door_registered")'
 
@@ -60,7 +64,7 @@ jobs:
       - name: Build Home Assistant image
         run: >-
           docker build
-          --build-arg BUILD_VERSION=1.1.1
+          --build-arg BUILD_VERSION=1.2.1
           --build-arg BUILD_ARCH=amd64
           -t reolink-sip-gateway:ci
           reolink_sip_gateway

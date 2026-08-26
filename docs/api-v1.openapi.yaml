@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Reolink SIP Gateway Integration API
-  version: 1.3.0
+  version: 1.4.0
   description: >-
     Local API exposed by Reolink SIP Gateway 1.0.0 and newer. The API is
     versioned independently from the gateway release and is intended for the
@@ -62,7 +62,7 @@ paths:
   /calls/test:
     post:
       operationId: startTestCall
-      summary: Start an outgoing call to the configured SIP destination
+      summary: Start an outgoing call for the first configured route (legacy compatibility)
       responses:
         "202":
           $ref: "#/components/responses/Accepted"
@@ -76,6 +76,40 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
         "503":
           description: SIP is not registered or commands are not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /routes/{route_id}/test:
+    post:
+      operationId: startRouteTestCall
+      summary: Start an outgoing call for one configured route
+      parameters:
+        - name: route_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-z][a-z0-9_]{0,63}$'
+      responses:
+        "202":
+          $ref: "#/components/responses/Accepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: The route ID is not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: Another call owns the single call slot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: No SIP account used by this route is registered, or commands are not ready
           content:
             application/json:
               schema:
@@ -136,7 +170,7 @@ components:
           const: 1
         gateway_version:
           type: string
-          examples: [1.1.1]
+          examples: [1.2.1]
         instance_id:
           type: string
           format: uuid
@@ -148,7 +182,7 @@ components:
           uniqueItems: true
           items:
             type: string
-            enum: [call_status, caller_number, dtmf_events, events, hangup, parallel_calls, test_call]
+            enum: [call_status, caller_number, dtmf_events, events, hangup, parallel_calls, route_test_calls, test_call]
     Status:
       type: object
       additionalProperties: false
@@ -173,6 +207,11 @@ components:
           $ref: "#/components/schemas/MediaStatus"
         controls:
           $ref: "#/components/schemas/Controls"
+        routes:
+          type: array
+          description: Configured route catalogue; present when route_test_calls is advertised
+          items:
+            $ref: "#/components/schemas/RouteStatus"
     DTMFEvent:
       type: object
       additionalProperties: false
@@ -293,6 +332,18 @@ components:
         codec:
           type: string
           enum: [pcma, pcmu]
+        route_id:
+          type: string
+          description: Stable route ID of the current outgoing call
+        route_name:
+          type: string
+          description: Display name of the current outgoing route
+        last_route_id:
+          type: string
+          description: Stable route ID of the most recently started route call
+        last_route_name:
+          type: string
+          description: Display name of the most recently started route call
     MediaStatus:
       type: object
       additionalProperties: false
@@ -336,6 +387,21 @@ components:
           type: boolean
         hangup_available:
           type: boolean
+    RouteStatus:
+      type: object
+      additionalProperties: false
+      required: [id, name, test_call_available]
+      properties:
+        id:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{0,63}$'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        test_call_available:
+          type: boolean
+          description: Whether at least one SIP account used by this route is registered and the global call slot is free
     CommandResponse:
       type: object
       additionalProperties: false
@@ -362,6 +428,7 @@ components:
                 - not_found
                 - method_not_allowed
                 - call_busy
+                - route_not_found
                 - sip_unavailable
                 - gateway_unavailable
                 - streaming_unavailable

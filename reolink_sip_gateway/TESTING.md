@@ -1,8 +1,8 @@
-# Prüfprotokoll 1.1.1
+# Prüfprotokoll 1.2.1
 
 ## Ziel
 
-1.1.1 macht Tür- und Mobilkonto unabhängig aktivierbar, wendet die eingehende Anrufannahme auf beide Konten an und behält den First-Answer-Wins-Fork mit maximal drei Mobilzielen. Zu prüfen sind Tür-, Mobil- und Kombibetrieb, der kontenübergreifende Busy-Schutz, DTMF auf beiden Konten, getrennte Registrierungen/Ports, CANCEL/ACK/BYE-Races und weiterhin exakt eine Reolink-Mediensitzung.
+1.2.0 ergänzt mehrere Klingeltaster-Routen mit je einem Besucher-Sensor, optionaler FRITZ!Box-Klingeltaster-Nummer und maximal drei referenzierten Mobilzielen. 1.2.1 fasst zusätzlich die drei erweiterten SIP-Ports am Ende des SIP-Abschnitts zusammen. Zu prüfen sind die identische Optionsreihenfolge in allen öffentlichen Darstellungen, die unveränderte Runtimeübersetzung, Matrixauflösung, unabhängige Entprellung, routenspezifische API-Testanrufe, der globale Busy-Schutz, die 1.1.1-Kompatibilitätsroute, DTMF auf beiden Konten und weiterhin exakt eine Reolink-Mediensitzung.
 
 ## Softwareprüfungen vor Release
 
@@ -10,16 +10,40 @@
 - `go vet ./...`
 - `go test ./...`
 - `go test -shuffle=on ./...`
-- `go test -race ./...`
+- `go test -race -p 1 ./...` (Paketserialisierung schützt den Echtzeit-Pacing-Test vor fremder Race-Build-Last; die Race-Erkennung selbst bleibt vollständig aktiv.)
 - wiederholte Media/AEC-/Kalibrierungstests
 - statischer amd64-Go-Releasebuild
 - UI-Adaptertest: gruppierte `testdata/options.valid.json` → flache `testdata/options.runtime.valid.json`; anschließend `-check-config` gegen die Runtime-Datei
 - YAML-/JSON-Prüfung von App-Konfiguration und Übersetzungen
-- identische fünf Gruppen und Feldmengen in `options`, `schema`, DE, EN und Testkonfiguration
+- identische fünf bestehende Gruppen sowie die beiden Routenlisten in `options`, `schema`, DE, EN und Testkonfiguration
+- identische SIP-Feldreihenfolge in `options`, `schema`, DE, EN und Fixture: beide Konto-Blöcke vor `sip_registrar_port`, `sip_local_port` und `parallel_local_port`
 - Bash-Syntaxprüfung des s6-Startskripts
-- Versionsprüfung 1.1.1 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
+- Versionsprüfung 1.2.1 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
 - Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
 - expliziter Test der nativen Statistikbits 0…7
+
+## Ergänzungen 1.2.0
+
+- Leere `mobile_targets`- und `call_routes`-Listen ergeben exakt eine aufgelöste Route `default` aus den bisherigen Einzelwerten. Explizit konfigurierte Routen ignorieren diese Altwerte, ohne sie zu löschen oder zurückzuschreiben.
+- Routen- und Mobilziel-IDs werden getrimmt und streng validiert. Doppelte IDs, Besucher-Sensoren, Klingeltaster-Nummern, normalisierte Rufnummern und Zielreferenzen sowie unbekannte Referenzen oder leere Rufwege schlagen beim Start fehl.
+- Eine Route kann Tür-only, Mobil-only oder kombiniert sein. Die Validierung berücksichtigt die beiden Konto-Schalter und verlangt für jede Live-Route mindestens einen tatsächlich aktivierten Rufweg.
+- Alle Besucher-Sensoren werden in einer Home-Assistant-WebSocket-Subscription überwacht. Der REST-Fallback hält je Entity einen eigenen Flankenzustand; Entprellung erfolgt je Route, während der globale Call-Controller weiterhin nur einen Gewinner zulässt.
+- API v1 liefert einen Routenkatalog ohne Telefonnummern, aktuelle/letzte Route und `POST /api/v1/routes/{route_id}/test`. Der Alt-Endpunkt startet kompatibel die erste aufgelöste Route; unbekannte IDs ergeben `404 route_not_found`.
+- Status und Testanruf-Verfügbarkeit werden je Route aus den tatsächlich benötigten und registrierten SIP-Konten berechnet. Ein Tür-only-Test benötigt keine Mobilregistrierung und umgekehrt.
+- Kein Routenmodell enthält Kamera-, NVR-Kanal-, Medien-, DTMF- oder Türöffnerauswahl. Genau eine Reolink-Konfiguration und Mediensitzung bleibt die globale Ressource.
+
+## FRITZ!Box-4050-Hardwaretest 1.2.1
+
+1. Zwei Klingeltaster-Ziele in der als IP-Türsprechanlage eingerichteten FRITZ!Box 4050 prüfen, beispielsweise `11` für Klingeltaster 1 und `12` für Klingeltaster 2. Die FRITZ!Box 6690 bleibt nur Modem.
+2. Zwei unterschiedliche Besucher-Entities als Routen anlegen und beiden unterschiedliche `doorbell_number`-Werte geben. Jede reale Klingeltaste muss exakt die erwartete FRITZ!Fon-Türdarstellung auslösen.
+3. Drei benannte Mobilziele anlegen und als Matrix unterschiedlich auf beide Routen verteilen. Bei jeder Taste dürfen nur deren zugeordnete Mobiltelefone klingeln; ein gemeinsames Ziel muss in beiden Routen funktionieren, ohne doppelt gepflegte Rufnummer.
+4. In der Companion-Integration muss je Route genau ein Testanruf-Button mit dem Routennamen erscheinen. Beide Buttons einzeln auslösen und die Zuordnung zu Türziel und Mobiltelefonen prüfen.
+5. Eine Tür-only- und eine Mobil-only-Route testen. Der jeweilige Testanruf muss auch dann verfügbar sein, wenn das für diese Route nicht benötigte Konto deaktiviert ist.
+6. Zwei Routen nahezu gleichzeitig auslösen. Nur die erste darf einen Rufaufbau und die eine Reolink-Mediensitzung erhalten; die zweite darf weder parallel starten noch nach Gesprächsende nachgeholt werden.
+7. Dieselbe Route innerhalb der Entprellzeit erneut, danach die andere Route auslösen. Nur die Wiederholung derselben Route wird entprellt; die andere erreicht den globalen Busy-Entscheid und bleibt ebenfalls unqueued.
+8. Je einen Tür- und Mobilzweig zuerst annehmen und zusätzlich einen Fast-Simultaneous-Answer-Test durchführen. CANCEL beziehungsweise ACK+BYE müssen alle Verlierer sauber beenden.
+9. Eingehende Anrufe an beide Konten und DTMF in beiden Richtungen prüfen. Das Verhalten muss gegenüber 1.1.1 identisch sein; Route darf höchstens als zusätzliche Diagnose erscheinen.
+10. Abschließend beide Routenlisten leeren und die bisherige Einzelkonfiguration erneut starten. Registrierung, Standard-Testanruf und Besuchertrigger müssen ohne manuelle Migration funktionieren.
 
 ## Ergänzungen 1.1.1
 
@@ -40,7 +64,7 @@
 - Jeder Wählzweig reserviert einen eigenen dynamischen RTP-Socket. Nur der Gewinner wird an `media.Session` übergeben; loser sockets werden nach Fehler/CANCEL/BYE geschlossen. Der globale Call-Slot bleibt bis zum begrenzten Loser-Cleanup reserviert.
 - API v1 meldet `parallel_calls`, Aktivierungszustand und zweite Registrierung additiv. Alte Felder und DTMF-Ereignisse bleiben unverändert.
 
-## FRITZ!Box-4050-Hardwaretest 1.1.1
+## FRITZ!Box-4050-Regressionsprüfung 1.1.1
 
 1. FRITZ!Box 4050 als Registrar/Telefonanlage verwenden; FRITZ!Box 6690 bleibt reines Modem.
 2. Tür-Konto als IP-Türsprechanlage mit passendem Klingeltaster-Ziel anlegen, beispielsweise `11` für Klingeltaster 1; Mobilkonto als normales LAN/WLAN-IP-Telefon anlegen. Lokale Gateway-Ports 5070/5071, Registrarziel jeweils 4050:5060.

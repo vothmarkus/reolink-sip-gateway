@@ -19,6 +19,7 @@ var (
 	ErrSIPUnavailable     = errors.New("SIP is unavailable")
 	ErrNoActiveCall       = errors.New("no call is active")
 	ErrCommandUnavailable = errors.New("gateway commands are not ready")
+	ErrRouteNotFound      = errors.New("call route was not found")
 )
 
 var apiCapabilities = []string{
@@ -28,11 +29,12 @@ var apiCapabilities = []string{
 	"events",
 	"hangup",
 	"parallel_calls",
+	"route_test_calls",
 	"test_call",
 }
 
 type CommandHandler interface {
-	StartTestCall(context.Context) error
+	StartTestCall(context.Context, string) error
 	Hangup(context.Context) error
 }
 
@@ -61,6 +63,7 @@ type APIStatus struct {
 	Call       APICallStatus    `json:"call"`
 	Media      APIMediaStatus   `json:"media"`
 	Controls   APIControls      `json:"controls"`
+	Routes     []APIRouteStatus `json:"routes,omitempty"`
 }
 
 type APIGatewayStatus struct {
@@ -93,6 +96,10 @@ type APICallStatus struct {
 	StartedAt        *time.Time `json:"started_at,omitempty"`
 	EndedAt          *time.Time `json:"ended_at,omitempty"`
 	Codec            string     `json:"codec,omitempty"`
+	RouteID          string     `json:"route_id,omitempty"`
+	RouteName        string     `json:"route_name,omitempty"`
+	LastRouteID      string     `json:"last_route_id,omitempty"`
+	LastRouteName    string     `json:"last_route_name,omitempty"`
 }
 
 type APIMediaStatus struct {
@@ -113,6 +120,12 @@ type APIMediaStatus struct {
 type APIControls struct {
 	TestCallAvailable bool `json:"test_call_available"`
 	HangupAvailable   bool `json:"hangup_available"`
+}
+
+type APIRouteStatus struct {
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	TestCallAvailable bool   `json:"test_call_available"`
 }
 
 type APIDTMFEvent struct {
@@ -157,7 +170,7 @@ func (s *Store) registerAPIRoutes(mux *http.ServeMux, options ServerOptions) {
 		if !apiMethod(w, r, http.MethodGet) {
 			return
 		}
-		writeAPIJSON(w, http.StatusOK, newAPIStatus(s.Get()))
+		writeAPIJSON(w, http.StatusOK, newAPIStatus(s.Get(), s.Routes()))
 	}))
 	mux.Handle("/api/v1/events", auth(func(w http.ResponseWriter, r *http.Request) {
 		if !apiMethod(w, r, http.MethodGet) {
@@ -173,7 +186,27 @@ func (s *Store) registerAPIRoutes(mux *http.ServeMux, options ServerOptions) {
 			writeCommandError(w, ErrCommandUnavailable)
 			return
 		}
-		if err := options.Commands.StartTestCall(r.Context()); err != nil {
+		if err := options.Commands.StartTestCall(r.Context(), ""); err != nil {
+			writeCommandError(w, err)
+			return
+		}
+		writeAPIJSON(w, http.StatusAccepted, apiCommandResponse{Status: "accepted"})
+	}))
+	mux.Handle("/api/v1/routes/", auth(func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/api/v1/routes/")
+		parts := strings.Split(path, "/")
+		if len(parts) != 2 || parts[0] == "" || parts[1] != "test" {
+			writeAPIError(w, http.StatusNotFound, "not_found", "API endpoint not found")
+			return
+		}
+		if !apiMethod(w, r, http.MethodPost) {
+			return
+		}
+		if options.Commands == nil {
+			writeCommandError(w, ErrCommandUnavailable)
+			return
+		}
+		if err := options.Commands.StartTestCall(r.Context(), parts[0]); err != nil {
 			writeCommandError(w, err)
 			return
 		}
@@ -203,7 +236,7 @@ func (s *Store) registerAPIRoutes(mux *http.ServeMux, options ServerOptions) {
 	}))
 }
 
-func newAPIStatus(snapshot Snapshot) APIStatus {
+func newAPIStatus(snapshot Snapshot, routes []RouteDefinition) APIStatus {
 	active := snapshot.CurrentCallDirection != ""
 	callCanStart := snapshot.State == "idle" || snapshot.State == "error"
 	doorRegistered := snapshot.DoorCallEnabled && snapshot.SIPRegistered
@@ -212,6 +245,20 @@ func newAPIStatus(snapshot Snapshot) APIStatus {
 	callState := "idle"
 	if active {
 		callState = snapshot.State
+	}
+	routeStatuses := make([]APIRouteStatus, 0, len(routes))
+	anyRouteAvailable := false
+	for _, route := range routes {
+		pathRegistered := (route.DoorCall && doorRegistered) || (route.MobileCall && parallelRegistered)
+		available := !snapshot.DryRun && pathRegistered && !active && callCanStart
+		anyRouteAvailable = anyRouteAvailable || available
+		routeStatuses = append(routeStatuses, APIRouteStatus{
+			ID: route.ID, Name: route.Name, TestCallAvailable: available,
+		})
+	}
+	legacyTestCallAvailable := !snapshot.DryRun && anyRegistered && !active && callCanStart
+	if len(routeStatuses) > 0 {
+		legacyTestCallAvailable = anyRouteAvailable
 	}
 	return APIStatus{
 		APIVersion: APIVersion,
@@ -233,6 +280,8 @@ func newAPIStatus(snapshot Snapshot) APIStatus {
 			LastDirection: snapshot.LastCallDirection, CallerNumber: snapshot.CurrentCallerNumber,
 			LastCallerNumber: snapshot.LastCallerNumber, StartedAt: timePointer(snapshot.LastCallStarted),
 			EndedAt: timePointer(snapshot.LastCallEnded), Codec: snapshot.ActiveCodec,
+			RouteID: snapshot.CurrentRouteID, RouteName: snapshot.CurrentRouteName,
+			LastRouteID: snapshot.LastRouteID, LastRouteName: snapshot.LastRouteName,
 		},
 		Media: APIMediaStatus{
 			ConfiguredReolinkMode: snapshot.ConfiguredReolinkMode, ActiveReolinkMode: snapshot.ActiveReolinkMode,
@@ -243,9 +292,10 @@ func newAPIStatus(snapshot Snapshot) APIStatus {
 			LastCalibration: timePointer(snapshot.LastCalibration),
 		},
 		Controls: APIControls{
-			TestCallAvailable: !snapshot.DryRun && anyRegistered && !active && callCanStart,
+			TestCallAvailable: legacyTestCallAvailable,
 			HangupAvailable:   active,
 		},
+		Routes: routeStatuses,
 	}
 }
 
@@ -266,7 +316,7 @@ func (s *Store) serveEvents(w http.ResponseWriter, r *http.Request, instanceID s
 	keepalive := time.NewTicker(15 * time.Second)
 	defer keepalive.Stop()
 	writeStatus := func(snapshot Snapshot) bool {
-		payload, err := json.Marshal(newAPIStatus(snapshot))
+		payload, err := json.Marshal(newAPIStatus(snapshot, s.Routes()))
 		if err != nil {
 			return false
 		}
@@ -356,6 +406,8 @@ func writeCommandError(w http.ResponseWriter, err error) {
 		writeAPIError(w, http.StatusConflict, "call_busy", "another call is active")
 	case errors.Is(err, ErrSIPUnavailable):
 		writeAPIError(w, http.StatusServiceUnavailable, "sip_unavailable", "SIP is not registered")
+	case errors.Is(err, ErrRouteNotFound):
+		writeAPIError(w, http.StatusNotFound, "route_not_found", "call route was not found")
 	case errors.Is(err, ErrCommandUnavailable), errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		writeAPIError(w, http.StatusServiceUnavailable, "gateway_unavailable", "gateway commands are not ready")
 	default:

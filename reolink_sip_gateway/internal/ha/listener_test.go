@@ -51,12 +51,12 @@ func TestListenerWebSocketTrigger(t *testing.T) {
 		}
 		_ = serverWriteFrame(conn, wsOpcodeText, []byte(`{"type":"auth_ok"}`))
 		msg, err = serverReadFrame(rw.Reader)
-		if err != nil || !strings.Contains(string(msg), `"subscribe_trigger"`) || !strings.Contains(string(msg), `"from":"off"`) || !strings.Contains(string(msg), `"to":"on"`) {
+		if err != nil || !strings.Contains(string(msg), `"subscribe_trigger"`) || !strings.Contains(string(msg), `"entity_id":["binary_sensor.door"]`) || !strings.Contains(string(msg), `"from":"off"`) || !strings.Contains(string(msg), `"to":"on"`) {
 			t.Errorf("bad subscription: %s %v", msg, err)
 			return
 		}
 		_ = serverWriteFrame(conn, wsOpcodeText, []byte(`{"id":1,"type":"result","success":true,"result":null}`))
-		ev := `{"id":1,"type":"event","event":{"variables":{"trigger":{"to_state":{"state":"on"}}}}}`
+		ev := `{"id":1,"type":"event","event":{"variables":{"trigger":{"to_state":{"entity_id":"binary_sensor.door","state":"on"}}}}}`
 		_ = serverWriteFrame(conn, wsOpcodeText, []byte(ev))
 		// Keep the connection alive until the test context is canceled.
 		time.Sleep(300 * time.Millisecond)
@@ -66,18 +66,21 @@ func TestListenerWebSocketTrigger(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ch := make(chan struct{}, 1)
+	ch := make(chan Trigger, 1)
 	l := &Listener{
 		WSURL:        "ws" + strings.TrimPrefix(srv.URL, "http") + "/core/websocket",
 		RESTBaseURL:  srv.URL,
 		Token:        "token",
-		EntityID:     "binary_sensor.door",
+		Routes:       []RouteSubscription{{RouteID: "front_door", EntityID: "binary_sensor.door"}},
 		PollInterval: 20 * time.Millisecond,
 	}
 	done := make(chan error, 1)
 	go func() { done <- l.Run(ctx, ch) }()
 	select {
-	case <-ch:
+	case event := <-ch:
+		if event.RouteID != "front_door" || event.EntityID != "binary_sensor.door" {
+			t.Fatalf("unexpected route trigger: %#v", event)
+		}
 		cancel()
 	case <-time.After(2 * time.Second):
 		t.Fatal("no websocket visitor trigger")
@@ -113,7 +116,7 @@ func TestListenerWebSocketTriggerDoesNotRequireREST(t *testing.T) {
 			return
 		}
 		_ = serverWriteFrame(conn, wsOpcodeText, []byte(`{"id":1,"type":"result","success":true}`))
-		_ = serverWriteFrame(conn, wsOpcodeText, []byte(`{"id":1,"type":"event","event":{"variables":{"trigger":{"to_state":{"state":"on"}}}}}`))
+		_ = serverWriteFrame(conn, wsOpcodeText, []byte(`{"id":1,"type":"event","event":{"variables":{"trigger":{"to_state":{"entity_id":"binary_sensor.door","state":"on"}}}}}`))
 		time.Sleep(150 * time.Millisecond)
 	})
 	srv := httptest.NewServer(mux)
@@ -121,8 +124,8 @@ func TestListenerWebSocketTriggerDoesNotRequireREST(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	ch := make(chan struct{}, 1)
-	l := &Listener{WSURL: "ws" + strings.TrimPrefix(srv.URL, "http") + "/core/websocket", RESTBaseURL: srv.URL, Token: "token", EntityID: "binary_sensor.door"}
+	ch := make(chan Trigger, 1)
+	l := &Listener{WSURL: "ws" + strings.TrimPrefix(srv.URL, "http") + "/core/websocket", RESTBaseURL: srv.URL, Token: "token", Routes: []RouteSubscription{{RouteID: "front_door", EntityID: "binary_sensor.door"}}}
 	done := make(chan error, 1)
 	go func() { done <- l.Run(ctx, ch) }()
 	select {
@@ -135,6 +138,36 @@ func TestListenerWebSocketTriggerDoesNotRequireREST(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("listener did not stop")
+	}
+}
+
+func TestListenerFallbackTracksEachRouteIndependently(t *testing.T) {
+	l := &Listener{
+		previous:    make(map[string]string),
+		initialized: make(map[string]bool),
+	}
+	one := RouteSubscription{RouteID: "wohnung_1", EntityID: "binary_sensor.one"}
+	two := RouteSubscription{RouteID: "wohnung_2", EntityID: "binary_sensor.two"}
+	triggers := make(chan Trigger, 2)
+
+	l.acceptState(one, "off", triggers)
+	l.acceptState(two, "off", triggers)
+	l.acceptState(one, "on", triggers)
+	l.acceptState(two, "on", triggers)
+
+	seen := map[string]bool{}
+	for range 2 {
+		seen[(<-triggers).RouteID] = true
+	}
+	if !seen["wohnung_1"] || !seen["wohnung_2"] {
+		t.Fatalf("route triggers=%#v", seen)
+	}
+}
+
+func TestListenerRequiresRoute(t *testing.T) {
+	err := (&Listener{}).Run(context.Background(), make(chan Trigger, 1))
+	if err == nil || !strings.Contains(err.Error(), "route") {
+		t.Fatalf("error=%v", err)
 	}
 }
 

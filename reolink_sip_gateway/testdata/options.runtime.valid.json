@@ -26,6 +26,8 @@
   "parallel_password": "",
   "parallel_destinations": [],
   "parallel_local_port": 5071,
+  "mobile_targets": [],
+  "call_routes": [],
   "incoming_calls_enabled": false,
   "incoming_allowed_callers": [
     "*"

@@ -38,6 +38,10 @@ type Snapshot struct {
 	LastCallDirection             string    `json:"last_call_direction,omitempty"`
 	CurrentCallerNumber           string    `json:"current_caller_number,omitempty"`
 	LastCallerNumber              string    `json:"last_caller_number,omitempty"`
+	CurrentRouteID                string    `json:"current_route_id,omitempty"`
+	CurrentRouteName              string    `json:"current_route_name,omitempty"`
+	LastRouteID                   string    `json:"last_route_id,omitempty"`
+	LastRouteName                 string    `json:"last_route_name,omitempty"`
 	LastError                     string    `json:"last_error,omitempty"`
 	ActiveCodec                   string    `json:"active_codec,omitempty"`
 	ConfiguredReolinkMode         string    `json:"configured_reolink_mode"`
@@ -75,11 +79,19 @@ type subscriber struct {
 	dtmf   chan dtmfEvent
 }
 
+type RouteDefinition struct {
+	ID         string
+	Name       string
+	DoorCall   bool
+	MobileCall bool
+}
+
 type Store struct {
 	mu             sync.RWMutex
 	value          Snapshot
 	subscribers    map[uint64]subscriber
 	nextSubscriber uint64
+	routes         []RouteDefinition
 }
 
 func New(version string) *Store {
@@ -123,6 +135,18 @@ func (s *Store) Get() Snapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.value
+}
+
+func (s *Store) SetRoutes(routes []RouteDefinition) {
+	s.mu.Lock()
+	s.routes = append([]RouteDefinition(nil), routes...)
+	s.mu.Unlock()
+}
+
+func (s *Store) Routes() []RouteDefinition {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]RouteDefinition(nil), s.routes...)
 }
 
 // Subscribe returns an initial snapshot followed by the newest changed
@@ -318,6 +342,8 @@ var page = template.Must(template.New("status").Funcs(template.FuncMap{"time": f
 <tr><td>Aktiver Codec</td><td>{{.ActiveCodec}}</td></tr>
 <tr><td>Aktiver Empfang</td><td>{{.ActiveReceive}}{{if .ReceiveDetails}} – {{.ReceiveDetails}}{{end}}</td></tr>
 <tr><td>Aktiver Rückkanal</td><td>{{.ActiveTalkback}}{{if .TalkbackDetails}} – {{.TalkbackDetails}}{{end}}</td></tr>
+<tr><td>Aktuelle Route</td><td>{{if .CurrentRouteName}}{{.CurrentRouteName}} (<code>{{.CurrentRouteID}}</code>){{else}}–{{end}}</td></tr>
+<tr><td>Letzte Route</td><td>{{if .LastRouteName}}{{.LastRouteName}} (<code>{{.LastRouteID}}</code>){{else}}–{{end}}</td></tr>
 <tr><td>Aktuelle Anrufrichtung</td><td>{{if .CurrentCallDirection}}{{.CurrentCallDirection}}{{else}}–{{end}}</td></tr>
 <tr><td>Aktuell anrufende Nummer</td><td>{{if .CurrentCallerNumber}}{{.CurrentCallerNumber}}{{else}}–{{end}}</td></tr>
 <tr><td>Letzte anrufende Nummer</td><td>{{if .LastCallerNumber}}{{.LastCallerNumber}}{{else}}–{{end}}</td></tr>

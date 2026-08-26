@@ -113,6 +113,106 @@ func TestMobileOnlyLiveConfiguration(t *testing.T) {
 	}
 }
 
+func TestRoutingMatrixValidationAndResolution(t *testing.T) {
+	cfg := validRoutingConfig()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid routing matrix failed: %v", err)
+	}
+	routes := cfg.ResolvedCallRoutes()
+	if len(routes) != 2 || routes[0].ID != "wohnung_1" || routes[0].DoorbellNumber != "11" || len(routes[0].MobileTargets) != 2 || routes[0].MobileTargets[1].ID != "bereitschaft" {
+		t.Fatalf("resolved routes=%#v", routes)
+	}
+	if cfg.MaxMobileTargetsPerRoute() != 2 {
+		t.Fatalf("maximum mobile targets=%d", cfg.MaxMobileTargetsPerRoute())
+	}
+	if route, ok := cfg.FindCallRoute("wohnung_2"); !ok || route.Name != "Wohnung 2" {
+		t.Fatalf("route=%#v ok=%t", route, ok)
+	}
+}
+
+func TestRoutingMatrixRejectsAmbiguousOrBrokenEntries(t *testing.T) {
+	tests := map[string]func(*Config){
+		"duplicate target id": func(c *Config) { c.MobileTargets[1].ID = c.MobileTargets[0].ID },
+		"duplicate formatted destination": func(c *Config) {
+			c.MobileTargets[1].Destination = "0163 12-34"
+			c.MobileTargets[0].Destination = "01631234"
+		},
+		"duplicate route id":         func(c *Config) { c.CallRoutes[1].ID = c.CallRoutes[0].ID },
+		"duplicate entity":           func(c *Config) { c.CallRoutes[1].VisitorEntity = c.CallRoutes[0].VisitorEntity },
+		"duplicate doorbell number":  func(c *Config) { c.CallRoutes[1].DoorbellNumber = c.CallRoutes[0].DoorbellNumber },
+		"unknown target":             func(c *Config) { c.CallRoutes[0].MobileTarget1 = "unknown" },
+		"duplicate target reference": func(c *Config) { c.CallRoutes[0].MobileTarget2 = c.CallRoutes[0].MobileTarget1 },
+		"invalid route id":           func(c *Config) { c.CallRoutes[0].ID = "Wohnung-1" },
+		"missing route path": func(c *Config) {
+			c.CallRoutes[1].DoorbellNumber = ""
+			c.CallRoutes[1].MobileTarget1 = ""
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg := validRoutingConfig()
+			mutate(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation failure")
+			}
+		})
+	}
+}
+
+func TestLegacyConfigurationSynthesizesDefaultRoute(t *testing.T) {
+	cfg := Defaults()
+	cfg.ParallelDestinations = []string{"0163", "0176"}
+	routes := cfg.ResolvedCallRoutes()
+	if len(routes) != 1 || routes[0].ID != DefaultRouteID || routes[0].Name != "Standard" || routes[0].VisitorEntity != cfg.VisitorEntity || routes[0].DoorbellNumber != cfg.SIPDestination || len(routes[0].MobileTargets) != 2 {
+		t.Fatalf("legacy route=%#v", routes)
+	}
+}
+
+func TestLoadNormalizesRoutingMatrixWhitespace(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "options.json")
+	data := `{
+		"dry_run": true,
+		"visitor_entity": "auto",
+		"mobile_targets": [{"id":" markus ","name":" Markus ","destination":" 0163 "}],
+		"call_routes": [{"id":" wohnung_1 ","name":" Wohnung 1 ","visitor_entity":" binary_sensor.klingel_1 ","doorbell_number":" 11 ","mobile_target_1":" markus ","mobile_target_2":"","mobile_target_3":""}]
+	}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := cfg.ResolvedCallRoutes()[0]
+	if route.ID != "wohnung_1" || route.Name != "Wohnung 1" || route.DoorbellNumber != "11" || route.MobileTargets[0].Destination != "0163" {
+		t.Fatalf("normalized route=%#v", route)
+	}
+}
+
+func validRoutingConfig() Config {
+	cfg := Defaults()
+	cfg.DryRun = false
+	cfg.ReolinkPassword = "camera-secret"
+	cfg.SIPUsername = "door"
+	cfg.SIPPassword = "door-secret"
+	cfg.SIPDestination = ""
+	cfg.VisitorEntity = "auto" // ignored once explicit routes are configured
+	cfg.ParallelCallEnabled = true
+	cfg.ParallelUsername = "mobile"
+	cfg.ParallelPassword = "mobile-secret"
+	cfg.ParallelDestinations = nil
+	cfg.MobileTargets = []MobileTarget{
+		{ID: "markus", Name: "Markus", Destination: "0163"},
+		{ID: "bereitschaft", Name: "Bereitschaft", Destination: "0176"},
+	}
+	cfg.CallRoutes = []CallRoute{
+		{ID: "wohnung_1", Name: "Wohnung 1", VisitorEntity: "binary_sensor.klingel_1", DoorbellNumber: "11", MobileTarget1: "markus", MobileTarget2: "bereitschaft"},
+		{ID: "wohnung_2", Name: "Wohnung 2", VisitorEntity: "binary_sensor.klingel_2", DoorbellNumber: "12", MobileTarget1: "markus"},
+	}
+	return cfg
+}
+
 func TestIncomingCallerAndRTPWatchdogValidation(t *testing.T) {
 	cfg := Defaults()
 	cfg.IncomingCallsEnabled = true
