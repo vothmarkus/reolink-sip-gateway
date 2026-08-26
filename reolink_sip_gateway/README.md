@@ -1,8 +1,12 @@
-# Reolink SIP Gateway 1.2.0
+# Reolink SIP Gateway 1.2.1
 
 Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann SIP-Anrufe auslösen; optional lassen sich die aktivierten Gateway-Nebenstellen anrufen und direkt mit der Doorbell verbinden.
 
 > Community-Projekt. Nicht offiziell von Reolink oder Home Assistant bereitgestellt oder unterstützt.
+
+## 1.2.1: übersichtlicher SIP-Abschnitt
+
+1.2.1 ordnet ausschließlich die sichtbaren SIP-Optionen sinnvoller an: Zuerst stehen die Einstellungen des Türsprechstellen- und des Mobilruf-Kontos. Danach folgen als gemeinsamer erweiterter Block **SIP-Port** (5060), **Lokaler SIP-Port des Tür-Kontos** (5070) und **Lokaler SIP-Port des Mobilruf-Kontos** (5071). Gespeicherte Werte, Registrierung, Routing und Audioverhalten bleiben unverändert.
 
 ## 1.2.0: mehrere Klingeltaster und intuitive Anrufrouten
 
@@ -164,14 +168,14 @@ sip:
   sip_destination: "11"
   sip_display_name: Haustür
   sip_codec_preference: pcma
-  sip_registrar_port: 5060
-  sip_local_port: 5070
   parallel_call_enabled: true
   parallel_username: "mobilruf"
   parallel_password: "..."
   parallel_destinations:
     - "0163..."
     - "0176..."
+  sip_registrar_port: 5060
+  sip_local_port: 5070
   parallel_local_port: 5071
 
 audio:

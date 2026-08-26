@@ -1,10 +1,12 @@
-# Reolink SIP Gateway 1.2.0 – Dokumentation
+# Reolink SIP Gateway 1.2.1 – Dokumentation
 
 ## Zweck
 
-**1.2.0** unterstützt mehrere Klingeltaster-Routen über zwei unabhängig aktivierbare SIP-Konten an derselben FRITZ!Box: eine IP-Türsprechanlage und ein normales IP-Telefon für bis zu drei Mobilziele je Route. Mindestens ein Konto muss im Live-Betrieb aktiv sein. Der zuerst angenommene ausgehende Tür- oder Mobilzweig beziehungsweise der erste eingehende Anruf erhält den weiterhin einzigen Reolink-Medienweg.
+**1.2.1** unterstützt mehrere Klingeltaster-Routen über zwei unabhängig aktivierbare SIP-Konten an derselben FRITZ!Box: eine IP-Türsprechanlage und ein normales IP-Telefon für bis zu drei Mobilziele je Route. Mindestens ein Konto muss im Live-Betrieb aktiv sein. Der zuerst angenommene ausgehende Tür- oder Mobilzweig beziehungsweise der erste eingehende Anruf erhält den weiterhin einzigen Reolink-Medienweg.
 
 Die fünf bisherigen Konfigurationsgruppen und der flache Runtime-Vertrag bleiben bestehen. 1.2.0 ergänzt auf oberster Ebene die optionalen Listen `mobile_targets` und `call_routes`. Leere Listen ergeben automatisch die bisherige Einzelroute. Es gibt weiterhin nur eine konfigurierte Kamera und höchstens ein aktives Reolink-Gespräch. Die App bleibt ohne Companion-Integration vollständig funktionsfähig und erzeugt selbst keine HA-Entities oder Automationen.
+
+1.2.1 ändert nur die sichtbare Reihenfolge im SIP-Abschnitt: Auf die beiden zusammenhängenden Konto-Blöcke folgen Registrar-Port, lokaler Tür-Port und lokaler Mobil-Port als gemeinsamer erweiterter Portblock. Schlüssel, gespeicherte Werte und Runtimeübersetzung bleiben identisch.
 
 Das bestehende Branding verwendet PNG-Transparenz für den Außenbereich von `icon.png`, `logo.png` und dem eingebetteten Ingress-Logo. Der Go-Modulpfad entspricht dem öffentlichen Repository `github.com/vothmarkus/reolink-sip-gateway`.
 
@@ -289,6 +291,8 @@ Beim ersten normalen Start entstehen `/data/integration-api-instance-id` und `/d
 Der Status unterscheidet aktuelle und letzte Werte: `call.direction`, `call.caller_number`, `call.route_id` und `call.route_name` werden nach dem Gespräch geleert, während die jeweiligen `last_*`-Felder erhalten bleiben. Bei eingehenden Anrufen ohne ausgelöste Klingelroute bleiben die Routenfelder leer. Die letzte anrufende Nummer wird nur durch einen zugelassenen eingehenden Anruf aktualisiert. Diagnosen und Fehlerantworten enthalten niemals Token, Zugangsdaten oder den Mobilzielkatalog.
 
 ## Update von älteren Versionen
+
+1.2.1 ordnet vorhandene SIP-Felder lediglich neu an. Es gibt keine neue Option und keine Datenmigration; alle gespeicherten Werte werden unverändert weiterverwendet.
 
 1.2.0 ergänzt die leeren Listen `mobile_targets` und `call_routes`. Solange keine Route eingetragen wird, bildet das Gateway `visitor_entity`, `sip_destination` und `parallel_destinations` intern auf die Route `default` ab; Registrierungen, Zielwahl, DTMF und Medienverhalten bleiben dadurch gegenüber 1.1.1 unverändert. Erst eine nicht leere Routenliste schaltet auf die explizite Matrix um. Der Startadapter schreibt die neuen Listen ausschließlich in den privaten Runtime-Snapshot und verändert keine bestehenden gespeicherten Werte.
 

@@ -6,7 +6,7 @@ Community Home Assistant app that bridges bidirectional audio between a Reolink 
 
 ## Current release
 
-**v1.2.0** adds a multi-button routing matrix while preserving the two optional SIP accounts and the single Reolink camera/media path. Named mobile targets are maintained once and referenced by call routes. Every route maps one Home Assistant visitor sensor to an optional FRITZ!Box doorbell number and up to three mobile targets. Empty route lists retain the v1.1.1 single-route behavior automatically.
+**v1.2.1** adds the v1.2 multi-button routing matrix while preserving the two optional SIP accounts and the single Reolink camera/media path. Named mobile targets are maintained once and referenced by call routes. Every route maps one Home Assistant visitor sensor to an optional FRITZ!Box doorbell number and up to three mobile targets. Empty route lists retain the v1.1.1 single-route behavior automatically. The 1.2.1 configuration polish keeps both account blocks together and groups the three advanced SIP ports at the end of the SIP section.
 
 Still-ringing losers receive `CANCEL`. If two peers answer across the winner decision, every `200 OK` is acknowledged and the losing dialog is immediately closed with `BYE`. The machine-readable integration contract remains API v1 and is documented in [`docs/api-v1.openapi.yaml`](docs/api-v1.openapi.yaml).
 
@@ -78,14 +78,14 @@ sip:
   sip_destination: "11"
   sip_display_name: "Front Door"
   sip_codec_preference: pcma
-  sip_registrar_port: 5060
-  sip_local_port: 5070
   parallel_call_enabled: true
   parallel_username: "mobile-call"
   parallel_password: "change-me"
   parallel_destinations:
     - "01630000000"
     - "01760000000"
+  sip_registrar_port: 5060
+  sip_local_port: 5070
   parallel_local_port: 5071
 
 audio:

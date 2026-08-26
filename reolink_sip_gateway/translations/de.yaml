@@ -49,12 +49,6 @@ configuration:
       sip_codec_preference:
         name: Bevorzugter Audiocodec
         description: PCMA wird für deutsche Telefonanlagen empfohlen; „auto“ bietet PCMA und PCMU an.
-      sip_registrar_port:
-        name: SIP-Port (erweitert)
-        description: UDP-Port des SIP-Registrars; normalerweise 5060.
-      sip_local_port:
-        name: Lokaler SIP-Port des Tür-Kontos (erweitert)
-        description: UDP-Port des Türsprechstellen-Kontos für die SIP-Signalisierung. RTP-Ports werden automatisch gewählt.
       parallel_call_enabled:
         name: Mobilruf-Konto aktivieren
         description: Registriert ein normales IP-Telefon an derselben FRITZ!Box und ruft bis zu drei Mobilziele gleichzeitig an – parallel zur aktiven Türsprechstelle oder als alleiniger Rufweg. Der zuerst angenommene Ruf gewinnt.
@@ -67,6 +61,12 @@ configuration:
       parallel_destinations:
         name: Mobilruf-Ziele
         description: Eine bis maximal drei gleichzeitig anzurufende externe Rufnummern im einfachen Modus ohne Anrufrouten. Im Routenmodus werden benannte Mobilziele und deren IDs verwendet.
+      sip_registrar_port:
+        name: SIP-Port (erweitert)
+        description: UDP-Port des SIP-Registrars; normalerweise 5060.
+      sip_local_port:
+        name: Lokaler SIP-Port des Tür-Kontos (erweitert)
+        description: UDP-Port des Türsprechstellen-Kontos für die SIP-Signalisierung. RTP-Ports werden automatisch gewählt.
       parallel_local_port:
         name: Lokaler SIP-Port des Mobilruf-Kontos (erweitert)
         description: UDP-Port des Mobilruf-Kontos; standardmäßig 5071 und bei gleichzeitig aktivem Tür-Konto verschieden von dessen Port.

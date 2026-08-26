@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1
+
+- Die beiden Konto-Blöcke stehen in der Home-Assistant-Konfiguration nun geschlossen vor den erweiterten SIP-Ports.
+- Registrar-Port 5060, lokaler Tür-Port 5070 und lokaler Mobil-Port 5071 bilden am Ende des SIP-Abschnitts einen gemeinsamen Block. Werte und Laufzeitverhalten ändern sich dadurch nicht.
+- Reihenfolgestests, deutsche/englische Übersetzungen, Beispiele und Versionskennungen auf 1.2.1 aktualisiert.
+
 ## 1.2.0
 
 - Wiederverwendbare **Mobilziele** und frei benennbare **Anrufrouten** ergänzt. Jede Route verbindet einen Home-Assistant-Besucher-Sensor mit einer optionalen FRITZ!Box-Klingeltaster-Nummer und bis zu drei Mobilzielen.

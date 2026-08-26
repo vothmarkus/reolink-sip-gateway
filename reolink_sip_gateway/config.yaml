@@ -1,5 +1,5 @@
 name: Reolink SIP Gateway
-version: "1.2.0"
+version: "1.2.1"
 slug: reolink_sip_gateway
 description: Verbindet eine Reolink-Türklingel über frei definierbare Klingeltaster-Routen mit SIP, Zwei-Wege-Audio und Home Assistant.
 url: https://github.com/vothmarkus/reolink-sip-gateway
@@ -34,12 +34,12 @@ options:
     sip_destination: "**610"
     sip_display_name: Haustür
     sip_codec_preference: pcma
-    sip_registrar_port: 5060
-    sip_local_port: 5070
     parallel_call_enabled: false
     parallel_username: ""
     parallel_password: ""
     parallel_destinations: []
+    sip_registrar_port: 5060
+    sip_local_port: 5070
     parallel_local_port: 5071
   mobile_targets: []
   call_routes: []
@@ -77,13 +77,13 @@ schema:
     sip_destination: str
     sip_display_name: str
     sip_codec_preference: list(auto|pcma|pcmu)
-    sip_registrar_port: port
-    sip_local_port: port
     parallel_call_enabled: bool
     parallel_username: str
     parallel_password: password
     parallel_destinations:
       - str(1,128)
+    sip_registrar_port: port
+    sip_local_port: port
     parallel_local_port: port
   mobile_targets:
     - id: "match(^[a-z][a-z0-9_]{0,63}$)"

@@ -1,8 +1,8 @@
-# Prüfprotokoll 1.2.0
+# Prüfprotokoll 1.2.1
 
 ## Ziel
 
-1.2.0 ergänzt mehrere Klingeltaster-Routen mit je einem Besucher-Sensor, optionaler FRITZ!Box-Klingeltaster-Nummer und maximal drei referenzierten Mobilzielen. Zu prüfen sind die Matrixauflösung, unabhängige Entprellung, routenspezifische API-Testanrufe, der globale Busy-Schutz, die 1.1.1-Kompatibilitätsroute, DTMF auf beiden Konten und weiterhin exakt eine Reolink-Mediensitzung.
+1.2.0 ergänzt mehrere Klingeltaster-Routen mit je einem Besucher-Sensor, optionaler FRITZ!Box-Klingeltaster-Nummer und maximal drei referenzierten Mobilzielen. 1.2.1 fasst zusätzlich die drei erweiterten SIP-Ports am Ende des SIP-Abschnitts zusammen. Zu prüfen sind die identische Optionsreihenfolge in allen öffentlichen Darstellungen, die unveränderte Runtimeübersetzung, Matrixauflösung, unabhängige Entprellung, routenspezifische API-Testanrufe, der globale Busy-Schutz, die 1.1.1-Kompatibilitätsroute, DTMF auf beiden Konten und weiterhin exakt eine Reolink-Mediensitzung.
 
 ## Softwareprüfungen vor Release
 
@@ -16,8 +16,9 @@
 - UI-Adaptertest: gruppierte `testdata/options.valid.json` → flache `testdata/options.runtime.valid.json`; anschließend `-check-config` gegen die Runtime-Datei
 - YAML-/JSON-Prüfung von App-Konfiguration und Übersetzungen
 - identische fünf bestehende Gruppen sowie die beiden Routenlisten in `options`, `schema`, DE, EN und Testkonfiguration
+- identische SIP-Feldreihenfolge in `options`, `schema`, DE, EN und Fixture: beide Konto-Blöcke vor `sip_registrar_port`, `sip_local_port` und `parallel_local_port`
 - Bash-Syntaxprüfung des s6-Startskripts
-- Versionsprüfung 1.2.0 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
+- Versionsprüfung 1.2.1 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
 - Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
 - expliziter Test der nativen Statistikbits 0…7
 
@@ -31,7 +32,7 @@
 - Status und Testanruf-Verfügbarkeit werden je Route aus den tatsächlich benötigten und registrierten SIP-Konten berechnet. Ein Tür-only-Test benötigt keine Mobilregistrierung und umgekehrt.
 - Kein Routenmodell enthält Kamera-, NVR-Kanal-, Medien-, DTMF- oder Türöffnerauswahl. Genau eine Reolink-Konfiguration und Mediensitzung bleibt die globale Ressource.
 
-## FRITZ!Box-4050-Hardwaretest 1.2.0
+## FRITZ!Box-4050-Hardwaretest 1.2.1
 
 1. Zwei Klingeltaster-Ziele in der als IP-Türsprechanlage eingerichteten FRITZ!Box 4050 prüfen, beispielsweise `11` für Klingeltaster 1 und `12` für Klingeltaster 2. Die FRITZ!Box 6690 bleibt nur Modem.
 2. Zwei unterschiedliche Besucher-Entities als Routen anlegen und beiden unterschiedliche `doorbell_number`-Werte geben. Jede reale Klingeltaste muss exakt die erwartete FRITZ!Fon-Türdarstellung auslösen.

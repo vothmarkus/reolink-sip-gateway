@@ -49,12 +49,6 @@ configuration:
       sip_codec_preference:
         name: Preferred audio codec
         description: PCMA is recommended for European telephony; auto offers PCMA and PCMU.
-      sip_registrar_port:
-        name: SIP port (advanced)
-        description: UDP port of the SIP registrar, usually 5060.
-      sip_local_port:
-        name: Door-account local SIP port (advanced)
-        description: UDP port used by the door-station account for SIP signalling. RTP ports are selected automatically.
       parallel_call_enabled:
         name: Enable mobile-call account
         description: Registers a normal IP phone on the same FRITZ!Box and calls up to three mobile destinations simultaneously, alongside an enabled door station or as the only route. The first answered call wins.
@@ -67,6 +61,12 @@ configuration:
       parallel_destinations:
         name: Mobile-call destinations
         description: One to at most three external numbers called simultaneously in simple mode without call routes. Route mode uses named mobile targets and their IDs instead.
+      sip_registrar_port:
+        name: SIP port (advanced)
+        description: UDP port of the SIP registrar, usually 5060.
+      sip_local_port:
+        name: Door-account local SIP port (advanced)
+        description: UDP port used by the door-station account for SIP signalling. RTP ports are selected automatically.
       parallel_local_port:
         name: Mobile-call local SIP port (advanced)
         description: UDP port for the mobile-call account; defaults to 5071 and must differ from the door-station port when both accounts are enabled.

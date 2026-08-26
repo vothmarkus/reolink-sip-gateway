@@ -260,7 +260,7 @@ complete_grouping_migration() {
     # state without writing anything to Supervisor.
     if [[ "${original_canonical}" == "${normalized_canonical}" ]]; then
         : > "${GROUPED_OPTIONS_MARKER}"
-        bashio::log.info "Reolink SIP Gateway v1.2.0 grouped option layout confirmed"
+        bashio::log.info "Reolink SIP Gateway v1.2.1 grouped option layout confirmed"
         return 0
     fi
 
@@ -276,7 +276,7 @@ complete_grouping_migration() {
 
     if supervisor_options_write "${normalized}"; then
         : > "${GROUPED_OPTIONS_MARKER}"
-        bashio::log.info "Reolink SIP Gateway v1.2.0 one-time option grouping migration completed"
+        bashio::log.info "Reolink SIP Gateway v1.2.1 one-time option grouping migration completed"
     else
         bashio::log.warning "Could not persist grouped options; runtime translation remains active and migration will be retried on the next start"
     fi
