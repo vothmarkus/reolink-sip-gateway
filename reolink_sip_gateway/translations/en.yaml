@@ -40,9 +40,6 @@ configuration:
       sip_password:
         name: Door-station account password
         description: Password of the IP door intercom configured in the FRITZ!Box. Required only when the door-station account is enabled.
-      sip_destination:
-        name: FRITZ!Box door destination / button
-        description: Dial destination for simple mode without call routes. For example, 11 commonly represents doorbell button 1 in the FRITZ!Box. When call routes are configured, each route's doorbell_number is used instead.
       sip_display_name:
         name: Door-station display name
         description: Caller name shown on the SIP endpoint for a door-station call.
@@ -58,9 +55,6 @@ configuration:
       parallel_password:
         name: Mobile-call account password
         description: Password of the mobile-call IP phone. Required only when the mobile-call account is enabled.
-      parallel_destinations:
-        name: Mobile-call destinations
-        description: One to at most three external numbers called simultaneously in simple mode without call routes. Route mode uses named mobile targets and their IDs instead.
       sip_registrar_port:
         name: SIP port (advanced)
         description: UDP port of the SIP registrar, usually 5060.
@@ -70,12 +64,6 @@ configuration:
       parallel_local_port:
         name: Mobile-call local SIP port (advanced)
         description: UDP port for the mobile-call account; defaults to 5071 and must differ from the door-station port when both accounts are enabled.
-  mobile_targets:
-    name: Named mobile targets (route mode)
-    description: Optional shared number catalogue for multiple doorbell buttons. Each entry has a short ID (for example “markus”), a display name and the number to dial, so a number is maintained only once. This list becomes active together with Call routes.
-  call_routes:
-    name: Call routes / doorbell buttons (route mode)
-    description: Optional. Each entry connects a unique route ID and display name to exactly one binary_sensor, an optional FRITZ!Box doorbell number (for example 11), and up to three IDs from Named mobile targets. Leave unused mobile_target_1 through mobile_target_3 fields empty. As soon as one route exists, this list replaces the simple visitor sensor, door destination and mobile-call destination fields.
   audio:
     name: Audio
     description: Echo cancellation and WebRTC audio filters. Reolink latency is calibrated automatically at startup.
@@ -91,11 +79,8 @@ configuration:
         description: Enables WebRTC noise suppression using the fixed, proven moderate profile.
   call:
     name: Call
-    description: Doorbell trigger, incoming SIP calls and call time limits.
+    description: Incoming SIP calls and call time limits. The associated doorbell triggers and dial destinations are listed directly below under Call routes / doorbell buttons.
     fields:
-      visitor_entity:
-        name: Reolink visitor sensor
-        description: Trigger used by simple mode without call routes. “auto” automatically uses the enabled visitor/doorbell sensor from the Reolink integration. In route mode every route names its own binary_sensor while still sharing exactly one Reolink camera.
       incoming_calls_enabled:
         name: Allow incoming SIP calls on all accounts
         description: Applies to every enabled SIP account. The first incoming call receives the exclusive Reolink media path; later calls receive 486 Busy Here. Only calls from the registrar and caller list are accepted. RFC 4733 DTMF is negotiated on both accounts.
@@ -117,6 +102,31 @@ configuration:
       max_call_duration_seconds:
         name: Maximum call duration
         description: Safety limit for one call.
+  call_routes:
+    name: Call routes / doorbell buttons
+    description: Each route connects one visitor sensor to an optional FRITZ!Box doorbell number (for example 11) and up to three directly entered mobile numbers. “auto” for the visitor sensor selects the enabled Reolink doorbell entity automatically. The prefilled default route is fully editable. Home Assistant's schema-depth limit requires this list to appear directly below the Call group instead of inside its collapsible panel.
+    fields:
+      id:
+        name: Route ID
+        description: Stable technical identifier such as “default” or “ground_floor”. It starts with a lowercase letter and contains only lowercase letters, digits and underscores. Do not change it after setup so the test-call entity remains stable.
+      name:
+        name: Display name
+        description: Human-readable route name such as “Ground floor”. It is also used by the corresponding test-call entity.
+      visitor_entity:
+        name: Doorbell entity
+        description: Home Assistant binary sensor that triggers this route. “auto” discovers the single enabled Reolink visitor entity and may be used by only one route.
+      doorbell_number:
+        name: FRITZ!Box doorbell button
+        description: Destination assigned by the FRITZ!Box IP door-intercom setup; for example 11 for button 1. Leave empty for a mobile-only route.
+      mobile_number_1:
+        name: Mobile number 1
+        description: First number called directly through the mobile-call account. Leave empty for no mobile call.
+      mobile_number_2:
+        name: Mobile number 2
+        description: Optional second number called simultaneously through the same mobile-call account.
+      mobile_number_3:
+        name: Mobile number 3
+        description: Optional third number called simultaneously through the same mobile-call account.
   diagnostics:
     name: Operation & diagnostics
     description: Operating mode and logging.

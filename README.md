@@ -6,7 +6,7 @@ Community Home Assistant app that bridges bidirectional audio between a Reolink 
 
 ## Current release
 
-**v1.2.1** adds the v1.2 multi-button routing matrix while preserving the two optional SIP accounts and the single Reolink camera/media path. Named mobile targets are maintained once and referenced by call routes. Every route maps one Home Assistant visitor sensor to an optional FRITZ!Box doorbell number and up to three mobile targets. Empty route lists retain the v1.1.1 single-route behavior automatically. The 1.2.1 configuration polish keeps both account blocks together and groups the three advanced SIP ports at the end of the SIP section.
+**v1.2.2** makes call routes the single, direct configuration model. A fresh installation contains one editable `Standardroute` with visitor sensor `auto`, FRITZ!Box doorbell number `11` and three optional mobile-number fields. Additional routes map further Home Assistant visitor sensors to further FRITZ!Box doorbell buttons while all routes continue to share one Reolink camera/media path and the same two optional SIP accounts. The former named-target catalogue and simple-mode destination fields are migrated losslessly and removed from the public form.
 
 Still-ringing losers receive `CANCEL`. If two peers answer across the winner decision, every `200 OK` is acknowledged and the losing dialog is immediately closed with `BYE`. The machine-readable integration contract remains API v1 and is documented in [`docs/api-v1.openapi.yaml`](docs/api-v1.openapi.yaml).
 
@@ -17,7 +17,7 @@ Highlights:
 - Versioned `/api/v1` with bearer authentication, a stable installation UUID, complete status snapshots and Server-Sent Events.
 - Up to two independent SIP registrations: an optional door station plus an optional normal IP telephone for mobile calls; at least one is required in live mode.
 - One to three simultaneous mobile destinations on the second account, with first-answer-wins SIP forking and deterministic CANCEL/ACK/BYE cleanup.
-- Reusable mobile targets and up to 32 named call routes for FRITZ!Box doorbell buttons or mobile-only routing.
+- Up to 32 named call routes with three direct mobile numbers per route, for FRITZ!Box doorbell buttons or mobile-only routing.
 - One companion-integration test-call button per configured route, plus current/last route diagnostics.
 - Negotiated `telephone-event/8000` reception for `0`–`9`, `*`, `#` and `A`–`D`, deduplicated to one event per completed keypress.
 - Integration commands for a configured test call and idempotent hang-up, both routed through the normal call lifecycle.
@@ -33,7 +33,7 @@ Highlights:
 - Automatic acoustic startup-delay calibration.
 - Fixed calibrated coarse AEC delay during calls; no competing live Go delay-control loop.
 - Zero-lookahead elastic SIP-to-Baichuan talkback playout with bounded ± correction and soft residual discontinuities.
-- Five grouped Home Assistant configuration sections plus the top-level Mobile targets and Call routes lists required by Home Assistant's supported schema depth.
+- Five grouped Home Assistant configuration sections plus the Call routes list placed immediately below Call, at Home Assistant's supported schema depth.
 - Transparent PNG icon/logo without the former white outer canvas.
 - `sip_registrar: auto` resolves the Home Assistant host's IPv4 default gateway at startup; a manual IP/DNS registrar remains supported.
 - Fresh installs default the Reolink username to `admin`.
@@ -75,15 +75,11 @@ sip:
   door_call_enabled: true
   sip_username: "doorbell"
   sip_password: "change-me"
-  sip_destination: "11"
   sip_display_name: "Front Door"
   sip_codec_preference: pcma
   parallel_call_enabled: true
   parallel_username: "mobile-call"
   parallel_password: "change-me"
-  parallel_destinations:
-    - "01630000000"
-    - "01760000000"
   sip_registrar_port: 5060
   sip_local_port: 5070
   parallel_local_port: 5071
@@ -94,7 +90,6 @@ audio:
   webrtc_noise_suppression_enabled: true
 
 call:
-  visitor_entity: auto
   incoming_calls_enabled: false
   incoming_allowed_callers:
     - "*"
@@ -104,55 +99,56 @@ call:
   rtp_inactivity_timeout_seconds: 15
   max_call_duration_seconds: 300
 
+call_routes:
+  - id: default
+    name: Standardroute
+    visitor_entity: auto
+    doorbell_number: "11"
+    mobile_number_1: "01630000000"
+    mobile_number_2: "01760000000"
+    mobile_number_3: ""
+
 diagnostics:
   dry_run: false
   log_level: info
 ```
 
-For multiple buttons, keep the two SIP accounts above and add the two route
-lists at top level, between `sip` and `audio` in the app editor:
+For multiple buttons, edit the pre-created default route or add further entries
+to the Call routes list displayed immediately below the Call section:
 
 ```yaml
-mobile_targets:
-  - id: markus
-    name: Markus
-    destination: "01630000000"
-  - id: bereitschaft
-    name: Bereitschaft
-    destination: "01510000000"
-
 call_routes:
   - id: wohnung_1
     name: Wohnung 1
     visitor_entity: binary_sensor.klingeltaste_wohnung_1
     doorbell_number: "11"
-    mobile_target_1: markus
-    mobile_target_2: bereitschaft
-    mobile_target_3: ""
+    mobile_number_1: "01630000000"
+    mobile_number_2: "01510000000"
+    mobile_number_3: ""
   - id: wohnung_2
     name: Wohnung 2
     visitor_entity: binary_sensor.klingeltaste_wohnung_2
     doorbell_number: "12"
-    mobile_target_1: markus
-    mobile_target_2: ""
-    mobile_target_3: ""
+    mobile_number_1: "01630000000"
+    mobile_number_2: ""
+    mobile_number_3: ""
 ```
 
-Use stable lowercase IDs with letters, digits and underscores. The three
-`mobile_target_*` fields contain IDs from `mobile_targets`, not telephone
-numbers. Leave `doorbell_number` empty for a mobile-only route, or leave all
-mobile target fields empty for a FRITZ!Box-only route. At least one enabled
-call path is required per route.
+Use stable lowercase IDs with letters, digits and underscores. Enter telephone
+numbers directly in `mobile_number_1` through `mobile_number_3`. Leave
+`doorbell_number` empty for a mobile-only route, or leave all mobile-number
+fields empty for a FRITZ!Box-only route. At least one enabled call path is
+required per route.
 
 `nvr_channel_number` is deliberately **1-based** in the user interface. The startup adapter translates it to the internal Reolink channel representation without exposing the protocol-specific zero-based value.
 
 With `sip_registrar: auto`, the startup adapter reads the Home Assistant host's IPv4 routing table and uses its default-gateway address (commonly the FRITZ!Box). Set an IP address or DNS name instead to override auto-detection. Existing saved registrar values are not replaced during an update.
 
-For a FRITZ!Box 4050 telephone system, configure the original account as an **IP door intercom** and the mobile account as **Telephone → LAN/WLAN (IP telephone)**. The door destination is the number assigned by the FRITZ!Box door-intercom setup; for example, `11` commonly represents doorbell button 1. Both registrations use the 4050 registrar address and port 5060, but normally listen locally on 5070 and 5071. Assign the required outgoing landline number to the mobile IP telephone. `parallel_destinations` accepts at most three unique numbers. Set `door_call_enabled: false` for mobile-only operation; dormant door credentials are then not required.
+For a FRITZ!Box 4050 telephone system, configure the original account as an **IP door intercom** and the mobile account as **Telephone → LAN/WLAN (IP telephone)**. Each route's `doorbell_number` is the number assigned by the FRITZ!Box door-intercom setup; for example, `11` commonly represents doorbell button 1. Both registrations use the 4050 registrar address and port 5060, but normally listen locally on 5070 and 5071. Assign the required outgoing landline number to the mobile IP telephone. Each route accepts at most three unique mobile numbers. Set `door_call_enabled: false` for mobile-only operation; dormant door credentials are then not required.
 
 The FRITZ!Box 6690 may remain a pure cable modem in this topology; it is not the SIP registrar or telephone system.
 
-With empty `call_routes`, `visitor_entity: auto` queries Home Assistant's compact `config/entity_registry/list_for_display` view and selects the single enabled `binary_sensor` from platform `reolink` with translation key `visitor`. Renamed entity IDs are therefore supported. If none or more than one are enabled, startup asks for an explicit manual entity instead of guessing. In route mode, each route explicitly names its visitor sensor so that the mapping remains unambiguous. Existing simple-mode configurations are retained during updates. WebSocket frames and complete messages remain bounded to 16 MiB.
+`visitor_entity: auto` on the pre-created default route queries Home Assistant's compact `config/entity_registry/list_for_display` view and selects the single enabled `binary_sensor` from platform `reolink` with translation key `visitor`. Renamed entity IDs are therefore supported. If none or more than one are enabled, startup asks for an explicit manual entity instead of guessing. Only one route may use `auto`; additional routes name their visitor sensor explicitly so that the mapping remains unambiguous. WebSocket frames and complete messages remain bounded to 16 MiB.
 
 Set **Allow incoming SIP calls on all accounts** (`incoming_calls_enabled`) in the **Call** section to call the camera through either enabled gateway account. With a FRITZ!Box, dial the internal number assigned to the desired device. The first incoming call occupies the global media slot; a concurrent call to either account receives `486 Busy Here`. The option defaults to `false` so upgrades never begin auto-answering unexpectedly. Signalling is accepted only from the configured registrar IP and UDP port, and the normalized SIP caller user must match `incoming_allowed_callers`. RFC 4733 DTMF is negotiated and reported identically on both accounts. The compatibility value `*` permits every caller; replace it with the telephone numbers or internal extensions that should be accepted. Country-code variants are intentionally not inferred.
 
@@ -175,6 +171,13 @@ At normal startup, the gateway can measure the acoustic Reolink loop delay by tr
 This design is intentional: hardware testing showed that the former Go live delay tracker could converge to a different time base and degrade echo suppression. Since v0.5.7 that live controller is disabled in production.
 
 ## Configuration migration
+
+v1.2.2 performs one guarded conversion to the direct route model:
+
+- A v1.1 simple configuration becomes the editable `default` route while preserving its visitor sensor, doorbell number and up to three mobile numbers.
+- A v1.2.0/1.2.1 route keeps its ID, name, visitor sensor and doorbell number; named target references are replaced with their corresponding numbers. Values entered directly into the former reference fields are preserved too.
+- Retired simple-route fields and the named-target catalogue are removed only after the complete replacement options have been prepared.
+- The existing persistent marker, compare-before-write guard and read-only normal-start behavior remain in effect.
 
 v0.5.10 finalizes the grouped configuration introduced in v0.5.8:
 

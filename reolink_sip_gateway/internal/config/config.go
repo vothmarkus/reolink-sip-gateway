@@ -21,7 +21,6 @@ const (
 	DefaultRTPInactivitySeconds = 15
 	MaxParallelDestinations     = 3
 	MaxCallRoutes               = 32
-	MaxMobileTargets            = 128
 	DefaultRouteID              = "default"
 	minimumAECSearchWindowMS    = 50
 	maximumAECSearchWindowMS    = 1000
@@ -39,13 +38,20 @@ type CallRoute struct {
 	Name           string `json:"name"`
 	VisitorEntity  string `json:"visitor_entity"`
 	DoorbellNumber string `json:"doorbell_number"`
-	MobileTarget1  string `json:"mobile_target_1"`
-	MobileTarget2  string `json:"mobile_target_2"`
-	MobileTarget3  string `json:"mobile_target_3"`
+	MobileNumber1  string `json:"mobile_number_1"`
+	MobileNumber2  string `json:"mobile_number_2"`
+	MobileNumber3  string `json:"mobile_number_3"`
+
+	// v1.2.0/1.2.1 accepted catalogue IDs in these fields. They remain
+	// decode-only aliases so standalone old runtime snapshots can be upgraded;
+	// the Home Assistant adapter persists only the direct-number fields.
+	LegacyMobileTarget1 string `json:"mobile_target_1,omitempty"`
+	LegacyMobileTarget2 string `json:"mobile_target_2,omitempty"`
+	LegacyMobileTarget3 string `json:"mobile_target_3,omitempty"`
 }
 
-func (r CallRoute) MobileTargetIDs() []string {
-	values := []string{r.MobileTarget1, r.MobileTarget2, r.MobileTarget3}
+func (r CallRoute) MobileNumbers() []string {
+	values := []string{r.MobileNumber1, r.MobileNumber2, r.MobileNumber3}
 	result := make([]string, 0, len(values))
 	for _, value := range values {
 		if value = strings.TrimSpace(value); value != "" {
@@ -67,44 +73,47 @@ type ResolvedCallRoute struct {
 }
 
 type Config struct {
-	VisitorEntity                  string         `json:"visitor_entity"`
-	ReolinkHost                    string         `json:"reolink_host"`
-	ReolinkRTSPPort                int            `json:"reolink_rtsp_port"`
-	ReolinkStreamPath              string         `json:"reolink_stream_path"`
-	ReolinkUsername                string         `json:"reolink_username"`
-	ReolinkPassword                string         `json:"reolink_password"`
-	ReolinkMode                    string         `json:"reolink_mode"`
-	BaichuanPort                   int            `json:"baichuan_port"`
-	NVRChannel                     int            `json:"nvr_channel"`
-	EchoCancellationEnabled        bool           `json:"echo_cancellation_enabled"`
-	EchoCancellationSearchWindowMS int            `json:"echo_cancellation_search_window_ms"`
-	WebRTCHighPassFilterEnabled    bool           `json:"webrtc_high_pass_filter_enabled"`
-	WebRTCNoiseSuppressionEnabled  bool           `json:"webrtc_noise_suppression_enabled"`
-	SIPRegistrar                   string         `json:"sip_registrar"`
-	SIPRegistrarPort               int            `json:"sip_registrar_port"`
-	SIPUsername                    string         `json:"sip_username"`
-	SIPPassword                    string         `json:"sip_password"`
-	SIPDestination                 string         `json:"sip_destination"`
-	SIPLocalPort                   int            `json:"sip_local_port"`
-	SIPDisplayName                 string         `json:"sip_display_name"`
-	SIPCodecPreference             string         `json:"sip_codec_preference"`
-	DoorCallEnabled                bool           `json:"door_call_enabled"`
-	ParallelCallEnabled            bool           `json:"parallel_call_enabled"`
-	ParallelUsername               string         `json:"parallel_username"`
-	ParallelPassword               string         `json:"parallel_password"`
-	ParallelDestinations           []string       `json:"parallel_destinations"`
-	ParallelLocalPort              int            `json:"parallel_local_port"`
-	MobileTargets                  []MobileTarget `json:"mobile_targets"`
-	CallRoutes                     []CallRoute    `json:"call_routes"`
-	IncomingCallsEnabled           bool           `json:"incoming_calls_enabled"`
-	IncomingAllowedCallers         []string       `json:"incoming_allowed_callers"`
-	IncomingConnectionToneEnabled  bool           `json:"incoming_connection_tone_enabled"`
-	RTPInactivityTimeoutSeconds    int            `json:"rtp_inactivity_timeout_seconds"`
-	RingTimeoutSeconds             int            `json:"ring_timeout_seconds"`
-	MaxCallDurationSeconds         int            `json:"max_call_duration_seconds"`
-	DebounceSeconds                int            `json:"debounce_seconds"`
-	LogLevel                       string         `json:"log_level"`
-	DryRun                         bool           `json:"dry_run"`
+	// Legacy v1.1/v1.2 routing inputs. They are accepted only for lossless
+	// upgrades and are immediately converted to CallRoutes during Load.
+	VisitorEntity        string         `json:"visitor_entity,omitempty"`
+	SIPDestination       string         `json:"sip_destination,omitempty"`
+	ParallelDestinations []string       `json:"parallel_destinations,omitempty"`
+	MobileTargets        []MobileTarget `json:"mobile_targets,omitempty"`
+
+	ReolinkHost                    string      `json:"reolink_host"`
+	ReolinkRTSPPort                int         `json:"reolink_rtsp_port"`
+	ReolinkStreamPath              string      `json:"reolink_stream_path"`
+	ReolinkUsername                string      `json:"reolink_username"`
+	ReolinkPassword                string      `json:"reolink_password"`
+	ReolinkMode                    string      `json:"reolink_mode"`
+	BaichuanPort                   int         `json:"baichuan_port"`
+	NVRChannel                     int         `json:"nvr_channel"`
+	EchoCancellationEnabled        bool        `json:"echo_cancellation_enabled"`
+	EchoCancellationSearchWindowMS int         `json:"echo_cancellation_search_window_ms"`
+	WebRTCHighPassFilterEnabled    bool        `json:"webrtc_high_pass_filter_enabled"`
+	WebRTCNoiseSuppressionEnabled  bool        `json:"webrtc_noise_suppression_enabled"`
+	SIPRegistrar                   string      `json:"sip_registrar"`
+	SIPRegistrarPort               int         `json:"sip_registrar_port"`
+	SIPUsername                    string      `json:"sip_username"`
+	SIPPassword                    string      `json:"sip_password"`
+	SIPLocalPort                   int         `json:"sip_local_port"`
+	SIPDisplayName                 string      `json:"sip_display_name"`
+	SIPCodecPreference             string      `json:"sip_codec_preference"`
+	DoorCallEnabled                bool        `json:"door_call_enabled"`
+	ParallelCallEnabled            bool        `json:"parallel_call_enabled"`
+	ParallelUsername               string      `json:"parallel_username"`
+	ParallelPassword               string      `json:"parallel_password"`
+	ParallelLocalPort              int         `json:"parallel_local_port"`
+	CallRoutes                     []CallRoute `json:"call_routes"`
+	IncomingCallsEnabled           bool        `json:"incoming_calls_enabled"`
+	IncomingAllowedCallers         []string    `json:"incoming_allowed_callers"`
+	IncomingConnectionToneEnabled  bool        `json:"incoming_connection_tone_enabled"`
+	RTPInactivityTimeoutSeconds    int         `json:"rtp_inactivity_timeout_seconds"`
+	RingTimeoutSeconds             int         `json:"ring_timeout_seconds"`
+	MaxCallDurationSeconds         int         `json:"max_call_duration_seconds"`
+	DebounceSeconds                int         `json:"debounce_seconds"`
+	LogLevel                       string      `json:"log_level"`
+	DryRun                         bool        `json:"dry_run"`
 
 	// Runtime-only values. They are resolved during startup and never exposed as
 	// user options. This keeps the Home Assistant form small while preserving a
@@ -119,7 +128,6 @@ type Config struct {
 
 func Defaults() Config {
 	cfg := Config{
-		VisitorEntity:                  "binary_sensor.reolink_video_doorbell_visitor",
 		ReolinkHost:                    "192.168.177.50",
 		ReolinkUsername:                "admin",
 		ReolinkRTSPPort:                554,
@@ -133,24 +141,28 @@ func Defaults() Config {
 		WebRTCNoiseSuppressionEnabled:  true,
 		SIPRegistrar:                   "192.168.177.9",
 		SIPRegistrarPort:               5060,
-		SIPDestination:                 "**610",
 		SIPLocalPort:                   5070,
 		SIPDisplayName:                 "Haustür",
 		SIPCodecPreference:             "pcma",
 		DoorCallEnabled:                true,
 		ParallelCallEnabled:            false,
-		ParallelDestinations:           []string{},
 		ParallelLocalPort:              5071,
-		IncomingCallsEnabled:           false,
-		IncomingAllowedCallers:         []string{"*"},
-		IncomingConnectionToneEnabled:  true,
-		RTPInactivityTimeoutSeconds:    DefaultRTPInactivitySeconds,
-		RingTimeoutSeconds:             30,
-		MaxCallDurationSeconds:         300,
-		DebounceSeconds:                3,
-		LogLevel:                       "info",
-		DryRun:                         true,
-		StatusPort:                     18099,
+		CallRoutes: []CallRoute{{
+			ID:             DefaultRouteID,
+			Name:           "Standardroute",
+			VisitorEntity:  "binary_sensor.reolink_video_doorbell_visitor",
+			DoorbellNumber: "11",
+		}},
+		IncomingCallsEnabled:          false,
+		IncomingAllowedCallers:        []string{"*"},
+		IncomingConnectionToneEnabled: true,
+		RTPInactivityTimeoutSeconds:   DefaultRTPInactivitySeconds,
+		RingTimeoutSeconds:            30,
+		MaxCallDurationSeconds:        300,
+		DebounceSeconds:               3,
+		LogLevel:                      "info",
+		DryRun:                        true,
+		StatusPort:                    18099,
 	}
 	cfg.SetAECDelay(DefaultAECInitialDelayMS)
 	return cfg
@@ -204,6 +216,7 @@ func Load(path string) (Config, error) {
 	cfg.ReolinkMode = strings.ToLower(strings.TrimSpace(cfg.ReolinkMode))
 	cfg.SIPCodecPreference = strings.ToLower(strings.TrimSpace(cfg.SIPCodecPreference))
 	cfg.ParallelDestinations = normalizeListEntries(cfg.ParallelDestinations)
+	cfg.migrateLegacyRouting(raw)
 	cfg.normalizeRouting()
 	cfg.IncomingAllowedCallers = normalizeCallerEntries(cfg.IncomingAllowedCallers)
 	cfg.LogLevel = strings.ToLower(strings.TrimSpace(cfg.LogLevel))
@@ -214,9 +227,6 @@ func Load(path string) (Config, error) {
 
 func (c Config) Validate() error {
 	var errs []error
-	if len(c.CallRoutes) == 0 && !validBinarySensorEntityID(c.VisitorEntity) {
-		errs = append(errs, errors.New("visitor_entity must be a binary_sensor entity ID"))
-	}
 	if err := validateHost("reolink_host", c.ReolinkHost); err != nil {
 		errs = append(errs, err)
 	}
@@ -249,7 +259,6 @@ func (c Config) Validate() error {
 		"reolink_stream_path": c.ReolinkStreamPath,
 		"reolink_username":    c.ReolinkUsername,
 		"sip_username":        c.SIPUsername,
-		"sip_destination":     c.SIPDestination,
 		"sip_display_name":    c.SIPDisplayName,
 		"parallel_username":   c.ParallelUsername,
 	} {
@@ -272,9 +281,6 @@ func (c Config) Validate() error {
 		if strings.TrimSpace(c.SIPPassword) == "" {
 			errs = append(errs, errors.New("sip_password is required when the door call is enabled"))
 		}
-		if len(c.CallRoutes) == 0 && strings.TrimSpace(c.SIPDestination) == "" {
-			errs = append(errs, errors.New("sip_destination is required when the door call is enabled"))
-		}
 	}
 	if c.SIPLocalPort < 1 || c.SIPLocalPort > 65535 {
 		errs = append(errs, errors.New("sip_local_port must be 1..65535"))
@@ -285,26 +291,7 @@ func (c Config) Validate() error {
 	if c.ParallelLocalPort < 1 || c.ParallelLocalPort > 65535 {
 		errs = append(errs, errors.New("parallel_local_port must be 1..65535"))
 	}
-	if len(c.ParallelDestinations) > MaxParallelDestinations {
-		errs = append(errs, fmt.Errorf("parallel_destinations must contain at most %d entries", MaxParallelDestinations))
-	}
-	for _, destination := range c.ParallelDestinations {
-		destination = strings.TrimSpace(destination)
-		if destination == "" {
-			errs = append(errs, errors.New("parallel_destinations entries must not be empty"))
-			continue
-		}
-		if strings.ContainsAny(destination, "\r\n") {
-			errs = append(errs, errors.New("parallel_destinations must not contain CR/LF characters"))
-		}
-		if len(destination) > 128 {
-			errs = append(errs, errors.New("parallel_destinations entries must not exceed 128 characters"))
-		}
-	}
 	if c.ParallelCallEnabled {
-		if len(c.CallRoutes) == 0 && len(c.ParallelDestinations) == 0 {
-			errs = append(errs, errors.New("parallel_destinations must contain at least one destination when parallel calling is enabled"))
-		}
 		if c.DoorCallEnabled && c.ParallelLocalPort == c.SIPLocalPort {
 			errs = append(errs, errors.New("parallel_local_port must differ from sip_local_port"))
 		}
@@ -372,62 +359,91 @@ func (c Config) Validate() error {
 	return errors.Join(errs...)
 }
 
-func (c *Config) normalizeRouting() {
-	for i := range c.MobileTargets {
-		c.MobileTargets[i].ID = strings.TrimSpace(c.MobileTargets[i].ID)
-		c.MobileTargets[i].Name = strings.TrimSpace(c.MobileTargets[i].Name)
-		c.MobileTargets[i].Destination = strings.TrimSpace(c.MobileTargets[i].Destination)
+func (c *Config) migrateLegacyRouting(raw map[string]json.RawMessage) {
+	targets := make(map[string]string, len(c.MobileTargets))
+	for _, target := range c.MobileTargets {
+		id := strings.TrimSpace(target.ID)
+		if id != "" {
+			targets[id] = strings.TrimSpace(target.Destination)
+		}
 	}
+
+	_, routesPresent := raw["call_routes"]
+	if !routesPresent || len(c.CallRoutes) == 0 {
+		route := Defaults().CallRoutes[0]
+		if _, present := raw["visitor_entity"]; present {
+			route.VisitorEntity = strings.TrimSpace(c.VisitorEntity)
+		}
+		if _, present := raw["sip_destination"]; present {
+			route.DoorbellNumber = strings.TrimSpace(c.SIPDestination)
+		}
+		legacyNumbers := c.ParallelDestinations
+		if len(legacyNumbers) > MaxParallelDestinations {
+			legacyNumbers = legacyNumbers[:MaxParallelDestinations]
+		}
+		for index, destination := range legacyNumbers {
+			switch index {
+			case 0:
+				route.MobileNumber1 = destination
+			case 1:
+				route.MobileNumber2 = destination
+			case 2:
+				route.MobileNumber3 = destination
+			}
+		}
+		c.CallRoutes = []CallRoute{route}
+	}
+
+	for i := range c.CallRoutes {
+		route := &c.CallRoutes[i]
+		numbers := []*string{&route.MobileNumber1, &route.MobileNumber2, &route.MobileNumber3}
+		legacyRefs := []string{route.LegacyMobileTarget1, route.LegacyMobileTarget2, route.LegacyMobileTarget3}
+		for index, ref := range legacyRefs {
+			if strings.TrimSpace(*numbers[index]) != "" || strings.TrimSpace(ref) == "" {
+				continue
+			}
+			ref = strings.TrimSpace(ref)
+			if destination, found := targets[ref]; found && destination != "" {
+				*numbers[index] = destination
+			} else {
+				// Some v1.2.1 users intuitively entered a number directly into the
+				// old reference field. Preserve unknown values verbatim instead of
+				// losing a potentially valid SIP destination.
+				*numbers[index] = ref
+			}
+		}
+		route.LegacyMobileTarget1 = ""
+		route.LegacyMobileTarget2 = ""
+		route.LegacyMobileTarget3 = ""
+	}
+
+	// Do not carry retired values into marshalled runtime snapshots.
+	c.VisitorEntity = ""
+	c.SIPDestination = ""
+	c.ParallelDestinations = nil
+	c.MobileTargets = nil
+}
+
+func (c *Config) normalizeRouting() {
 	for i := range c.CallRoutes {
 		c.CallRoutes[i].ID = strings.TrimSpace(c.CallRoutes[i].ID)
 		c.CallRoutes[i].Name = strings.TrimSpace(c.CallRoutes[i].Name)
 		c.CallRoutes[i].VisitorEntity = strings.TrimSpace(c.CallRoutes[i].VisitorEntity)
 		c.CallRoutes[i].DoorbellNumber = strings.TrimSpace(c.CallRoutes[i].DoorbellNumber)
-		c.CallRoutes[i].MobileTarget1 = strings.TrimSpace(c.CallRoutes[i].MobileTarget1)
-		c.CallRoutes[i].MobileTarget2 = strings.TrimSpace(c.CallRoutes[i].MobileTarget2)
-		c.CallRoutes[i].MobileTarget3 = strings.TrimSpace(c.CallRoutes[i].MobileTarget3)
+		c.CallRoutes[i].MobileNumber1 = strings.TrimSpace(c.CallRoutes[i].MobileNumber1)
+		c.CallRoutes[i].MobileNumber2 = strings.TrimSpace(c.CallRoutes[i].MobileNumber2)
+		c.CallRoutes[i].MobileNumber3 = strings.TrimSpace(c.CallRoutes[i].MobileNumber3)
 	}
 }
 
 func (c Config) validateRouting() []error {
 	var errs []error
-	if len(c.MobileTargets) > MaxMobileTargets {
-		errs = append(errs, fmt.Errorf("mobile_targets must contain at most %d entries", MaxMobileTargets))
+	if len(c.CallRoutes) == 0 {
+		errs = append(errs, errors.New("call_routes must contain at least one route"))
+		return errs
 	}
 	if len(c.CallRoutes) > MaxCallRoutes {
 		errs = append(errs, fmt.Errorf("call_routes must contain at most %d entries", MaxCallRoutes))
-	}
-	if len(c.CallRoutes) == 0 && len(c.MobileTargets) > 0 {
-		errs = append(errs, errors.New("mobile_targets requires at least one call_routes entry"))
-	}
-
-	targets := make(map[string]MobileTarget, len(c.MobileTargets))
-	targetDestinations := make(map[string]string, len(c.MobileTargets))
-	for index, target := range c.MobileTargets {
-		target.ID = strings.TrimSpace(target.ID)
-		target.Name = strings.TrimSpace(target.Name)
-		target.Destination = strings.TrimSpace(target.Destination)
-		label := fmt.Sprintf("mobile_targets[%d]", index)
-		if !validRoutingID(target.ID) {
-			errs = append(errs, fmt.Errorf("%s.id must start with a lowercase letter and contain only lowercase letters, digits or underscores (maximum 64 characters)", label))
-		} else if _, exists := targets[target.ID]; exists {
-			errs = append(errs, fmt.Errorf("mobile_targets contains duplicate id %q", target.ID))
-		} else {
-			targets[target.ID] = target
-		}
-		if err := validateRoutingName(label+".name", target.Name); err != nil {
-			errs = append(errs, err)
-		}
-		if err := validateRoutingDestination(label+".destination", target.Destination, false); err != nil {
-			errs = append(errs, err)
-		} else {
-			canonical := canonicalRoutingDestination(target.Destination)
-			if previousID, exists := targetDestinations[canonical]; exists {
-				errs = append(errs, fmt.Errorf("mobile_targets %q and %q use the same destination", previousID, target.ID))
-			} else {
-				targetDestinations[canonical] = target.ID
-			}
-		}
 	}
 
 	routeIDs := make(map[string]struct{}, len(c.CallRoutes))
@@ -473,37 +489,41 @@ func (c Config) validateRouting() []error {
 			}
 		}
 
-		refs := route.MobileTargetIDs()
-		if len(refs) > 0 {
+		mobileFields := []string{route.MobileNumber1, route.MobileNumber2, route.MobileNumber3}
+		mobileNumbers := route.MobileNumbers()
+		if len(mobileNumbers) > 0 {
 			mobileRoutes++
 		}
-		seenRefs := make(map[string]struct{}, len(refs))
-		for _, targetID := range refs {
-			if !validRoutingID(targetID) {
-				errs = append(errs, fmt.Errorf("%s contains invalid mobile target id %q", label, targetID))
+		seenNumbers := make(map[string]struct{}, len(mobileNumbers))
+		for numberIndex, destination := range mobileFields {
+			destination = strings.TrimSpace(destination)
+			if destination == "" {
 				continue
 			}
-			if _, duplicate := seenRefs[targetID]; duplicate {
-				errs = append(errs, fmt.Errorf("%s references mobile target %q more than once", label, targetID))
+			field := fmt.Sprintf("%s.mobile_number_%d", label, numberIndex+1)
+			if err := validateRoutingDestination(field, destination, false); err != nil {
+				errs = append(errs, err)
 				continue
 			}
-			seenRefs[targetID] = struct{}{}
-			if _, exists := targets[targetID]; !exists {
-				errs = append(errs, fmt.Errorf("%s references unknown mobile target %q", label, targetID))
+			canonical := canonicalRoutingDestination(destination)
+			if _, duplicate := seenNumbers[canonical]; duplicate {
+				errs = append(errs, fmt.Errorf("%s contains the same mobile number more than once", label))
+				continue
 			}
+			seenNumbers[canonical] = struct{}{}
 		}
-		if route.DoorbellNumber == "" && len(refs) == 0 {
-			errs = append(errs, fmt.Errorf("%s must configure a doorbell_number, at least one mobile target, or both", label))
+		if route.DoorbellNumber == "" && len(mobileNumbers) == 0 {
+			errs = append(errs, fmt.Errorf("%s must configure a doorbell_number, at least one mobile number, or both", label))
 		}
-		if !c.DryRun && !(c.DoorCallEnabled && route.DoorbellNumber != "") && !(c.ParallelCallEnabled && len(refs) > 0) {
+		if !c.DryRun && !(c.DoorCallEnabled && route.DoorbellNumber != "") && !(c.ParallelCallEnabled && len(mobileNumbers) > 0) {
 			errs = append(errs, fmt.Errorf("%s has no call path on an enabled SIP account", label))
 		}
 	}
-	if len(c.CallRoutes) > 0 && c.DoorCallEnabled && doorRoutes == 0 {
+	if c.DoorCallEnabled && doorRoutes == 0 {
 		errs = append(errs, errors.New("door_call_enabled requires at least one call route with a doorbell_number"))
 	}
-	if len(c.CallRoutes) > 0 && c.ParallelCallEnabled && mobileRoutes == 0 {
-		errs = append(errs, errors.New("parallel_call_enabled requires at least one call route with a mobile target"))
+	if c.ParallelCallEnabled && mobileRoutes == 0 {
+		errs = append(errs, errors.New("parallel_call_enabled requires at least one call route with a mobile number"))
 	}
 	return errs
 }
@@ -563,32 +583,6 @@ func canonicalRoutingDestination(value string) string {
 }
 
 func (c Config) ResolvedCallRoutes() []ResolvedCallRoute {
-	if len(c.CallRoutes) == 0 {
-		mobileTargets := make([]MobileTarget, 0, len(c.ParallelDestinations))
-		for index, destination := range c.ParallelDestinations {
-			mobileTargets = append(mobileTargets, MobileTarget{
-				ID:          fmt.Sprintf("mobile_%d", index+1),
-				Name:        fmt.Sprintf("Mobilziel %d", index+1),
-				Destination: strings.TrimSpace(destination),
-			})
-		}
-		return []ResolvedCallRoute{{
-			ID:             DefaultRouteID,
-			Name:           "Standard",
-			VisitorEntity:  strings.TrimSpace(c.VisitorEntity),
-			DoorbellNumber: strings.TrimSpace(c.SIPDestination),
-			MobileTargets:  mobileTargets,
-		}}
-	}
-
-	targets := make(map[string]MobileTarget, len(c.MobileTargets))
-	for _, target := range c.MobileTargets {
-		targets[strings.TrimSpace(target.ID)] = MobileTarget{
-			ID:          strings.TrimSpace(target.ID),
-			Name:        strings.TrimSpace(target.Name),
-			Destination: strings.TrimSpace(target.Destination),
-		}
-	}
 	routes := make([]ResolvedCallRoute, 0, len(c.CallRoutes))
 	for _, route := range c.CallRoutes {
 		resolved := ResolvedCallRoute{
@@ -598,10 +592,12 @@ func (c Config) ResolvedCallRoutes() []ResolvedCallRoute {
 			DoorbellNumber: strings.TrimSpace(route.DoorbellNumber),
 			MobileTargets:  make([]MobileTarget, 0, MaxParallelDestinations),
 		}
-		for _, targetID := range route.MobileTargetIDs() {
-			if target, exists := targets[targetID]; exists {
-				resolved.MobileTargets = append(resolved.MobileTargets, target)
-			}
+		for index, destination := range route.MobileNumbers() {
+			resolved.MobileTargets = append(resolved.MobileTargets, MobileTarget{
+				ID:          strconv.Itoa(index + 1),
+				Name:        fmt.Sprintf("Mobilziel %d", index+1),
+				Destination: destination,
+			})
 		}
 		routes = append(routes, resolved)
 	}

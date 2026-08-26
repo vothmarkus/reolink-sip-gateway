@@ -406,7 +406,7 @@ func buildResponse(req Message, code int, reason, toTag string, extra []string, 
 	}
 	lines = append(lines, "To: "+to, "Call-ID: "+req.Header("call-id"), "CSeq: "+req.Header("cseq"))
 	lines = append(lines, extra...)
-	lines = append(lines, "Server: ReolinkSIPGateway/1.2.1", fmt.Sprintf("Content-Length: %d", len(body)), "", "")
+	lines = append(lines, "Server: ReolinkSIPGateway/1.2.2", fmt.Sprintf("Content-Length: %d", len(body)), "", "")
 	return append([]byte(strings.Join(lines, "\r\n")), body...)
 }
 

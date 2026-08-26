@@ -13,26 +13,21 @@
     "door_call_enabled": true,
     "sip_username": "621",
     "sip_password": "test-password",
-    "sip_destination": "**610",
     "sip_display_name": "Haustür",
     "sip_codec_preference": "pcma",
     "parallel_call_enabled": false,
     "parallel_username": "",
     "parallel_password": "",
-    "parallel_destinations": [],
     "sip_registrar_port": 5060,
     "sip_local_port": 5070,
     "parallel_local_port": 5071
   },
-  "mobile_targets": [],
-  "call_routes": [],
   "audio": {
     "echo_cancellation_enabled": true,
     "webrtc_high_pass_filter_enabled": true,
     "webrtc_noise_suppression_enabled": true
   },
   "call": {
-    "visitor_entity": "binary_sensor.reolink_video_doorbell_visitor",
     "incoming_calls_enabled": false,
     "incoming_allowed_callers": [
       "*"
@@ -43,6 +38,17 @@
     "rtp_inactivity_timeout_seconds": 15,
     "max_call_duration_seconds": 300
   },
+  "call_routes": [
+    {
+      "id": "default",
+      "name": "Standardroute",
+      "visitor_entity": "binary_sensor.reolink_video_doorbell_visitor",
+      "doorbell_number": "11",
+      "mobile_number_1": "",
+      "mobile_number_2": "",
+      "mobile_number_3": ""
+    }
+  ],
   "diagnostics": {
     "dry_run": true,
     "log_level": "info"

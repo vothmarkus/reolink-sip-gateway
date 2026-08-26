@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.2
+
+- **Anrufrouten / Klingeltaster** ist jetzt das einzige sichtbare Routingmodell und steht unmittelbar unter dem Block **Anruf**. Eine Neuinstallation enthält eine vollständig editierbare Standardroute mit Besucher-Sensor `auto`, Klingeltaster `11` und drei leeren Mobilnummern.
+- Die separate Liste **Benannte Mobilziele** sowie die bisherigen Einzeloptionen für Besucher-Sensor, Türziel und Mobilnummern wurden aus der Oberfläche entfernt. Rufnummern werden direkt in `mobile_number_1` bis `mobile_number_3` der jeweiligen Route eingetragen.
+- Einmalige verlustfreie Migration ergänzt: 1.1-Werte werden zur Standardroute; 1.2.0/1.2.1-Routen behalten ID, Name, Sensor und Klingeltaster, während Ziel-IDs über den alten Katalog in direkte Nummern aufgelöst werden. Direkt in frühere Referenzfelder eingetragene Nummern bleiben ebenfalls erhalten.
+- Die Migration verwendet weiterhin einen persistenten Marker und einen Vergleich unmittelbar vor dem einzigen Supervisor-Schreibvorgang. Zeitgleiche Benutzeränderungen werden nicht überschrieben; normale Starts bleiben anschließend read-only.
+- API v1 und Companion-Integration bleiben kompatibel: Der Routenkatalog enthält weiterhin keine Rufnummern, und für jede vorhandene Route gibt es genau einen Testanruf. Eine Kamera, gemeinsamer Busy-Schutz, eingehende Anrufe und RFC-4733-DTMF auf beiden Konten bleiben unverändert.
+- Adapter-, Migrations-, Konfigurations-, API- und Versionsprüfungen auf 1.2.2 aktualisiert.
+
 ## 1.2.1
 
 - Die beiden Konto-Blöcke stehen in der Home-Assistant-Konfiguration nun geschlossen vor den erweiterten SIP-Ports.

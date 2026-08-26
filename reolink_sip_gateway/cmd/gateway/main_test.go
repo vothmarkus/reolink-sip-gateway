@@ -54,7 +54,9 @@ func TestBothSIPAccountConfigsAcceptIncomingCalls(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.IncomingCallsEnabled = true
 	cfg.IncomingAllowedCallers = []string{"**620", "0163"}
-	cfg.ParallelDestinations = []string{"0163", "0176", "0151"}
+	cfg.CallRoutes[0].MobileNumber1 = "0163"
+	cfg.CallRoutes[0].MobileNumber2 = "0176"
+	cfg.CallRoutes[0].MobileNumber3 = "0151"
 
 	door := doorSIPConfig(cfg)
 	mobile := parallelSIPConfig(cfg)
@@ -112,17 +114,17 @@ func TestConfiguredSIPAccountCountSupportsMobileOnly(t *testing.T) {
 	}
 }
 
-func TestRouteHelpersPreserveStableIDsAndLegacyDefault(t *testing.T) {
+func TestRouteHelpersPreserveStableIDsAndDefaultRoute(t *testing.T) {
 	cfg := config.Defaults()
-	legacy := cfg.ResolvedCallRoutes()
-	if len(legacy) != 1 || legacy[0].ID != config.DefaultRouteID {
-		t.Fatalf("legacy routes=%#v", legacy)
+	routes := cfg.ResolvedCallRoutes()
+	if len(routes) != 1 || routes[0].ID != config.DefaultRouteID {
+		t.Fatalf("default routes=%#v", routes)
 	}
-	if route, ok := requestedCallRoute(legacy, ""); !ok || route.ID != config.DefaultRouteID {
-		t.Fatalf("legacy default route=%#v ok=%t", route, ok)
+	if route, ok := requestedCallRoute(routes, ""); !ok || route.ID != config.DefaultRouteID {
+		t.Fatalf("default route=%#v ok=%t", route, ok)
 	}
 
-	routes := []config.ResolvedCallRoute{
+	routes = []config.ResolvedCallRoute{
 		{ID: "wohnung_1", Name: "Wohnung 1", VisitorEntity: "binary_sensor.one", DoorbellNumber: "11"},
 		{ID: "wohnung_2", Name: "Wohnung 2", VisitorEntity: "binary_sensor.two", MobileTargets: []config.MobileTarget{{ID: "maria", Destination: "0176"}}},
 	}
