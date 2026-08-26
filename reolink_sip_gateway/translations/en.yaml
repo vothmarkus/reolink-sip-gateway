@@ -42,7 +42,7 @@ configuration:
         description: Password of the IP door intercom configured in the FRITZ!Box. Required only when the door-station account is enabled.
       sip_destination:
         name: FRITZ!Box door destination / button
-        description: Dial destination used by the IP door intercom in the FRITZ!Box. For example, 11 commonly represents doorbell button 1; the FRITZ!Box assignment is authoritative.
+        description: Dial destination for simple mode without call routes. For example, 11 commonly represents doorbell button 1 in the FRITZ!Box. When call routes are configured, each route's doorbell_number is used instead.
       sip_display_name:
         name: Door-station display name
         description: Caller name shown on the SIP endpoint for a door-station call.
@@ -66,10 +66,16 @@ configuration:
         description: Password of the mobile-call IP phone. Required only when the mobile-call account is enabled.
       parallel_destinations:
         name: Mobile-call destinations
-        description: One to at most three external numbers called simultaneously. Every leg uses the same mobile-call account and its outgoing number assigned in the FRITZ!Box.
+        description: One to at most three external numbers called simultaneously in simple mode without call routes. Route mode uses named mobile targets and their IDs instead.
       parallel_local_port:
         name: Mobile-call local SIP port (advanced)
         description: UDP port for the mobile-call account; defaults to 5071 and must differ from the door-station port when both accounts are enabled.
+  mobile_targets:
+    name: Named mobile targets (route mode)
+    description: Optional shared number catalogue for multiple doorbell buttons. Each entry has a short ID (for example “markus”), a display name and the number to dial, so a number is maintained only once. This list becomes active together with Call routes.
+  call_routes:
+    name: Call routes / doorbell buttons (route mode)
+    description: Optional. Each entry connects a unique route ID and display name to exactly one binary_sensor, an optional FRITZ!Box doorbell number (for example 11), and up to three IDs from Named mobile targets. Leave unused mobile_target_1 through mobile_target_3 fields empty. As soon as one route exists, this list replaces the simple visitor sensor, door destination and mobile-call destination fields.
   audio:
     name: Audio
     description: Echo cancellation and WebRTC audio filters. Reolink latency is calibrated automatically at startup.
@@ -89,7 +95,7 @@ configuration:
     fields:
       visitor_entity:
         name: Reolink visitor sensor
-        description: “auto” automatically uses the enabled visitor/doorbell sensor from the Reolink integration. If multiple Reolink doorbells are present, enter the desired binary_sensor entity manually.
+        description: Trigger used by simple mode without call routes. “auto” automatically uses the enabled visitor/doorbell sensor from the Reolink integration. In route mode every route names its own binary_sensor while still sharing exactly one Reolink camera.
       incoming_calls_enabled:
         name: Allow incoming SIP calls on all accounts
         description: Applies to every enabled SIP account. The first incoming call receives the exclusive Reolink media path; later calls receive 486 Busy Here. Only calls from the registrar and caller list are accepted. RFC 4733 DTMF is negotiated on both accounts.
@@ -101,7 +107,7 @@ configuration:
         description: Plays a short 256 ms excerpt of the proven acoustic calibration marker at the doorbell before answering a phone-to-camera call.
       debounce_seconds:
         name: Doorbell debounce
-        description: Additional visitor events within this interval are ignored.
+        description: Additional events from the same route within this interval are ignored. Other routes are debounced independently, but cannot displace or queue behind an active global call.
       ring_timeout_seconds:
         name: Ring timeout
         description: Time before an unanswered call is cancelled.

@@ -71,6 +71,8 @@ assert_eq "$(jq -r .call.rtp_inactivity_timeout_seconds <<<"${fresh}")" "15"
 assert_eq "$(jq -r .sip.parallel_call_enabled <<<"${fresh}")" "false"
 assert_eq "$(jq -c .sip.parallel_destinations <<<"${fresh}")" '[]'
 assert_eq "$(jq -r .sip.parallel_local_port <<<"${fresh}")" "5071"
+assert_eq "$(jq -c .mobile_targets <<<"${fresh}")" '[]'
+assert_eq "$(jq -c .call_routes <<<"${fresh}")" '[]'
 
 # Direct legacy upgrade: old flat values must beat newly materialized grouped defaults once.
 legacy='{"sip_username":"legacy-user","sip_password":"legacy-pass","nvr_channel":1,"sip":{"sip_username":"","sip_password":""},"reolink":{"nvr_channel_number":1}}'
@@ -101,6 +103,31 @@ assert_eq "$(jq -r .door_call_enabled <<<"${runtime}")" "true"
 assert_eq "$(jq -r .parallel_call_enabled <<<"${runtime}")" "false"
 assert_eq "$(jq -c .parallel_destinations <<<"${runtime}")" '[]'
 assert_eq "$(jq -r .parallel_local_port <<<"${runtime}")" "5071"
+assert_eq "$(jq -c .mobile_targets <<<"${runtime}")" '[]'
+assert_eq "$(jq -c .call_routes <<<"${runtime}")" '[]'
+
+# v1.2 route lists remain at Home Assistant's supported list-of-mapping depth,
+# reach the flat runtime unchanged and bypass legacy visitor auto-discovery.
+rm -f "${TMP}/resolver-called"
+resolve_reolink_visitor_entity(){ echo called > "${TMP}/resolver-called"; return 1; }
+matrix_options="$(jq -c '
+  .call.visitor_entity="auto"
+  | .mobile_targets=[
+      {"id":"markus","name":"Markus","destination":"0163"},
+      {"id":"maria","name":"Maria","destination":"0176"}
+    ]
+  | .call_routes=[
+      {"id":"wohnung_1","name":"Wohnung 1","visitor_entity":"binary_sensor.klingel_1","doorbell_number":"11","mobile_target_1":"markus","mobile_target_2":"maria","mobile_target_3":""},
+      {"id":"wohnung_2","name":"Wohnung 2","visitor_entity":"binary_sensor.klingel_2","doorbell_number":"12","mobile_target_1":"maria","mobile_target_2":"","mobile_target_3":""}
+    ]
+' <<<"${normalized}")"
+build_runtime_options "${matrix_options}"
+runtime="$(cat /tmp/reolink-sip-gateway-runtime-options.json)"
+assert_eq "$(jq -r '.call_routes[0].doorbell_number' <<<"${runtime}")" "11"
+assert_eq "$(jq -r '.call_routes[1].mobile_target_1' <<<"${runtime}")" "maria"
+assert_eq "$(jq -r '.mobile_targets[0].destination' <<<"${runtime}")" "0163"
+[[ ! -e "${TMP}/resolver-called" ]]
+resolve_reolink_visitor_entity(){ printf '%s\n' 'binary_sensor.test_visitor'; }
 
 # v1.1.1 can disable the door account and retain the mobile account as the
 # only SIP route. Empty dormant door credentials survive the adapter unchanged.
@@ -208,7 +235,7 @@ WRITES=0
 LAST_WRITE=''
 supervisor_options_write(){ WRITES=$((WRITES+1)); LAST_WRITE="$1"; return 0; }
 
-grouped='{"reolink":{"reolink_host":"10.0.0.2","reolink_username":"u","reolink_password":"p","reolink_mode":"nvr","nvr_channel_number":2,"reolink_rtsp_port":554,"baichuan_port":9000},"sip":{"sip_registrar":"10.0.0.1","door_call_enabled":true,"sip_username":"s","sip_password":"x","sip_destination":"100","sip_display_name":"Door","sip_codec_preference":"pcma","sip_registrar_port":5060,"sip_local_port":5070,"parallel_call_enabled":false,"parallel_username":"","parallel_password":"","parallel_destinations":[],"parallel_local_port":5071},"audio":{"echo_cancellation_enabled":true,"webrtc_high_pass_filter_enabled":true,"webrtc_noise_suppression_enabled":true},"call":{"visitor_entity":"binary_sensor.door","incoming_calls_enabled":false,"incoming_allowed_callers":["*"],"incoming_connection_tone_enabled":true,"debounce_seconds":3,"ring_timeout_seconds":30,"rtp_inactivity_timeout_seconds":15,"max_call_duration_seconds":300},"diagnostics":{"log_level":"info","dry_run":false}}'
+grouped='{"reolink":{"reolink_host":"10.0.0.2","reolink_username":"u","reolink_password":"p","reolink_mode":"nvr","nvr_channel_number":2,"reolink_rtsp_port":554,"baichuan_port":9000},"sip":{"sip_registrar":"10.0.0.1","door_call_enabled":true,"sip_username":"s","sip_password":"x","sip_destination":"100","sip_display_name":"Door","sip_codec_preference":"pcma","sip_registrar_port":5060,"sip_local_port":5070,"parallel_call_enabled":false,"parallel_username":"","parallel_password":"","parallel_destinations":[],"parallel_local_port":5071},"mobile_targets":[],"call_routes":[],"audio":{"echo_cancellation_enabled":true,"webrtc_high_pass_filter_enabled":true,"webrtc_noise_suppression_enabled":true},"call":{"visitor_entity":"binary_sensor.door","incoming_calls_enabled":false,"incoming_allowed_callers":["*"],"incoming_connection_tone_enabled":true,"debounce_seconds":3,"ring_timeout_seconds":30,"rtp_inactivity_timeout_seconds":15,"max_call_duration_seconds":300},"diagnostics":{"log_level":"info","dry_run":false}}'
 printf '%s\n' "${grouped}" > "${OPTIONS_FILE}"
 normalized="$(normalize_public_options "${grouped}" true)"
 assert_eq "$(jq -r .reolink.reolink_username <<<"${normalized}")" "u"

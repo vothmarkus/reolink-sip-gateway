@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0
+
+- Wiederverwendbare **Mobilziele** und frei benennbare **Anrufrouten** ergänzt. Jede Route verbindet einen Home-Assistant-Besucher-Sensor mit einer optionalen FRITZ!Box-Klingeltaster-Nummer und bis zu drei Mobilzielen.
+- Sämtliche Routen teilen weiterhin genau eine Reolink-Kamera, einen Medienweg und den globalen First-Answer-Wins-Controller. Gleichzeitig ausgelöste weitere Routen werden nicht vorgemerkt.
+- Besucher-Sensoren aller Routen werden gemeinsam abonniert und pro Route separat entprellt. Ungültige oder doppelte IDs, Sensoren, Klingeltaster-Nummern, Rufziele und Referenzen führen beim Start zu einem klaren Konfigurationsfehler.
+- API v1 um den nicht sensiblen Routenkatalog, aktuelle/letzte Route und `POST /api/v1/routes/{route_id}/test` ergänzt. Das bisherige Testanruf-Ziel bleibt für ältere Integrationen kompatibel.
+- Leere Routenlisten verwenden automatisch die bisherige Einzelroute aus `visitor_entity`, `sip_destination` und `parallel_destinations`; ein Update verändert daher keine bestehende Installation.
+- Eingehende Anrufe und RFC-4733-DTMF bleiben kontenübergreifend unverändert. Telefonnummern und DTMF-Tasten werden weiterhin nicht in normalen Gatewaylogs ausgegeben.
+- Konfigurationsoberfläche, Startadapter, Statusseite, OpenAPI-Vertrag, Dokumentation, Tests und Versionskennungen auf 1.2.0 aktualisiert.
+
 ## 1.1.1
 
 - `door_call_enabled` ergänzt. Das Türsprechstellen-Konto bleibt für bestehende Installationen standardmäßig aktiv, kann aber vollständig deaktiviert werden; ein reiner Mobilbetrieb mit einem bis drei Zielen ist nun eine gültige Live-Konfiguration.

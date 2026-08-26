@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -24,7 +23,7 @@ import (
 	statuspkg "github.com/vothmarkus/reolink-sip-gateway/internal/status"
 )
 
-const version = "1.1.1"
+const version = "1.2.0"
 
 func main() {
 	configPath := flag.String("config", "/data/options.json", "path to Home Assistant app options JSON")
@@ -58,6 +57,7 @@ func main() {
 		fmt.Println("configuration valid")
 		return
 	}
+	routes := cfg.ResolvedCallRoutes()
 
 	logger := newLogger(cfg.LogLevel)
 	logger.Info("starting Reolink SIP Gateway", "version", version, "dry_run", cfg.DryRun)
@@ -76,6 +76,7 @@ func main() {
 		logger.Warn("cannot determine Home Assistant app hostname", "error", hostnameErr)
 	}
 	store := statuspkg.New(version)
+	store.SetRoutes(statusRouteDefinitions(cfg, routes))
 	store.Update(func(s *statuspkg.Snapshot) {
 		s.DryRun = cfg.DryRun
 		s.DoorCallEnabled = cfg.DoorCallEnabled
@@ -181,11 +182,11 @@ func main() {
 
 		if doorSIPClient != nil {
 			doorSIPClient.StartRegistration(ctx)
-			logger.Info("door SIP calling configured", "destination", cfg.SIPDestination, "local_port", cfg.SIPLocalPort)
+			logger.Info("door SIP calling configured", "route_count", countDoorRoutes(routes), "local_port", cfg.SIPLocalPort)
 		}
 		if parallelSIPClient != nil {
 			parallelSIPClient.StartRegistration(ctx)
-			logger.Info("mobile SIP parallel calling configured", "destination_count", len(cfg.ParallelDestinations), "local_port", cfg.ParallelLocalPort)
+			logger.Info("mobile SIP parallel calling configured", "route_count", countMobileRoutes(routes), "local_port", cfg.ParallelLocalPort)
 		}
 		if cfg.IncomingCallsEnabled {
 			allowAll := len(cfg.IncomingAllowedCallers) == 1 && cfg.IncomingAllowedCallers[0] == "*"
@@ -223,10 +224,10 @@ func main() {
 		}()
 	}
 
-	triggers := make(chan struct{}, 1)
+	triggers := make(chan ha.Trigger, max(1, len(routes)))
 	listener := &ha.Listener{
 		Token:        token,
-		EntityID:     cfg.VisitorEntity,
+		Routes:       routeSubscriptions(routes),
 		PollInterval: cfg.HAPollInterval(), // fixed one-second REST fallback; WebSocket remains primary.
 		Logger:       logger,
 		OnConnection: func(ok bool) {
@@ -247,12 +248,16 @@ func main() {
 
 	var calls callcontrol.Controller
 	commands.Configure(
-		func(context.Context) error {
-			if cfg.DryRun || !anySIPRegistered(doorSIPClient, parallelSIPClient) {
+		func(_ context.Context, routeID string) error {
+			route, ok := requestedCallRoute(routes, routeID)
+			if !ok {
+				return statuspkg.ErrRouteNotFound
+			}
+			if cfg.DryRun || !routeSIPAvailable(cfg, route, doorSIPClient, parallelSIPClient) {
 				return statuspkg.ErrSIPUnavailable
 			}
 			if err := calls.Start(ctx, func(callCtx context.Context) {
-				handleCall(callCtx, cfg, doorSIPClient, parallelSIPClient, store, logger)
+				handleCall(callCtx, cfg, route, doorSIPClient, parallelSIPClient, store, logger)
 			}); err != nil {
 				if errors.Is(err, callcontrol.ErrBusy) {
 					return statuspkg.ErrCallBusy
@@ -260,8 +265,9 @@ func main() {
 				return err
 			}
 			logger.Info("Home Assistant integration test call accepted",
-				"door_enabled", cfg.DoorCallEnabled,
-				"mobile_destination_count", len(cfg.ParallelDestinations))
+				"route", route.ID,
+				"door_leg", cfg.DoorCallEnabled && route.DoorbellNumber != "",
+				"mobile_target_count", len(route.MobileTargets))
 			return nil
 		},
 		func(context.Context) error {
@@ -284,7 +290,7 @@ func main() {
 	)
 	defer commands.Disable()
 
-	var lastTrigger atomic.Int64
+	lastTriggers := make(map[string]time.Time, len(routes))
 	var incomingCalls <-chan *sip.IncomingInvite
 	if cfg.IncomingCallsEnabled {
 		incomingCalls = mergeIncomingCalls(ctx, doorSIPClient, parallelSIPClient)
@@ -295,19 +301,23 @@ func main() {
 			store.Update(func(s *statuspkg.Snapshot) { s.State = "stopping" })
 			logger.Info("stopping")
 			return
-		case <-triggers:
-			now := time.Now()
-			prevNanos := lastTrigger.Load()
-			if prevNanos != 0 && now.Sub(time.Unix(0, prevNanos)) < cfg.Debounce() {
-				logger.Debug("visitor trigger ignored by debounce")
+		case trigger := <-triggers:
+			route, ok := requestedCallRoute(routes, trigger.RouteID)
+			if !ok {
+				logger.Warn("Home Assistant trigger ignored for unknown route", "route", trigger.RouteID, "entity", trigger.EntityID)
 				continue
 			}
-			lastTrigger.Store(now.UnixNano())
+			now := time.Now()
+			if previous := lastTriggers[route.ID]; !previous.IsZero() && now.Sub(previous) < cfg.Debounce() {
+				logger.Debug("call-route trigger ignored by debounce", "route", route.ID)
+				continue
+			}
+			lastTriggers[route.ID] = now
 			store.Update(func(s *statuspkg.Snapshot) { s.LastVisitorEvent = now })
 			if err := calls.Start(ctx, func(callCtx context.Context) {
-				handleCall(callCtx, cfg, doorSIPClient, parallelSIPClient, store, logger)
+				handleCall(callCtx, cfg, route, doorSIPClient, parallelSIPClient, store, logger)
 			}); err != nil {
-				logger.Warn("visitor trigger ignored because a call is active")
+				logger.Warn("call-route trigger ignored because a call is active", "route", route.ID)
 				continue
 			}
 		case incoming := <-incomingCalls:
@@ -355,9 +365,71 @@ func parallelSIPConfig(cfg config.Config) sip.Config {
 		CodecPreference:    cfg.SIPCodecPreference,
 		AcceptIncoming:     cfg.IncomingCallsEnabled,
 		AllowedCallers:     cfg.IncomingAllowedCallers,
-		MaxConcurrentCalls: len(cfg.ParallelDestinations),
+		MaxConcurrentCalls: cfg.MaxMobileTargetsPerRoute(),
 		Debug:              cfg.DebugEnabled(),
 	}
+}
+
+func routeSubscriptions(routes []config.ResolvedCallRoute) []ha.RouteSubscription {
+	result := make([]ha.RouteSubscription, 0, len(routes))
+	for _, route := range routes {
+		result = append(result, ha.RouteSubscription{RouteID: route.ID, EntityID: route.VisitorEntity})
+	}
+	return result
+}
+
+func statusRouteDefinitions(cfg config.Config, routes []config.ResolvedCallRoute) []statuspkg.RouteDefinition {
+	result := make([]statuspkg.RouteDefinition, 0, len(routes))
+	for _, route := range routes {
+		result = append(result, statuspkg.RouteDefinition{
+			ID:         route.ID,
+			Name:       route.Name,
+			DoorCall:   cfg.DoorCallEnabled && route.DoorbellNumber != "",
+			MobileCall: cfg.ParallelCallEnabled && len(route.MobileTargets) > 0,
+		})
+	}
+	return result
+}
+
+func requestedCallRoute(routes []config.ResolvedCallRoute, routeID string) (config.ResolvedCallRoute, bool) {
+	if routeID == "" {
+		if len(routes) == 0 {
+			return config.ResolvedCallRoute{}, false
+		}
+		return routes[0], true
+	}
+	for _, route := range routes {
+		if route.ID == routeID {
+			return route, true
+		}
+	}
+	return config.ResolvedCallRoute{}, false
+}
+
+func routeSIPAvailable(cfg config.Config, route config.ResolvedCallRoute, doorClient, parallelClient *sip.Client) bool {
+	doorAvailable := cfg.DoorCallEnabled && route.DoorbellNumber != "" && doorClient != nil && doorClient.Registered()
+	mobileAvailable := cfg.ParallelCallEnabled && len(route.MobileTargets) > 0 && parallelClient != nil && parallelClient.Registered()
+	return doorAvailable || mobileAvailable
+}
+
+func countDoorRoutes(routes []config.ResolvedCallRoute) int {
+	count := 0
+	for _, route := range routes {
+		if route.DoorbellNumber != "" {
+			count++
+		}
+	}
+	return count
+}
+
+func countMobileRoutes(routes []config.ResolvedCallRoute) int {
+	count := 0
+	for _, route := range routes {
+		if len(route.MobileTargets) > 0 {
+			count++
+		}
+	}
+	return count
 }
 
 func configuredSIPAccountCount(cfg config.Config) int {
@@ -427,6 +499,8 @@ func handleIncomingCall(parent context.Context, cfg config.Config, incoming *sip
 		s.CurrentCallDirection = "incoming"
 		s.LastCallDirection = "incoming"
 		s.CurrentCallerNumber = incoming.CallerID()
+		s.CurrentRouteID = ""
+		s.CurrentRouteName = ""
 		if incoming.CallerID() != "" {
 			s.LastCallerNumber = incoming.CallerID()
 		}
@@ -560,7 +634,8 @@ func handleIncomingCall(parent context.Context, cfg config.Config, incoming *sip
 	finishCall(store, logger, started, finalErr, "incoming call ended")
 }
 
-func handleCall(parent context.Context, cfg config.Config, doorClient, parallelClient *sip.Client, store *statuspkg.Store, logger *slog.Logger) {
+func handleCall(parent context.Context, cfg config.Config, route config.ResolvedCallRoute, doorClient, parallelClient *sip.Client, store *statuspkg.Store, logger *slog.Logger) {
+	logger = logger.With("route", route.ID)
 	started := time.Now()
 	store.Update(func(s *statuspkg.Snapshot) {
 		s.State = "dialing"
@@ -568,6 +643,10 @@ func handleCall(parent context.Context, cfg config.Config, doorClient, parallelC
 		s.CurrentCallDirection = "outgoing"
 		s.LastCallDirection = "outgoing"
 		s.CurrentCallerNumber = ""
+		s.CurrentRouteID = route.ID
+		s.CurrentRouteName = route.Name
+		s.LastRouteID = route.ID
+		s.LastRouteName = route.Name
 		s.LastError = ""
 		s.ActiveCodec = ""
 		s.ActiveTalkback = ""
@@ -578,7 +657,7 @@ func handleCall(parent context.Context, cfg config.Config, doorClient, parallelC
 		s.CurrentDelayMS = cfg.AECInitialDelayMS
 	})
 	if cfg.DryRun {
-		logger.Info("dry-run visitor event received; SIP call suppressed")
+		logger.Info("dry-run call-route event received; SIP call suppressed")
 		store.Update(func(s *statuspkg.Snapshot) {
 			s.State = "idle"
 			s.LastCallEnded = time.Now()
@@ -586,7 +665,7 @@ func handleCall(parent context.Context, cfg config.Config, doorClient, parallelC
 		})
 		return
 	}
-	legs := outboundDialLegs(cfg, doorClient, parallelClient, logger)
+	legs := outboundDialLegs(cfg, route, doorClient, parallelClient, logger)
 	if len(legs) == 0 {
 		recordCallError(store, logger, errors.New("no configured SIP account is registered"))
 		return
@@ -615,7 +694,7 @@ func handleCall(parent context.Context, cfg config.Config, doorClient, parallelC
 	defer candidate.Close()
 	call := candidate.call
 	rtpConn := candidate.rtpConn
-	logger.Info("SIP fork winner selected", "leg", winner.Leg.ID, "destination", winner.Leg.Destination, "codec", call.Codec.Name)
+	logger.Info("SIP fork winner selected", "leg", winner.Leg.ID, "codec", call.Codec.Name)
 
 	var ffConn *net.UDPConn
 	if cfg.ReceiveMode() == "rtsp" {
@@ -726,11 +805,11 @@ func (c *outboundCandidate) Close() {
 	})
 }
 
-func outboundDialLegs(cfg config.Config, doorClient, parallelClient *sip.Client, logger *slog.Logger) []callcontrol.DialLeg {
-	legs := make([]callcontrol.DialLeg, 0, 1+len(cfg.ParallelDestinations))
-	if cfg.DoorCallEnabled {
+func outboundDialLegs(cfg config.Config, route config.ResolvedCallRoute, doorClient, parallelClient *sip.Client, logger *slog.Logger) []callcontrol.DialLeg {
+	legs := make([]callcontrol.DialLeg, 0, 1+len(route.MobileTargets))
+	if cfg.DoorCallEnabled && route.DoorbellNumber != "" {
 		if doorClient != nil && doorClient.Registered() {
-			legs = append(legs, newOutboundDialLeg("door", cfg.SIPDestination, doorClient, logger))
+			legs = append(legs, newOutboundDialLeg("door", route.DoorbellNumber, doorClient, logger))
 		} else if doorClient != nil {
 			logger.Warn("door SIP call leg skipped because its account is not registered")
 		}
@@ -739,12 +818,12 @@ func outboundDialLegs(cfg config.Config, doorClient, parallelClient *sip.Client,
 		return legs
 	}
 	if parallelClient == nil || !parallelClient.Registered() {
-		logger.Warn("mobile SIP call legs skipped because the mobile account is not registered", "destination_count", len(cfg.ParallelDestinations))
+		logger.Warn("mobile SIP call legs skipped because the mobile account is not registered", "target_count", len(route.MobileTargets))
 		return legs
 	}
-	for index, destination := range cfg.ParallelDestinations {
-		id := fmt.Sprintf("mobile-%d", index+1)
-		legs = append(legs, newOutboundDialLeg(id, destination, parallelClient, logger))
+	for _, target := range route.MobileTargets {
+		id := "mobile_" + target.ID
+		legs = append(legs, newOutboundDialLeg(id, target.Destination, parallelClient, logger))
 	}
 	return legs
 }
@@ -758,7 +837,7 @@ func newOutboundDialLeg(id, destination string, client *sip.Client, logger *slog
 				return nil, fmt.Errorf("reserve SIP RTP port: %w", err)
 			}
 			rtpPort := rtpConn.LocalAddr().(*net.UDPAddr).Port
-			logger.Debug("SIP fork media port reserved", "leg", id, "destination", destination, "sip_rtp_port", rtpPort)
+			logger.Debug("SIP fork media port reserved", "leg", id, "sip_rtp_port", rtpPort)
 			call, err := client.Dial(ctx, destination, rtpPort)
 			if err != nil {
 				_ = rtpConn.Close()
@@ -851,6 +930,8 @@ func recordIncomingCallError(store *statuspkg.Store, logger *slog.Logger, err er
 func clearActiveCall(s *statuspkg.Snapshot) {
 	s.CurrentCallDirection = ""
 	s.CurrentCallerNumber = ""
+	s.CurrentRouteID = ""
+	s.CurrentRouteName = ""
 	clearActiveMedia(s)
 }
 
@@ -892,11 +973,11 @@ func recordCallError(store *statuspkg.Store, logger *slog.Logger, err error) {
 // callbacks that capture the final runtime configuration and SIP client.
 type gatewayCommands struct {
 	mu       sync.RWMutex
-	testCall func(context.Context) error
+	testCall func(context.Context, string) error
 	hangup   func(context.Context) error
 }
 
-func (c *gatewayCommands) Configure(testCall, hangup func(context.Context) error) {
+func (c *gatewayCommands) Configure(testCall func(context.Context, string) error, hangup func(context.Context) error) {
 	c.mu.Lock()
 	c.testCall = testCall
 	c.hangup = hangup
@@ -907,14 +988,14 @@ func (c *gatewayCommands) Disable() {
 	c.Configure(nil, nil)
 }
 
-func (c *gatewayCommands) StartTestCall(ctx context.Context) error {
+func (c *gatewayCommands) StartTestCall(ctx context.Context, routeID string) error {
 	c.mu.RLock()
 	command := c.testCall
 	c.mu.RUnlock()
 	if command == nil {
 		return statuspkg.ErrCommandUnavailable
 	}
-	return command(ctx)
+	return command(ctx, routeID)
 }
 
 func (c *gatewayCommands) Hangup(ctx context.Context) error {

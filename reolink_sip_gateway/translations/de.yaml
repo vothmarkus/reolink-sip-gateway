@@ -42,7 +42,7 @@ configuration:
         description: Kennwort der in der FRITZ!Box angelegten IP-Türsprechanlage. Nur bei aktiviertem Türsprechstellen-Konto erforderlich.
       sip_destination:
         name: FRITZ!Box-Türziel / Klingeltaster
-        description: In der FRITZ!Box für die IP-Türsprechanlage verwendetes Rufziel. Beispielsweise steht 11 typischerweise für Klingeltaster 1; maßgeblich ist die Zuordnung in der FRITZ!Box.
+        description: Rufziel für den einfachen Modus ohne Anrufrouten. Beispielsweise steht 11 typischerweise für Klingeltaster 1 in der FRITZ!Box. Bei konfigurierten Anrufrouten wird stattdessen deren Feld „doorbell_number“ verwendet.
       sip_display_name:
         name: Anzeigename der Türsprechstelle
         description: Name, der beim Türsprechstellen-Ruf auf dem SIP-Endgerät erscheinen soll.
@@ -66,10 +66,16 @@ configuration:
         description: Kennwort des Mobilruf-IP-Telefons. Nur bei aktiviertem Mobilruf-Konto erforderlich.
       parallel_destinations:
         name: Mobilruf-Ziele
-        description: Eine bis maximal drei gleichzeitig anzurufende externe Rufnummern. Alle Zweige verwenden dasselbe Mobilruf-Konto und die ihm in der FRITZ!Box zugewiesene ausgehende Rufnummer.
+        description: Eine bis maximal drei gleichzeitig anzurufende externe Rufnummern im einfachen Modus ohne Anrufrouten. Im Routenmodus werden benannte Mobilziele und deren IDs verwendet.
       parallel_local_port:
         name: Lokaler SIP-Port des Mobilruf-Kontos (erweitert)
         description: UDP-Port des Mobilruf-Kontos; standardmäßig 5071 und bei gleichzeitig aktivem Tür-Konto verschieden von dessen Port.
+  mobile_targets:
+    name: Benannte Mobilziele (Routenmodus)
+    description: Optionaler gemeinsamer Rufnummernkatalog für mehrere Klingeltaster. Jeder Eintrag erhält eine kurze ID (z. B. „markus“), einen Anzeigenamen und die zu wählende Rufnummer. Die Rufnummer muss dadurch nur einmal gepflegt werden. Die Liste wird erst zusammen mit „Anrufrouten“ aktiv.
+  call_routes:
+    name: Anrufrouten / Klingeltaster (Routenmodus)
+    description: Optional. Jeder Eintrag verbindet eine eindeutige Routen-ID und einen Anzeigenamen mit genau einem binary_sensor, optional einer FRITZ!Box-Klingeltaster-Nummer (z. B. 11) und bis zu drei IDs aus „Benannte Mobilziele“. Nicht verwendete Felder mobile_target_1 bis mobile_target_3 bleiben leer. Sobald mindestens eine Route vorhanden ist, ersetzt diese Liste die einfachen Felder Besucher-Sensor, Türziel und Mobilruf-Ziele.
   audio:
     name: Audio
     description: Echounterdrückung und WebRTC-Audiofilter. Die Reolink-Latenz wird beim Start automatisch kalibriert.
@@ -89,7 +95,7 @@ configuration:
     fields:
       visitor_entity:
         name: Reolink-Besucher-Sensor
-        description: „auto“ verwendet automatisch den aktivierten Besucher-/Klingelsensor der Reolink-Integration. Bei mehreren Reolink-Türklingeln muss die gewünschte binary_sensor-Entity manuell eingetragen werden.
+        description: Auslöser für den einfachen Modus ohne Anrufrouten. „auto“ verwendet automatisch den aktivierten Besucher-/Klingelsensor der Reolink-Integration. Im Routenmodus trägt jede Route ihren eigenen binary_sensor ein; weiterhin wird genau eine Reolink-Kamera verwendet.
       incoming_calls_enabled:
         name: Eingehende SIP-Anrufe auf allen Konten zulassen
         description: Gilt für jedes aktivierte SIP-Konto. Der erste eingehende Anruf erhält den exklusiven Reolink-Medienweg; weitere Anrufe werden mit 486 Busy Here abgewiesen. Es werden nur Anrufe vom Registrar und aus der Anruferliste akzeptiert. RFC-4733-DTMF wird auf beiden Konten ausgehandelt.
@@ -101,7 +107,7 @@ configuration:
         description: Spielt vor der Annahme eines Telefon-zu-Kamera-Anrufs einen kurzen 256-ms-Ausschnitt des bewährten akustischen Kalibrierungsmarkers an der Doorbell ab.
       debounce_seconds:
         name: Klingelentprellung
-        description: Weitere Klingelereignisse innerhalb dieser Zeit werden ignoriert.
+        description: Weitere Klingelereignisse derselben Route innerhalb dieser Zeit werden ignoriert. Andere Routen werden unabhängig entprellt, können aber keinen bereits aktiven globalen Anruf verdrängen oder in eine Warteschlange stellen.
       ring_timeout_seconds:
         name: Klingeldauer
         description: Zeit bis zum Abbruch eines nicht angenommenen Anrufs.

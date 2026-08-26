@@ -16,15 +16,31 @@ type Listener struct {
 	WSURL        string
 	RESTBaseURL  string
 	Token        string
-	EntityID     string
+	Routes       []RouteSubscription
 	PollInterval time.Duration
 	Client       *http.Client
 	Logger       *slog.Logger
 	OnConnection func(bool)
 
-	previous    string
-	initialized bool
+	previous    map[string]string
+	initialized map[string]bool
 	connectedAt time.Time
+}
+
+type RouteSubscription struct {
+	RouteID  string
+	EntityID string
+}
+
+type Trigger struct {
+	RouteID  string
+	EntityID string
+}
+
+type routeStateResult struct {
+	route RouteSubscription
+	state string
+	err   error
 }
 
 type wsEnvelope struct {
@@ -43,13 +59,14 @@ type triggerEvent struct {
 	Variables struct {
 		Trigger struct {
 			ToState *struct {
-				State string `json:"state"`
+				EntityID string `json:"entity_id"`
+				State    string `json:"state"`
 			} `json:"to_state"`
 		} `json:"trigger"`
 	} `json:"variables"`
 }
 
-func (l *Listener) Run(ctx context.Context, trigger chan<- struct{}) error {
+func (l *Listener) Run(ctx context.Context, trigger chan<- Trigger) error {
 	if l.WSURL == "" {
 		l.WSURL = "ws://supervisor/core/websocket"
 	}
@@ -61,6 +78,15 @@ func (l *Listener) Run(ctx context.Context, trigger chan<- struct{}) error {
 	}
 	if l.PollInterval <= 0 {
 		l.PollInterval = time.Second
+	}
+	if len(l.Routes) == 0 {
+		return errors.New("at least one Home Assistant call route is required")
+	}
+	if l.previous == nil {
+		l.previous = make(map[string]string, len(l.Routes))
+	}
+	if l.initialized == nil {
+		l.initialized = make(map[string]bool, len(l.Routes))
 	}
 
 	backoff := time.Second
@@ -100,7 +126,7 @@ func (l *Listener) Run(ctx context.Context, trigger chan<- struct{}) error {
 	}
 }
 
-func (l *Listener) runWebSocket(ctx context.Context, trigger chan<- struct{}) error {
+func (l *Listener) runWebSocket(ctx context.Context, trigger chan<- Trigger) error {
 	conn, err := dialWebSocket(ctx, l.WSURL)
 	if err != nil {
 		return err
@@ -134,12 +160,16 @@ func (l *Listener) runWebSocket(ctx context.Context, trigger chan<- struct{}) er
 		return fmt.Errorf("Home Assistant websocket authentication failed: %s", authRes.Message)
 	}
 
+	entityIDs := make([]string, 0, len(l.Routes))
+	for _, route := range l.Routes {
+		entityIDs = append(entityIDs, route.EntityID)
+	}
 	subscribe := map[string]any{
 		"id":   1,
 		"type": "subscribe_trigger",
 		"trigger": map[string]any{
 			"platform":  "state",
-			"entity_id": l.EntityID,
+			"entity_id": entityIDs,
 			"from":      "off",
 			"to":        "on",
 		},
@@ -164,19 +194,21 @@ func (l *Listener) runWebSocket(ctx context.Context, trigger chan<- struct{}) er
 	}
 	l.connectedAt = time.Now()
 	if l.Logger != nil {
-		l.Logger.Info("Home Assistant visitor trigger subscription active", "entity", l.EntityID)
+		l.Logger.Info("Home Assistant call-route trigger subscription active", "route_count", len(l.Routes))
 	}
 	// Seed the REST-fallback edge detector without making REST availability a
 	// prerequisite for WebSocket operation. Because the subscription is already
 	// active, any concurrent off->on transition is queued on the WebSocket.
-	if state, err := l.fetchState(ctx); err == nil {
-		l.previous = strings.ToLower(strings.TrimSpace(state))
-		l.initialized = true
-	} else if l.Logger != nil {
-		// WebSocket operation is unaffected, but surfacing this at warning level
-		// makes a mistyped/removed entity visible instead of silently leaving the
-		// REST fallback without an initial edge state.
-		l.Logger.Warn("could not verify current HA visitor sensor state for fallback", "entity", l.EntityID, "error", err)
+	for _, result := range l.fetchRouteStates(ctx) {
+		if result.err == nil {
+			l.previous[result.route.EntityID] = strings.ToLower(strings.TrimSpace(result.state))
+			l.initialized[result.route.EntityID] = true
+		} else if l.Logger != nil {
+			// WebSocket operation is unaffected, but surfacing this at warning level
+			// makes a mistyped/removed entity visible instead of silently leaving the
+			// REST fallback without an initial edge state.
+			l.Logger.Warn("could not verify current HA route sensor state for fallback", "route", result.route.RouteID, "entity", result.route.EntityID, "error", result.err)
+		}
 	}
 
 	pingDone := make(chan struct{})
@@ -222,14 +254,22 @@ func (l *Listener) runWebSocket(ctx context.Context, trigger chan<- struct{}) er
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(ev.Variables.Trigger.ToState.State), "on") {
-			l.previous = "on"
-			l.initialized = true
-			l.emitTrigger(trigger)
+			entityID := strings.TrimSpace(ev.Variables.Trigger.ToState.EntityID)
+			route, ok := l.routeForEntity(entityID)
+			if !ok {
+				if l.Logger != nil {
+					l.Logger.Warn("Home Assistant trigger referenced an unknown route entity", "entity", entityID)
+				}
+				continue
+			}
+			l.previous[entityID] = "on"
+			l.initialized[entityID] = true
+			l.emitTrigger(trigger, route)
 		}
 	}
 }
 
-func (l *Listener) pollFallback(ctx context.Context, trigger chan<- struct{}, duration time.Duration) error {
+func (l *Listener) pollFallback(ctx context.Context, trigger chan<- Trigger, duration time.Duration) error {
 	deadline := time.NewTimer(duration)
 	defer deadline.Stop()
 	ticker := time.NewTicker(l.PollInterval)
@@ -237,19 +277,19 @@ func (l *Listener) pollFallback(ctx context.Context, trigger chan<- struct{}, du
 
 	// Poll immediately, then at the configured interval until reconnect time.
 	for {
-		state, err := l.fetchState(ctx)
-		if err == nil {
-			if l.OnConnection != nil {
-				l.OnConnection(true)
+		allConnected := true
+		for _, result := range l.fetchRouteStates(ctx) {
+			if result.err == nil {
+				l.acceptState(result.route, result.state, trigger)
+				continue
 			}
-			l.acceptState(state, trigger)
-		} else {
-			if l.OnConnection != nil {
-				l.OnConnection(false)
-			}
+			allConnected = false
 			if l.Logger != nil {
-				l.Logger.Warn("Home Assistant fallback state read failed", "entity", l.EntityID, "error", err)
+				l.Logger.Warn("Home Assistant fallback state read failed", "route", result.route.RouteID, "entity", result.route.EntityID, "error", result.err)
 			}
+		}
+		if l.OnConnection != nil {
+			l.OnConnection(allConnected)
 		}
 		select {
 		case <-ctx.Done():
@@ -261,31 +301,56 @@ func (l *Listener) pollFallback(ctx context.Context, trigger chan<- struct{}, du
 	}
 }
 
-func (l *Listener) acceptState(state string, trigger chan<- struct{}) {
+func (l *Listener) acceptState(route RouteSubscription, state string, trigger chan<- Trigger) {
 	state = strings.ToLower(strings.TrimSpace(state))
-	if !l.initialized {
-		l.previous = state
-		l.initialized = true
+	if !l.initialized[route.EntityID] {
+		l.previous[route.EntityID] = state
+		l.initialized[route.EntityID] = true
 		return
 	}
-	if l.previous != "on" && state == "on" {
-		l.emitTrigger(trigger)
+	if l.previous[route.EntityID] != "on" && state == "on" {
+		l.emitTrigger(trigger, route)
 	}
-	l.previous = state
+	l.previous[route.EntityID] = state
 }
 
-func (l *Listener) emitTrigger(trigger chan<- struct{}) {
+func (l *Listener) emitTrigger(trigger chan<- Trigger, route RouteSubscription) {
 	select {
-	case trigger <- struct{}{}:
+	case trigger <- Trigger{RouteID: route.RouteID, EntityID: route.EntityID}:
 	default:
 		if l.Logger != nil {
-			l.Logger.Warn("visitor event dropped because trigger queue is full")
+			l.Logger.Warn("call-route event dropped because trigger queue is full", "route", route.RouteID)
 		}
 	}
 }
 
-func (l *Listener) fetchState(ctx context.Context) (string, error) {
-	endpoint := strings.TrimRight(l.RESTBaseURL, "/") + "/states/" + url.PathEscape(l.EntityID)
+func (l *Listener) routeForEntity(entityID string) (RouteSubscription, bool) {
+	for _, route := range l.Routes {
+		if route.EntityID == entityID {
+			return route, true
+		}
+	}
+	return RouteSubscription{}, false
+}
+
+func (l *Listener) fetchRouteStates(ctx context.Context) []routeStateResult {
+	results := make(chan routeStateResult, len(l.Routes))
+	for _, route := range l.Routes {
+		route := route
+		go func() {
+			state, err := l.fetchState(ctx, route.EntityID)
+			results <- routeStateResult{route: route, state: state, err: err}
+		}()
+	}
+	collected := make([]routeStateResult, 0, len(l.Routes))
+	for range l.Routes {
+		collected = append(collected, <-results)
+	}
+	return collected
+}
+
+func (l *Listener) fetchState(ctx context.Context, entityID string) (string, error) {
+	endpoint := strings.TrimRight(l.RESTBaseURL, "/") + "/states/" + url.PathEscape(entityID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return "", err

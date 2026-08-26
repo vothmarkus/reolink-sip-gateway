@@ -13,17 +13,17 @@ import (
 )
 
 type testCommands struct {
-	testCall func(context.Context) error
+	testCall func(context.Context, string) error
 	hangup   func(context.Context) error
 }
 
 const testInstanceID = "12345678-1234-5678-9234-567812345678"
 
-func (c testCommands) StartTestCall(ctx context.Context) error {
+func (c testCommands) StartTestCall(ctx context.Context, routeID string) error {
 	if c.testCall == nil {
 		return nil
 	}
-	return c.testCall(ctx)
+	return c.testCall(ctx, routeID)
 }
 
 func (c testCommands) Hangup(ctx context.Context) error {
@@ -59,7 +59,7 @@ func TestAPIV1RequiresBearerToken(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &info); err != nil {
 		t.Fatal(err)
 	}
-	if info.APIVersion != APIVersion || info.GatewayVersion != "1.1.1" || info.InstanceID != testInstanceID {
+	if info.APIVersion != APIVersion || info.GatewayVersion != "1.2.0" || info.InstanceID != testInstanceID {
 		t.Fatalf("unexpected info: %#v", info)
 	}
 	if !strings.Contains(strings.Join(info.Capabilities, ","), "dtmf_events") {
@@ -67,6 +67,9 @@ func TestAPIV1RequiresBearerToken(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(info.Capabilities, ","), "parallel_calls") {
 		t.Fatalf("parallel-call capability is missing: %#v", info.Capabilities)
+	}
+	if !strings.Contains(strings.Join(info.Capabilities, ","), "route_test_calls") {
+		t.Fatalf("route test-call capability is missing: %#v", info.Capabilities)
 	}
 }
 
@@ -94,6 +97,10 @@ func TestAPIV1StatusMapping(t *testing.T) {
 		snapshot.LastCallDirection = "incoming"
 		snapshot.CurrentCallerNumber = "01631416518"
 		snapshot.LastCallerNumber = "01631416518"
+		snapshot.CurrentRouteID = "wohnung_1"
+		snapshot.CurrentRouteName = "Wohnung 1"
+		snapshot.LastRouteID = "wohnung_1"
+		snapshot.LastRouteName = "Wohnung 1"
 		snapshot.LastCallStarted = started
 		snapshot.ActiveCodec = "pcma"
 	})
@@ -110,6 +117,9 @@ func TestAPIV1StatusMapping(t *testing.T) {
 	if !status.Call.Active || status.Call.State != "active" || status.Call.CallerNumber != "01631416518" || !status.Controls.HangupAvailable {
 		t.Fatalf("unexpected status mapping: %#v", status)
 	}
+	if status.Call.RouteID != "wohnung_1" || status.Call.LastRouteName != "Wohnung 1" {
+		t.Fatalf("unexpected route status: %#v", status.Call)
+	}
 	if status.Controls.TestCallAvailable {
 		t.Fatal("test call must not be available during a call")
 	}
@@ -118,10 +128,38 @@ func TestAPIV1StatusMapping(t *testing.T) {
 	}
 }
 
+func TestAPIV1RouteAvailabilityUsesEachRoutesAccounts(t *testing.T) {
+	snapshot := Snapshot{
+		Version: "1.2.0", State: "idle", DoorCallEnabled: true, SIPRegistered: true,
+		ParallelCallEnabled: true, ParallelSIPRegistered: false,
+	}
+	routes := []RouteDefinition{
+		{ID: "door", Name: "Tür", DoorCall: true},
+		{ID: "mobile", Name: "Mobil", MobileCall: true},
+		{ID: "combined", Name: "Kombiniert", DoorCall: true, MobileCall: true},
+	}
+	status := newAPIStatus(snapshot, routes)
+	if len(status.Routes) != 3 || !status.Routes[0].TestCallAvailable || status.Routes[1].TestCallAvailable || !status.Routes[2].TestCallAvailable {
+		t.Fatalf("unexpected route availability: %#v", status.Routes)
+	}
+}
+
+func TestAPIV1UnknownRouteCommandReturnsNotFound(t *testing.T) {
+	_, handler := newTestAPI(t, testCommands{
+		testCall: func(context.Context, string) error { return ErrRouteNotFound },
+	})
+	req := authenticatedRequest(http.MethodPost, "/api/v1/routes/missing/test")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusNotFound || !strings.Contains(res.Body.String(), "route_not_found") {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+}
+
 func TestAPIV1MobileOnlyRegistrationIsAvailable(t *testing.T) {
 	status := newAPIStatus(Snapshot{
-		Version: "1.1.1", State: "idle", ParallelCallEnabled: true, ParallelSIPRegistered: true,
-	})
+		Version: "1.2.0", State: "idle", ParallelCallEnabled: true, ParallelSIPRegistered: true,
+	}, nil)
 	if !status.SIP.Registered || status.SIP.DoorCallEnabled || status.SIP.DoorRegistered || !status.SIP.ParallelRegistered {
 		t.Fatalf("unexpected mobile-only SIP status: %#v", status.SIP)
 	}
@@ -132,9 +170,10 @@ func TestAPIV1MobileOnlyRegistrationIsAvailable(t *testing.T) {
 
 func TestAPIV1Commands(t *testing.T) {
 	testCalled := false
+	testRoute := ""
 	hangupCalled := false
 	_, handler := newTestAPI(t, testCommands{
-		testCall: func(context.Context) error { testCalled = true; return nil },
+		testCall: func(_ context.Context, routeID string) error { testCalled = true; testRoute = routeID; return nil },
 		hangup:   func(context.Context) error { hangupCalled = true; return nil },
 	})
 	for _, path := range []string{"/api/v1/calls/test", "/api/v1/calls/hangup"} {
@@ -148,11 +187,17 @@ func TestAPIV1Commands(t *testing.T) {
 	if !testCalled || !hangupCalled {
 		t.Fatalf("callbacks test=%t hangup=%t", testCalled, hangupCalled)
 	}
+	req := authenticatedRequest(http.MethodPost, "/api/v1/routes/wohnung_1/test")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusAccepted || testRoute != "wohnung_1" {
+		t.Fatalf("route test call status=%d route=%q body=%s", res.Code, testRoute, res.Body.String())
+	}
 }
 
 func TestAPIV1CommandErrors(t *testing.T) {
 	_, handler := newTestAPI(t, testCommands{
-		testCall: func(context.Context) error { return ErrCallBusy },
+		testCall: func(context.Context, string) error { return ErrCallBusy },
 		hangup:   func(context.Context) error { return ErrNoActiveCall },
 	})
 	tests := []struct {
@@ -292,7 +337,8 @@ func TestWriteCommandErrorDoesNotExposeInternalDetails(t *testing.T) {
 
 func newTestAPI(t *testing.T, commands CommandHandler) (*Store, http.Handler) {
 	t.Helper()
-	store := New("1.1.1")
+	store := New("1.2.0")
+	store.SetRoutes([]RouteDefinition{{ID: "default", Name: "Standard", DoorCall: true}})
 	mux := http.NewServeMux()
 	store.registerAPIRoutes(mux, ServerOptions{Token: "test-token", InstanceID: testInstanceID, Commands: commands})
 	return store, mux

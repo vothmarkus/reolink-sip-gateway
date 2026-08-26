@@ -1,58 +1,60 @@
 # Roadmap
 
-## v1.2: multiple doorbell buttons and routing matrix
+## v1.2: multiple doorbell buttons and routing matrix — implemented
 
-The v1.1 SIP fork deliberately accepts a generic list of call legs, but its
-public Home Assistant configuration still has one visitor entity and at most
-one door destination. v1.2 can extend only the routing layer while retaining
-the two optional SIP identities, first-answer-wins controller and single
-Reolink media session.
-
-The planned data model separates reusable mobile targets from doorbell-button
-routes:
+v1.2 separates reusable mobile targets from call routes. Each route maps one
+Home Assistant visitor entity to an optional FRITZ!Box doorbell number and up
+to three optional mobile targets:
 
 ```yaml
 mobile_targets:
-  markus: "0163..."
-  maria: "0176..."
-  bereitschaft: "0151..."
+  - id: markus
+    name: Markus
+    destination: "0163..."
+  - id: bereitschaft
+    name: Bereitschaft
+    destination: "0151..."
 
-door_buttons:
+call_routes:
   - id: wohnung_1
+    name: Wohnung 1
     visitor_entity: binary_sensor.klingeltaste_wohnung_1
-    door_destination: "**610"
-    mobile_targets: [markus, bereitschaft]
-
+    doorbell_number: "11"
+    mobile_target_1: markus
+    mobile_target_2: bereitschaft
+    mobile_target_3: ""
   - id: wohnung_2
+    name: Wohnung 2
     visitor_entity: binary_sensor.klingeltaste_wohnung_2
-    door_destination: "**611"
-    mobile_targets: [maria]
+    doorbell_number: "12"
+    mobile_target_1: markus
+    mobile_target_2: ""
+    mobile_target_3: ""
 ```
 
-This is a bipartite matrix: each button selects exactly one FRITZ!Box
-door-mode destination and zero to three entries from the shared mobile-target
-list. Different door destinations let the FRITZ!Box interpret calls as
-different doorbell buttons, while the mobile matrix determines which external
-numbers ring for each apartment.
+The two-list UI is the routing matrix: phone numbers are entered once under
+**Mobile targets**, while **Call routes** reference their stable IDs. Empty
+`mobile_targets` and `call_routes` lists retain the v1.1.1 single-route
+configuration without migration work.
 
-Implementation constraints for v1.2:
+Implemented invariants:
 
-- retain at most one door SIP account and one mobile SIP account; routes with a
-  FRITZ!Box door-button destination require the door account, while mobile-only
-  routes remain valid;
-- keep the v1.1 maximum of three simultaneous mobile legs per button event;
-- subscribe to all configured Home Assistant entities and preserve the entity
-  ID as the route key;
-- debounce each button independently;
-- reject duplicate entity IDs, route IDs, door destinations and unknown mobile
-  target references during startup;
-- migrate the v1.1 single `visitor_entity`, `sip_destination` and
-  `parallel_destinations` values into one default route without changing its
-  behavior;
-- expose the active/last route ID additively through API v1 without putting
-  telephone numbers or routing secrets into logs;
-- continue allowing only one winning Reolink conversation globally.
+- one optional door SIP account and one optional mobile SIP account;
+- zero or one FRITZ!Box doorbell number plus zero to three mobile targets per
+  route, with at least one enabled call path;
+- one Home Assistant WebSocket subscription for all route entities and an
+  independent debounce state per route;
+- fail-fast validation for duplicate or invalid IDs, entities, doorbell
+  numbers, destinations and target references;
+- one global call controller: the first route or incoming call owns the single
+  Reolink media path and later concurrent calls are rejected, never queued;
+- current/last route metadata and a route catalogue in API v1, without phone
+  numbers or credentials;
+- one route-specific test-call button per route in the companion integration;
+- unchanged RFC 4733 DTMF semantics on both SIP accounts.
 
-The route may later gain a media/camera selector, but that is intentionally
-outside the first v1.2 scope. Multi-button routing should first reuse the one
-already configured Reolink door audio path.
+## Later candidates
+
+Multiple cameras, separate media paths, route-specific door openers and queued
+calls are intentionally outside v1.2. They require a different resource and
+permission model rather than another field in the routing matrix.

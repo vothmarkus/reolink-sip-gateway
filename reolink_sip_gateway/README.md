@@ -1,8 +1,18 @@
-# Reolink SIP Gateway 1.1.1
+# Reolink SIP Gateway 1.2.0
 
 Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann SIP-Anrufe auslösen; optional lassen sich die aktivierten Gateway-Nebenstellen anrufen und direkt mit der Doorbell verbinden.
 
 > Community-Projekt. Nicht offiziell von Reolink oder Home Assistant bereitgestellt oder unterstützt.
+
+## 1.2.0: mehrere Klingeltaster und intuitive Anrufrouten
+
+1.2.0 ergänzt zwei Listen in der Home-Assistant-Konfiguration: Unter **Benannte Mobilziele** wird jede Rufnummer genau einmal mit kurzer ID und Anzeigename angelegt. Unter **Anrufrouten / Klingeltaster** wird anschließend für jeden Besucher-Sensor ausgewählt, welche FRITZ!Box-Klingeltaster-Nummer und welche bis zu drei Mobilziel-IDs angerufen werden.
+
+Eine Route darf nur die Türsprechstelle, nur Mobilziele oder beides verwenden. Beispielsweise kann `doorbell_number: "11"` Klingeltaster 1 und `"12"` Klingeltaster 2 der als IP-Türsprechanlage eingerichteten FRITZ!Box 4050 auslösen. Alle Routen verwenden weiterhin dieselbe konfigurierte Reolink-Kamera und denselben exklusiven Medienweg. Die erste Route beziehungsweise der erste eingehende Anruf gewinnt; ein fast gleichzeitig ausgelöster weiterer Ruf wird verworfen und nicht vorgemerkt.
+
+API v1 liefert einen Rufnummern-freien Routenkatalog sowie aktuelle und letzte Route. Die Companion-Integration 1.2 erzeugt daraus automatisch für jede vorhandene Route einen eigenen **Testanruf**-Button. Die vorhandene Auflegen-Funktion und RFC-4733-DTMF auf beiden SIP-Konten bleiben unverändert.
+
+Bestehende Installationen müssen nichts migrieren: Solange **Benannte Mobilziele** und **Anrufrouten** leer bleiben, erzeugt das Gateway intern genau eine kompatible Standardroute aus `visitor_entity`, `sip_destination` und `parallel_destinations`.
 
 ## 1.1.1: unabhängige SIP-Konten und gemeinsame Anrufannahme
 
@@ -185,11 +195,46 @@ diagnostics:
   log_level: info
 ```
 
+Für mehrere Klingeltaster werden zwischen `sip` und `audio` zusätzlich die
+beiden Listen gepflegt:
+
+```yaml
+mobile_targets:
+  - id: markus
+    name: Markus
+    destination: "0163..."
+  - id: bereitschaft
+    name: Bereitschaft
+    destination: "0151..."
+
+call_routes:
+  - id: wohnung_1
+    name: Wohnung 1
+    visitor_entity: binary_sensor.klingeltaste_wohnung_1
+    doorbell_number: "11"
+    mobile_target_1: markus
+    mobile_target_2: bereitschaft
+    mobile_target_3: ""
+  - id: wohnung_2
+    name: Wohnung 2
+    visitor_entity: binary_sensor.klingeltaste_wohnung_2
+    doorbell_number: "12"
+    mobile_target_1: markus
+    mobile_target_2: ""
+    mobile_target_3: ""
+```
+
+Die IDs beginnen mit einem Kleinbuchstaben und enthalten nur Kleinbuchstaben,
+Ziffern oder Unterstriche. In `mobile_target_1` bis `mobile_target_3` stehen
+die IDs aus `mobile_targets`, nicht die Rufnummern. Nicht benötigte Felder
+bleiben leer. Eine Route ohne `doorbell_number` ist mobil-only; eine Route mit
+leeren Mobilziel-Feldern ruft nur den FRITZ!Box-Klingeltaster.
+
 Bei `sip_registrar: auto` wird beim Start die IPv4-Default-Gateway-Adresse des Home-Assistant-Hosts verwendet. Ein manueller Registrar überschreibt diese Automatik. Kann kein nutzbares IPv4-Gateway gefunden werden, fordert das Startlog dazu auf, den Registrar manuell einzutragen.
 
 Das erste Konto wird in der FRITZ!Box 4050 als **IP-Türsprechanlage** angelegt. `sip_destination: "11"` bezeichnet dort typischerweise Klingeltaster 1; maßgeblich ist die tatsächliche Zuordnung in der FRITZ!Box. Für den Mobil-Parallelruf wird ein weiteres Gerät vom Typ **Telefon → LAN/WLAN** angelegt. Die FRITZ!Box weist diesem Konto die gewünschte ausgehende Festnetznummer zu. `parallel_destinations` enthält eine bis drei externe Zielnummern; doppelte Einträge werden entfernt. Bei `door_call_enabled: false` sind Zugangsdaten und Ziel des Tür-Kontos nicht erforderlich. Im Live-Betrieb muss mindestens Tür- oder Mobilkonto aktiv sein; identische lokale Ports werden nur abgewiesen, wenn beide Konten aktiv sind.
 
-Bei `visitor_entity: auto` wird genau ein aktivierter Reolink-Besucher-Sensor aus der Home-Assistant-Entity-Registry verwendet. Bei keinem oder mehreren Treffern fordert das Startlog zur manuellen Auswahl auf.
+Bei leeren `call_routes` wird mit `visitor_entity: auto` genau ein aktivierter Reolink-Besucher-Sensor aus der Home-Assistant-Entity-Registry verwendet. Bei keinem oder mehreren Treffern fordert das Startlog zur manuellen Auswahl auf. Im Routenmodus wird der jeweilige `binary_sensor` bewusst pro Route eingetragen, damit die Klingeltaster-Zuordnung eindeutig bleibt.
 
 Mit `incoming_calls_enabled: true` nimmt das Gateway Anrufe an jedem aktivierten SIP-Konto automatisch an, sobald der konfigurierte Reolink-Medienweg bereit ist. Bei einer FRITZ!Box wird die unter **Telefonie → Telefoniegeräte** angezeigte interne Nummer des gewünschten Kontos gewählt. Der erste Anruf gewinnt den globalen Call-Slot; ein weiterer gleichzeitiger Anruf an eines der Konten erhält `486 Busy Here`. Ausgehandeltes RFC-4733-DTMF wird auf beiden Konten gleich verarbeitet.
 

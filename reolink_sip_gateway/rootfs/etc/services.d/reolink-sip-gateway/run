@@ -1,8 +1,8 @@
 #!/usr/bin/with-contenv bashio
 set -euo pipefail
 
-# v1.1.1 makes the door account optional and lets both enabled SIP accounts
-# accept incoming calls while preserving the v1.1 mobile fork.
+# v1.2 adds an optional top-level route matrix while preserving the v1.1.1
+# simple route and both independently enabled SIP accounts.
 # The Go gateway still receives the same flat runtime configuration used by
 # v0.5.7-v0.5.9. Grouped UI values are flattened immediately before exec.
 #
@@ -105,6 +105,8 @@ normalize_public_options() {
             parallel_destinations: current("sip"; "parallel_destinations"; []),
             parallel_local_port: current("sip"; "parallel_local_port"; 5071)
           },
+          mobile_targets: (.mobile_targets // []),
+          call_routes: (.call_routes // []),
           audio: {
             echo_cancellation_enabled: current("audio"; "echo_cancellation_enabled"; true),
             webrtc_high_pass_filter_enabled: current("audio"; "webrtc_high_pass_filter_enabled"; true),
@@ -176,12 +178,13 @@ resolve_reolink_visitor_entity() {
 build_runtime_options() {
     local options=${1}
     local ui_channel internal_channel mode stream_channel stream_path runtime
-    local sip_registrar detected_gateway visitor_entity detected_visitor
+    local sip_registrar detected_gateway visitor_entity detected_visitor explicit_route_count
 
     ui_channel="$(jq -r '.reolink.nvr_channel_number' <<<"${options}")"
     mode="$(jq -r '.reolink.reolink_mode' <<<"${options}")"
     sip_registrar="$(jq -r '.sip.sip_registrar' <<<"${options}")"
     visitor_entity="$(jq -r '.call.visitor_entity' <<<"${options}")"
+    explicit_route_count="$(jq -r '.call_routes | length' <<<"${options}")"
 
     if [[ "${sip_registrar,,}" == "auto" ]]; then
         if ! detected_gateway="$(detect_default_ipv4_gateway)"; then
@@ -192,7 +195,7 @@ build_runtime_options() {
         bashio::log.info "SIP registrar auto-detected from Home Assistant host IPv4 default gateway: ${sip_registrar}"
     fi
 
-    if [[ "${visitor_entity,,}" == "auto" ]]; then
+    if (( explicit_route_count == 0 )) && [[ "${visitor_entity,,}" == "auto" ]]; then
         if [[ -z "${SUPERVISOR_TOKEN:-}" ]]; then
             bashio::log.error "Visitor entity is set to 'auto', but SUPERVISOR_TOKEN is missing. Set Call → Reolink visitor sensor manually or enable homeassistant_api."
             return 1
@@ -225,7 +228,9 @@ build_runtime_options() {
         --arg sip_registrar "${sip_registrar}" \
         --arg visitor_entity "${visitor_entity}" \
         '
-          (.reolink + .sip + .audio + .call + .diagnostics)
+          . as $options
+          | ($options.reolink + $options.sip + $options.audio + $options.call + $options.diagnostics
+             + {mobile_targets: ($options.mobile_targets // []), call_routes: ($options.call_routes // [])})
           | del(.nvr_channel_number)
           | .nvr_channel = $channel
           | .reolink_stream_path = $path
@@ -255,7 +260,7 @@ complete_grouping_migration() {
     # state without writing anything to Supervisor.
     if [[ "${original_canonical}" == "${normalized_canonical}" ]]; then
         : > "${GROUPED_OPTIONS_MARKER}"
-        bashio::log.info "Reolink SIP Gateway v1.1.1 grouped option layout confirmed"
+        bashio::log.info "Reolink SIP Gateway v1.2.0 grouped option layout confirmed"
         return 0
     fi
 
@@ -271,7 +276,7 @@ complete_grouping_migration() {
 
     if supervisor_options_write "${normalized}"; then
         : > "${GROUPED_OPTIONS_MARKER}"
-        bashio::log.info "Reolink SIP Gateway v1.1.1 one-time option grouping migration completed"
+        bashio::log.info "Reolink SIP Gateway v1.2.0 one-time option grouping migration completed"
     else
         bashio::log.warning "Could not persist grouped options; runtime translation remains active and migration will be retried on the next start"
     fi

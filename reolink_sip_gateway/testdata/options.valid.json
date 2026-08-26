@@ -24,6 +24,8 @@
     "parallel_destinations": [],
     "parallel_local_port": 5071
   },
+  "mobile_targets": [],
+  "call_routes": [],
   "audio": {
     "echo_cancellation_enabled": true,
     "webrtc_high_pass_filter_enabled": true,

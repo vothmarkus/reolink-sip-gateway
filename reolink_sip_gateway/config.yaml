@@ -1,7 +1,7 @@
 name: Reolink SIP Gateway
-version: "1.1.1"
+version: "1.2.0"
 slug: reolink_sip_gateway
-description: Verbindet Reolink-Klingelereignisse und eingehende SIP-Anrufe mit Zwei-Wege-Audio und einer lokalen Integrations-API.
+description: Verbindet eine Reolink-Türklingel über frei definierbare Klingeltaster-Routen mit SIP, Zwei-Wege-Audio und Home Assistant.
 url: https://github.com/vothmarkus/reolink-sip-gateway
 arch:
   - amd64
@@ -41,6 +41,8 @@ options:
     parallel_password: ""
     parallel_destinations: []
     parallel_local_port: 5071
+  mobile_targets: []
+  call_routes: []
   audio:
     echo_cancellation_enabled: true
     webrtc_high_pass_filter_enabled: true
@@ -83,6 +85,18 @@ schema:
     parallel_destinations:
       - str(1,128)
     parallel_local_port: port
+  mobile_targets:
+    - id: "match(^[a-z][a-z0-9_]{0,63}$)"
+      name: str(1,64)
+      destination: str(1,128)
+  call_routes:
+    - id: "match(^[a-z][a-z0-9_]{0,63}$)"
+      name: str(1,64)
+      visitor_entity: "match(^binary_sensor\\.[a-z0-9_]+$)"
+      doorbell_number: str
+      mobile_target_1: str
+      mobile_target_2: str
+      mobile_target_3: str
   audio:
     echo_cancellation_enabled: bool
     webrtc_high_pass_filter_enabled: bool
