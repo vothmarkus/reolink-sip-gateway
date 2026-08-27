@@ -40,7 +40,7 @@ SIP registration + HA visitor subscription
 
 ### Configuration boundary
 
-The Home Assistant UI exposes five established groups plus the two top-level v1.2 lists `mobile_targets` and `call_routes`. The Go runtime deliberately retains the proven flat configuration contract. This keeps UI evolution away from the media implementation.
+The Home Assistant UI exposes five established groups plus the top-level `call_routes` list immediately after the Call group. A list of route mappings already reaches Home Assistant's supported nesting limit, so it cannot be embedded one level deeper inside `call`. The Go runtime deliberately retains the proven flat configuration contract. This keeps UI evolution away from the media implementation.
 
 v0.5.10 uses a persistent marker for the grouped-layout migration. Before the marker exists, old flat values may take precedence over Supervisor-materialized defaults so direct upgrades preserve user configuration. After migration, grouped values are authoritative and normal starts are read-only with respect to Supervisor options.
 
@@ -71,13 +71,14 @@ to every enabled identity, while one application-level controller remains the
 authority for the single Reolink media path. The API's legacy
 `sip.registered` field therefore represents any enabled registered identity.
 
-v1.2.0 passes the two routing lists through the UI boundary without resolving
-telephone numbers in the shell adapter. Go normalizes and validates the full
-graph, then resolves stable route IDs to runtime call-leg lists. With an empty
-route list it synthesizes the compatible `default` route from the v1.1.1
-visitor entity, door destination and mobile destinations. Explicit routes
-replace only that trigger/target layer; no route contains a camera, NVR
-channel, media, DTMF or opener selector.
+v1.2.2 makes `call_routes` the only public trigger/target model. A fresh
+installation starts with one editable `default` route. Each route holds its
+visitor entity, optional doorbell number and up to three direct mobile numbers;
+Go validates and resolves it to runtime call legs. The shell adapter performs a
+one-time, compare-before-write migration of the v1.1 simple fields and the
+v1.2.0/1.2.1 target catalogue, preserving existing route identity and values.
+A second persistent marker makes subsequent starts read-only again. No route
+contains a camera, NVR channel, media, DTMF or opener selector.
 
 ## Home Assistant integration boundary
 

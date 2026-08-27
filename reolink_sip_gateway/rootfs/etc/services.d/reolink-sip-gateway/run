@@ -1,8 +1,10 @@
 #!/usr/bin/with-contenv bashio
 set -euo pipefail
 
-# v1.2 adds an optional top-level route matrix while preserving the v1.1.1
-# simple route and both independently enabled SIP accounts.
+# v1.2.2 makes the route matrix the only public trigger/target model. It
+# migrates the v1.1 simple route and v1.2 named-target catalogue into direct
+# per-route mobile numbers while preserving both independently enabled SIP
+# accounts.
 # The Go gateway still receives the same flat runtime configuration used by
 # v0.5.7-v0.5.9. Grouped UI values are flattened immediately before exec.
 #
@@ -22,6 +24,7 @@ set -euo pipefail
 
 OPTIONS_FILE="${OPTIONS_FILE:-/data/options.json}"
 GROUPED_OPTIONS_MARKER="${GROUPED_OPTIONS_MARKER:-/data/.reolink-sip-gateway-grouped-options-v1}"
+ROUTING_OPTIONS_MARKER="${ROUTING_OPTIONS_MARKER:-/data/.reolink-sip-gateway-direct-routes-v1}"
 
 supervisor_options_write() {
     local options=${1}
@@ -79,7 +82,106 @@ normalize_public_options() {
             else 1
             end;
 
-        {
+        def clean_string:
+            if type == "string" then gsub("^[[:space:]]+|[[:space:]]+$"; "")
+            elif . == null then ""
+            else tostring
+            end;
+
+        def old_target_destination($reference; $targets):
+            ($reference | clean_string) as $id
+            | if $id == "" then ""
+              else ([
+                  $targets[]?
+                  | select((.id | clean_string) == $id)
+                  | (.destination | clean_string)
+                ] | first // $id)
+              end;
+
+        def direct_route($route; $targets):
+            {
+              id: ($route.id | clean_string),
+              name: ($route.name | clean_string),
+              visitor_entity: ($route.visitor_entity | clean_string),
+              doorbell_number: ($route.doorbell_number | clean_string),
+              mobile_number_1: (
+                if $route | has("mobile_number_1") then $route.mobile_number_1 | clean_string
+                else old_target_destination($route.mobile_target_1; $targets)
+                end
+              ),
+              mobile_number_2: (
+                if $route | has("mobile_number_2") then $route.mobile_number_2 | clean_string
+                else old_target_destination($route.mobile_target_2; $targets)
+                end
+              ),
+              mobile_number_3: (
+                if $route | has("mobile_number_3") then $route.mobile_number_3 | clean_string
+                else old_target_destination($route.mobile_target_3; $targets)
+                end
+              )
+            };
+
+        def prefilled_default_route:
+            has("mobile_number_1")
+            and has("mobile_number_2")
+            and has("mobile_number_3")
+            and (((.id // "") | clean_string) == "default")
+            and (((.name // "") | clean_string) == "Standardroute")
+            and (((.visitor_entity // "") | ascii_downcase | clean_string) == "auto")
+            and (((.doorbell_number // "") | clean_string) == "11")
+            and (((.mobile_number_1 // "") | clean_string) == "")
+            and (((.mobile_number_2 // "") | clean_string) == "")
+            and (((.mobile_number_3 // "") | clean_string) == "");
+
+        . as $source
+        | ($source.mobile_targets // []) as $old_targets
+        | ($source.call_routes // []) as $source_routes
+        | (
+            $source | has("visitor_entity")
+            or (($source.call // {}) | has("visitor_entity"))
+            or ($source | has("sip_destination"))
+            or (($source.sip // {}) | has("sip_destination"))
+            or ($source | has("parallel_destinations"))
+            or (($source.sip // {}) | has("parallel_destinations"))
+          ) as $has_simple_route
+        | (
+            ($source_routes | length) == 1
+            and ($source_routes[0] | prefilled_default_route)
+          ) as $only_prefilled_default
+        | (
+            ($source_routes | length) > 0
+            and (($has_simple_route and $only_prefilled_default) | not)
+          ) as $has_explicit_routes
+        | (current("sip"; "parallel_destinations"; []) // []) as $old_mobile_numbers
+        | (
+            if $has_explicit_routes then
+              [$source_routes[] | direct_route(.; $old_targets)]
+            elif $has_simple_route then
+              [{
+                id: "default",
+                name: "Standardroute",
+                visitor_entity: current("call"; "visitor_entity"; "auto"),
+                doorbell_number: current("sip"; "sip_destination"; "11"),
+                mobile_number_1: ($old_mobile_numbers[0] // ""),
+                mobile_number_2: ($old_mobile_numbers[1] // ""),
+                mobile_number_3: ($old_mobile_numbers[2] // "")
+              }]
+            elif ($source_routes | length) > 0 then
+              [$source_routes[] | direct_route(.; [])]
+            else
+              [{
+                id: "default",
+                name: "Standardroute",
+                visitor_entity: "auto",
+                doorbell_number: "11",
+                mobile_number_1: "",
+                mobile_number_2: "",
+                mobile_number_3: ""
+              }]
+            end
+          ) as $direct_routes
+
+        | {
           reolink: {
             reolink_host: current("reolink"; "reolink_host"; "192.168.177.50"),
             reolink_username: current("reolink"; "reolink_username"; "admin"),
@@ -94,26 +196,21 @@ normalize_public_options() {
             door_call_enabled: current("sip"; "door_call_enabled"; true),
             sip_username: current("sip"; "sip_username"; ""),
             sip_password: current("sip"; "sip_password"; ""),
-            sip_destination: current("sip"; "sip_destination"; "**610"),
             sip_display_name: current("sip"; "sip_display_name"; "Haustür"),
             sip_codec_preference: current("sip"; "sip_codec_preference"; "pcma"),
-            sip_registrar_port: current("sip"; "sip_registrar_port"; 5060),
-            sip_local_port: current("sip"; "sip_local_port"; 5070),
             parallel_call_enabled: current("sip"; "parallel_call_enabled"; false),
             parallel_username: current("sip"; "parallel_username"; ""),
             parallel_password: current("sip"; "parallel_password"; ""),
-            parallel_destinations: current("sip"; "parallel_destinations"; []),
+            sip_registrar_port: current("sip"; "sip_registrar_port"; 5060),
+            sip_local_port: current("sip"; "sip_local_port"; 5070),
             parallel_local_port: current("sip"; "parallel_local_port"; 5071)
           },
-          mobile_targets: (.mobile_targets // []),
-          call_routes: (.call_routes // []),
           audio: {
             echo_cancellation_enabled: current("audio"; "echo_cancellation_enabled"; true),
             webrtc_high_pass_filter_enabled: current("audio"; "webrtc_high_pass_filter_enabled"; true),
             webrtc_noise_suppression_enabled: current("audio"; "webrtc_noise_suppression_enabled"; true)
           },
           call: {
-            visitor_entity: current("call"; "visitor_entity"; "auto"),
             incoming_calls_enabled: current("call"; "incoming_calls_enabled"; false),
             incoming_allowed_callers: current("call"; "incoming_allowed_callers"; ["*"]),
             incoming_connection_tone_enabled: current("call"; "incoming_connection_tone_enabled"; true),
@@ -122,6 +219,7 @@ normalize_public_options() {
             rtp_inactivity_timeout_seconds: current("call"; "rtp_inactivity_timeout_seconds"; 15),
             max_call_duration_seconds: current("call"; "max_call_duration_seconds"; 300)
           },
+          call_routes: $direct_routes,
           diagnostics: {
             log_level: current("diagnostics"; "log_level"; "info"),
             dry_run: current("diagnostics"; "dry_run"; true)
@@ -178,13 +276,12 @@ resolve_reolink_visitor_entity() {
 build_runtime_options() {
     local options=${1}
     local ui_channel internal_channel mode stream_channel stream_path runtime
-    local sip_registrar detected_gateway visitor_entity detected_visitor explicit_route_count
+    local sip_registrar detected_gateway detected_visitor auto_route_count
 
     ui_channel="$(jq -r '.reolink.nvr_channel_number' <<<"${options}")"
     mode="$(jq -r '.reolink.reolink_mode' <<<"${options}")"
     sip_registrar="$(jq -r '.sip.sip_registrar' <<<"${options}")"
-    visitor_entity="$(jq -r '.call.visitor_entity' <<<"${options}")"
-    explicit_route_count="$(jq -r '.call_routes | length' <<<"${options}")"
+    auto_route_count="$(jq -r '[.call_routes[] | select((.visitor_entity | ascii_downcase) == "auto")] | length' <<<"${options}")"
 
     if [[ "${sip_registrar,,}" == "auto" ]]; then
         if ! detected_gateway="$(detect_default_ipv4_gateway)"; then
@@ -195,17 +292,21 @@ build_runtime_options() {
         bashio::log.info "SIP registrar auto-detected from Home Assistant host IPv4 default gateway: ${sip_registrar}"
     fi
 
-    if (( explicit_route_count == 0 )) && [[ "${visitor_entity,,}" == "auto" ]]; then
+    if (( auto_route_count > 1 )); then
+        bashio::log.error "More than one call route uses visitor_entity 'auto'. Keep 'auto' on only one route and select the other visitor entities explicitly."
+        return 1
+    fi
+
+    if (( auto_route_count == 1 )); then
         if [[ -z "${SUPERVISOR_TOKEN:-}" ]]; then
-            bashio::log.error "Visitor entity is set to 'auto', but SUPERVISOR_TOKEN is missing. Set Call → Reolink visitor sensor manually or enable homeassistant_api."
+            bashio::log.error "A call route uses visitor_entity 'auto', but SUPERVISOR_TOKEN is missing. Set its visitor entity manually or enable homeassistant_api."
             return 1
         fi
         if ! detected_visitor="$(resolve_reolink_visitor_entity 2>&1)"; then
             bashio::log.error "Visitor entity auto-detection failed: ${detected_visitor}"
             return 1
         fi
-        visitor_entity=${detected_visitor}
-        bashio::log.info "Home Assistant Reolink visitor entity auto-detected: ${visitor_entity}"
+        bashio::log.info "Home Assistant Reolink visitor entity auto-detected for the default route: ${detected_visitor}"
     fi
 
     if [[ ! "${ui_channel}" =~ ^[0-9]+$ ]] || (( ui_channel < 1 || ui_channel > 256 )); then
@@ -226,41 +327,46 @@ build_runtime_options() {
         --argjson channel "${internal_channel}" \
         --arg path "${stream_path}" \
         --arg sip_registrar "${sip_registrar}" \
-        --arg visitor_entity "${visitor_entity}" \
+        --arg detected_visitor "${detected_visitor:-}" \
         '
           . as $options
           | ($options.reolink + $options.sip + $options.audio + $options.call + $options.diagnostics
-             + {mobile_targets: ($options.mobile_targets // []), call_routes: ($options.call_routes // [])})
+             + {call_routes: ($options.call_routes // [])})
           | del(.nvr_channel_number)
           | .nvr_channel = $channel
           | .reolink_stream_path = $path
           | .sip_registrar = $sip_registrar
-          | .visitor_entity = $visitor_entity
+          | .call_routes = [.call_routes[]
+              | if (.visitor_entity | ascii_downcase) == "auto"
+                then .visitor_entity = $detected_visitor
+                else .
+                end]
           | .echo_cancellation_search_window_ms = 300
         ' <<<"${options}")"
 
     printf '%s\n' "${runtime}" > /tmp/reolink-sip-gateway-runtime-options.json
 }
 
-complete_grouping_migration() {
+complete_option_migrations() {
     local original=${1}
     local normalized=${2}
     local original_canonical normalized_canonical current current_canonical
 
-    # A marker means migration already completed successfully (or the current
-    # configuration was already purely grouped). Normal starts are read-only.
-    if [[ -e "${GROUPED_OPTIONS_MARKER}" ]]; then
+    # Only a successful grouping and direct-route migration makes normal starts
+    # read-only. Existing installations may already have the older grouping
+    # marker while still needing the v1.2.2 route conversion.
+    if [[ -e "${GROUPED_OPTIONS_MARKER}" && -e "${ROUTING_OPTIONS_MARKER}" ]]; then
         return 0
     fi
 
     original_canonical="$(jq -cS . <<<"${original}")"
     normalized_canonical="$(jq -cS . <<<"${normalized}")"
 
-    # 0.5.8/0.5.9 users may already have a clean grouped layout. Confirm that
-    # state without writing anything to Supervisor.
+    # Fresh v1.2.2 installations already match the normalized representation.
     if [[ "${original_canonical}" == "${normalized_canonical}" ]]; then
         : > "${GROUPED_OPTIONS_MARKER}"
-        bashio::log.info "Reolink SIP Gateway v1.2.1 grouped option layout confirmed"
+        : > "${ROUTING_OPTIONS_MARKER}"
+        bashio::log.info "Reolink SIP Gateway v1.2.2 direct-route option layout confirmed"
         return 0
     fi
 
@@ -270,15 +376,16 @@ complete_grouping_migration() {
     current="$(load_public_options)"
     current_canonical="$(jq -cS . <<<"${current}")"
     if [[ "${current_canonical}" != "${original_canonical}" ]]; then
-        bashio::log.warning "App options changed while the legacy grouping migration was being prepared; skipping stale persistence"
+        bashio::log.warning "App options changed while the v1.2.2 option migration was being prepared; skipping stale persistence"
         return 0
     fi
 
     if supervisor_options_write "${normalized}"; then
         : > "${GROUPED_OPTIONS_MARKER}"
-        bashio::log.info "Reolink SIP Gateway v1.2.1 one-time option grouping migration completed"
+        : > "${ROUTING_OPTIONS_MARKER}"
+        bashio::log.info "Reolink SIP Gateway v1.2.2 one-time direct-route migration completed"
     else
-        bashio::log.warning "Could not persist grouped options; runtime translation remains active and migration will be retried on the next start"
+        bashio::log.warning "Could not persist v1.2.2 options; runtime translation remains active and migration will be retried on the next start"
     fi
 }
 
@@ -290,5 +397,5 @@ else
 fi
 NORMALIZED_OPTIONS="$(normalize_public_options "${PUBLIC_OPTIONS}" "${PREFER_LEGACY}")"
 build_runtime_options "${NORMALIZED_OPTIONS}"
-complete_grouping_migration "${PUBLIC_OPTIONS}" "${NORMALIZED_OPTIONS}"
+complete_option_migrations "${PUBLIC_OPTIONS}" "${NORMALIZED_OPTIONS}"
 exec /usr/bin/reolink-sip-gateway -config /tmp/reolink-sip-gateway-runtime-options.json

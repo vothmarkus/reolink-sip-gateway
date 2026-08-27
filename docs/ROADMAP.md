@@ -2,50 +2,40 @@
 
 ## v1.2: multiple doorbell buttons and routing matrix — implemented
 
-v1.2 separates reusable mobile targets from call routes. Each route maps one
-Home Assistant visitor entity to an optional FRITZ!Box doorbell number and up
-to three optional mobile targets:
+As finalized in v1.2.2, each route maps one Home Assistant visitor entity to an
+optional FRITZ!Box doorbell number and up to three direct mobile numbers:
 
 ```yaml
-mobile_targets:
-  - id: markus
-    name: Markus
-    destination: "0163..."
-  - id: bereitschaft
-    name: Bereitschaft
-    destination: "0151..."
-
 call_routes:
   - id: wohnung_1
     name: Wohnung 1
     visitor_entity: binary_sensor.klingeltaste_wohnung_1
     doorbell_number: "11"
-    mobile_target_1: markus
-    mobile_target_2: bereitschaft
-    mobile_target_3: ""
+    mobile_number_1: "0163..."
+    mobile_number_2: "0151..."
+    mobile_number_3: ""
   - id: wohnung_2
     name: Wohnung 2
     visitor_entity: binary_sensor.klingeltaste_wohnung_2
     doorbell_number: "12"
-    mobile_target_1: markus
-    mobile_target_2: ""
-    mobile_target_3: ""
+    mobile_number_1: "0163..."
+    mobile_number_2: ""
+    mobile_number_3: ""
 ```
 
-The two-list UI is the routing matrix: phone numbers are entered once under
-**Mobile targets**, while **Call routes** reference their stable IDs. Empty
-`mobile_targets` and `call_routes` lists retain the v1.1.1 single-route
-configuration without migration work.
+The UI pre-creates one editable default route and places the route list directly
+below the Call group. Upgrades convert the former simple fields or named target
+references once and losslessly into this representation.
 
 Implemented invariants:
 
 - one optional door SIP account and one optional mobile SIP account;
-- zero or one FRITZ!Box doorbell number plus zero to three mobile targets per
+- zero or one FRITZ!Box doorbell number plus zero to three direct mobile numbers per
   route, with at least one enabled call path;
 - one Home Assistant WebSocket subscription for all route entities and an
   independent debounce state per route;
 - fail-fast validation for duplicate or invalid IDs, entities, doorbell
-  numbers, destinations and target references;
+  numbers and duplicate destinations within one route;
 - one global call controller: the first route or incoming call owns the single
   Reolink media path and later concurrent calls are rejected, never queued;
 - current/last route metadata and a route catalogue in API v1, without phone

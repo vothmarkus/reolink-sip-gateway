@@ -1,5 +1,5 @@
 name: Reolink SIP Gateway
-version: "1.2.1"
+version: "1.2.2"
 slug: reolink_sip_gateway
 description: Verbindet eine Reolink-Türklingel über frei definierbare Klingeltaster-Routen mit SIP, Zwei-Wege-Audio und Home Assistant.
 url: https://github.com/vothmarkus/reolink-sip-gateway
@@ -31,24 +31,19 @@ options:
     door_call_enabled: true
     sip_username: ""
     sip_password: ""
-    sip_destination: "**610"
     sip_display_name: Haustür
     sip_codec_preference: pcma
     parallel_call_enabled: false
     parallel_username: ""
     parallel_password: ""
-    parallel_destinations: []
     sip_registrar_port: 5060
     sip_local_port: 5070
     parallel_local_port: 5071
-  mobile_targets: []
-  call_routes: []
   audio:
     echo_cancellation_enabled: true
     webrtc_high_pass_filter_enabled: true
     webrtc_noise_suppression_enabled: true
   call:
-    visitor_entity: auto
     incoming_calls_enabled: false
     incoming_allowed_callers:
       - "*"
@@ -57,6 +52,14 @@ options:
     ring_timeout_seconds: 30
     rtp_inactivity_timeout_seconds: 15
     max_call_duration_seconds: 300
+  call_routes:
+    - id: default
+      name: Standardroute
+      visitor_entity: auto
+      doorbell_number: "11"
+      mobile_number_1: ""
+      mobile_number_2: ""
+      mobile_number_3: ""
   diagnostics:
     dry_run: true
     log_level: info
@@ -74,35 +77,19 @@ schema:
     door_call_enabled: bool
     sip_username: str
     sip_password: password
-    sip_destination: str
     sip_display_name: str
     sip_codec_preference: list(auto|pcma|pcmu)
     parallel_call_enabled: bool
     parallel_username: str
     parallel_password: password
-    parallel_destinations:
-      - str(1,128)
     sip_registrar_port: port
     sip_local_port: port
     parallel_local_port: port
-  mobile_targets:
-    - id: "match(^[a-z][a-z0-9_]{0,63}$)"
-      name: str(1,64)
-      destination: str(1,128)
-  call_routes:
-    - id: "match(^[a-z][a-z0-9_]{0,63}$)"
-      name: str(1,64)
-      visitor_entity: "match(^binary_sensor\\.[a-z0-9_]+$)"
-      doorbell_number: str
-      mobile_target_1: str
-      mobile_target_2: str
-      mobile_target_3: str
   audio:
     echo_cancellation_enabled: bool
     webrtc_high_pass_filter_enabled: bool
     webrtc_noise_suppression_enabled: bool
   call:
-    visitor_entity: "match(^(auto|binary_sensor\\.[a-z0-9_]+)$)"
     incoming_calls_enabled: bool
     incoming_allowed_callers:
       - str(1,128)
@@ -111,6 +98,14 @@ schema:
     ring_timeout_seconds: int(5,180)
     rtp_inactivity_timeout_seconds: int(5,120)
     max_call_duration_seconds: int(15,3600)
+  call_routes:
+    - id: "match(^[a-z][a-z0-9_]{0,63}$)"
+      name: str(1,64)
+      visitor_entity: "match(^(auto|binary_sensor\\.[a-z0-9_]+)$)"
+      doorbell_number: str
+      mobile_number_1: str
+      mobile_number_2: str
+      mobile_number_3: str
   diagnostics:
     dry_run: bool
     log_level: list(debug|info|warn|error)

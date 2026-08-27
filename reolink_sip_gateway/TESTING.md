@@ -1,8 +1,8 @@
-# Prüfprotokoll 1.2.1
+# Prüfprotokoll 1.2.2
 
 ## Ziel
 
-1.2.0 ergänzt mehrere Klingeltaster-Routen mit je einem Besucher-Sensor, optionaler FRITZ!Box-Klingeltaster-Nummer und maximal drei referenzierten Mobilzielen. 1.2.1 fasst zusätzlich die drei erweiterten SIP-Ports am Ende des SIP-Abschnitts zusammen. Zu prüfen sind die identische Optionsreihenfolge in allen öffentlichen Darstellungen, die unveränderte Runtimeübersetzung, Matrixauflösung, unabhängige Entprellung, routenspezifische API-Testanrufe, der globale Busy-Schutz, die 1.1.1-Kompatibilitätsroute, DTMF auf beiden Konten und weiterhin exakt eine Reolink-Mediensitzung.
+1.2.2 macht die direkt unter **Anruf** platzierte Routenliste zum einzigen öffentlichen Routingmodell. Jede Route besitzt einen Besucher-Sensor, eine optionale FRITZ!Box-Klingeltaster-Nummer und maximal drei direkte Mobilrufnummern. Zu prüfen sind die vorausgefüllte editierbare Standardroute, verlustfreie Migration der 1.1- und 1.2-Vorwerte, unveränderte Matrixauflösung, unabhängige Entprellung, routenspezifische API-Testanrufe, der globale Busy-Schutz, DTMF auf beiden Konten und weiterhin exakt eine Reolink-Mediensitzung.
 
 ## Softwareprüfungen vor Release
 
@@ -15,35 +15,37 @@
 - statischer amd64-Go-Releasebuild
 - UI-Adaptertest: gruppierte `testdata/options.valid.json` → flache `testdata/options.runtime.valid.json`; anschließend `-check-config` gegen die Runtime-Datei
 - YAML-/JSON-Prüfung von App-Konfiguration und Übersetzungen
-- identische fünf bestehende Gruppen sowie die beiden Routenlisten in `options`, `schema`, DE, EN und Testkonfiguration
+- identische fünf bestehende Gruppen sowie `call_routes` unmittelbar hinter `call` in `options`, `schema`, DE, EN und Testkonfiguration
 - identische SIP-Feldreihenfolge in `options`, `schema`, DE, EN und Fixture: beide Konto-Blöcke vor `sip_registrar_port`, `sip_local_port` und `parallel_local_port`
 - Bash-Syntaxprüfung des s6-Startskripts
-- Versionsprüfung 1.2.1 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
+- Versionsprüfung 1.2.2 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
 - Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
 - expliziter Test der nativen Statistikbits 0…7
 
-## Ergänzungen 1.2.0
+## Ergänzungen 1.2.2
 
-- Leere `mobile_targets`- und `call_routes`-Listen ergeben exakt eine aufgelöste Route `default` aus den bisherigen Einzelwerten. Explizit konfigurierte Routen ignorieren diese Altwerte, ohne sie zu löschen oder zurückzuschreiben.
-- Routen- und Mobilziel-IDs werden getrimmt und streng validiert. Doppelte IDs, Besucher-Sensoren, Klingeltaster-Nummern, normalisierte Rufnummern und Zielreferenzen sowie unbekannte Referenzen oder leere Rufwege schlagen beim Start fehl.
+- Eine Neuinstallation enthält exakt die editierbare Route `default` mit Name `Standardroute`, Besucher-Sensor `auto`, Klingeltaster `11` und drei leeren Mobilnummern.
+- Eine 1.1-Konfiguration wird einmalig in diese Route überführt; Besucher-Sensor, Türziel und bis zu drei Mobilnummern bleiben erhalten. 1.2.0/1.2.1-Routen behalten ID, Name, Sensor und Klingeltaster; Katalogreferenzen und bereits direkt eingetragene Werte werden zu direkten Nummern.
+- Der Migrationsschreibvorgang erfolgt nur nach Vergleich mit den unveränderten Quelloptionen. Nach dem neuen persistenten Marker bleiben normale Starts read-only.
+- Routen-IDs werden getrimmt und streng validiert. Doppelte IDs, Besucher-Sensoren, Klingeltaster-Nummern, normalisierte Rufnummern innerhalb derselben Route oder leere Rufwege schlagen beim Start fehl. Dieselbe Mobilnummer in unterschiedlichen Routen ist erlaubt.
 - Eine Route kann Tür-only, Mobil-only oder kombiniert sein. Die Validierung berücksichtigt die beiden Konto-Schalter und verlangt für jede Live-Route mindestens einen tatsächlich aktivierten Rufweg.
 - Alle Besucher-Sensoren werden in einer Home-Assistant-WebSocket-Subscription überwacht. Der REST-Fallback hält je Entity einen eigenen Flankenzustand; Entprellung erfolgt je Route, während der globale Call-Controller weiterhin nur einen Gewinner zulässt.
 - API v1 liefert einen Routenkatalog ohne Telefonnummern, aktuelle/letzte Route und `POST /api/v1/routes/{route_id}/test`. Der Alt-Endpunkt startet kompatibel die erste aufgelöste Route; unbekannte IDs ergeben `404 route_not_found`.
 - Status und Testanruf-Verfügbarkeit werden je Route aus den tatsächlich benötigten und registrierten SIP-Konten berechnet. Ein Tür-only-Test benötigt keine Mobilregistrierung und umgekehrt.
 - Kein Routenmodell enthält Kamera-, NVR-Kanal-, Medien-, DTMF- oder Türöffnerauswahl. Genau eine Reolink-Konfiguration und Mediensitzung bleibt die globale Ressource.
 
-## FRITZ!Box-4050-Hardwaretest 1.2.1
+## FRITZ!Box-4050-Hardwaretest 1.2.2
 
 1. Zwei Klingeltaster-Ziele in der als IP-Türsprechanlage eingerichteten FRITZ!Box 4050 prüfen, beispielsweise `11` für Klingeltaster 1 und `12` für Klingeltaster 2. Die FRITZ!Box 6690 bleibt nur Modem.
 2. Zwei unterschiedliche Besucher-Entities als Routen anlegen und beiden unterschiedliche `doorbell_number`-Werte geben. Jede reale Klingeltaste muss exakt die erwartete FRITZ!Fon-Türdarstellung auslösen.
-3. Drei benannte Mobilziele anlegen und als Matrix unterschiedlich auf beide Routen verteilen. Bei jeder Taste dürfen nur deren zugeordnete Mobiltelefone klingeln; ein gemeinsames Ziel muss in beiden Routen funktionieren, ohne doppelt gepflegte Rufnummer.
+3. Bis zu drei Mobilrufnummern direkt je Route eintragen und unterschiedlich auf beide Routen verteilen. Bei jeder Taste dürfen nur deren zugeordnete Mobiltelefone klingeln; dieselbe Nummer muss in mehreren Routen funktionieren.
 4. In der Companion-Integration muss je Route genau ein Testanruf-Button mit dem Routennamen erscheinen. Beide Buttons einzeln auslösen und die Zuordnung zu Türziel und Mobiltelefonen prüfen.
 5. Eine Tür-only- und eine Mobil-only-Route testen. Der jeweilige Testanruf muss auch dann verfügbar sein, wenn das für diese Route nicht benötigte Konto deaktiviert ist.
 6. Zwei Routen nahezu gleichzeitig auslösen. Nur die erste darf einen Rufaufbau und die eine Reolink-Mediensitzung erhalten; die zweite darf weder parallel starten noch nach Gesprächsende nachgeholt werden.
 7. Dieselbe Route innerhalb der Entprellzeit erneut, danach die andere Route auslösen. Nur die Wiederholung derselben Route wird entprellt; die andere erreicht den globalen Busy-Entscheid und bleibt ebenfalls unqueued.
 8. Je einen Tür- und Mobilzweig zuerst annehmen und zusätzlich einen Fast-Simultaneous-Answer-Test durchführen. CANCEL beziehungsweise ACK+BYE müssen alle Verlierer sauber beenden.
 9. Eingehende Anrufe an beide Konten und DTMF in beiden Richtungen prüfen. Das Verhalten muss gegenüber 1.1.1 identisch sein; Route darf höchstens als zusätzliche Diagnose erscheinen.
-10. Abschließend beide Routenlisten leeren und die bisherige Einzelkonfiguration erneut starten. Registrierung, Standard-Testanruf und Besuchertrigger müssen ohne manuelle Migration funktionieren.
+10. Eine Kopie alter 1.1-Optionen sowie eine 1.2.1-Konfiguration mit Mobilzielkatalog aktualisieren. Nach genau einem Start müssen die migrierten Routen editierbar vorliegen und Registrierung, Testanrufe sowie Besuchertrigger unverändert funktionieren.
 
 ## Ergänzungen 1.1.1
 
@@ -52,7 +54,7 @@
 - Beide Konten übernehmen `incoming_calls_enabled` und dieselbe Anruferliste. Eingehende INVITEs beider lokalen Ports erreichen denselben globalen Controller: Der erste Anruf gewinnt, ein weiterer erhält `486 Busy Here`.
 - Ausgehandeltes RFC-4733-DTMF wird bei ein- und ausgehenden Gesprächen beider Konten identisch als API-Ereignis ausgegeben.
 - API v1 meldet Aktivierungs- und Registrierungsstatus beider Konten. Das kompatible Feld `sip.registered` ist wahr, sobald mindestens ein aktiviertes Konto registriert ist; damit sind Bereitschaft und Testanruf auch im Mobil-only-Betrieb korrekt.
-- Die deutsche UI beschreibt das erste Konto ausdrücklich als FRITZ!Box-IP-Türsprechanlage und erklärt `sip_destination`, beispielsweise `11` als typischen Klingeltaster 1.
+- Die deutsche UI beschreibt das erste Konto ausdrücklich als FRITZ!Box-IP-Türsprechanlage; ab 1.2.2 erklärt die Route `doorbell_number`, beispielsweise `11` als typischen Klingeltaster 1.
 
 ## Ergänzungen 1.1.0
 

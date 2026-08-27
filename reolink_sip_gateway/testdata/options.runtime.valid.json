@@ -1,5 +1,4 @@
 {
-  "visitor_entity": "binary_sensor.reolink_video_doorbell_visitor",
   "reolink_host": "192.168.177.50",
   "reolink_username": "test-user",
   "reolink_password": "test-password",
@@ -17,17 +16,24 @@
   "sip_registrar_port": 5060,
   "sip_username": "621",
   "sip_password": "test-password",
-  "sip_destination": "**610",
   "sip_local_port": 5070,
   "sip_display_name": "Haustür",
   "sip_codec_preference": "pcma",
   "parallel_call_enabled": false,
   "parallel_username": "",
   "parallel_password": "",
-  "parallel_destinations": [],
   "parallel_local_port": 5071,
-  "mobile_targets": [],
-  "call_routes": [],
+  "call_routes": [
+    {
+      "id": "default",
+      "name": "Standardroute",
+      "visitor_entity": "binary_sensor.reolink_video_doorbell_visitor",
+      "doorbell_number": "11",
+      "mobile_number_1": "",
+      "mobile_number_2": "",
+      "mobile_number_3": ""
+    }
+  ],
   "incoming_calls_enabled": false,
   "incoming_allowed_callers": [
     "*"

@@ -40,9 +40,6 @@ configuration:
       sip_password:
         name: Passwort des Türsprechstellen-Kontos
         description: Kennwort der in der FRITZ!Box angelegten IP-Türsprechanlage. Nur bei aktiviertem Türsprechstellen-Konto erforderlich.
-      sip_destination:
-        name: FRITZ!Box-Türziel / Klingeltaster
-        description: Rufziel für den einfachen Modus ohne Anrufrouten. Beispielsweise steht 11 typischerweise für Klingeltaster 1 in der FRITZ!Box. Bei konfigurierten Anrufrouten wird stattdessen deren Feld „doorbell_number“ verwendet.
       sip_display_name:
         name: Anzeigename der Türsprechstelle
         description: Name, der beim Türsprechstellen-Ruf auf dem SIP-Endgerät erscheinen soll.
@@ -58,9 +55,6 @@ configuration:
       parallel_password:
         name: Passwort des Mobilruf-Kontos
         description: Kennwort des Mobilruf-IP-Telefons. Nur bei aktiviertem Mobilruf-Konto erforderlich.
-      parallel_destinations:
-        name: Mobilruf-Ziele
-        description: Eine bis maximal drei gleichzeitig anzurufende externe Rufnummern im einfachen Modus ohne Anrufrouten. Im Routenmodus werden benannte Mobilziele und deren IDs verwendet.
       sip_registrar_port:
         name: SIP-Port (erweitert)
         description: UDP-Port des SIP-Registrars; normalerweise 5060.
@@ -70,12 +64,6 @@ configuration:
       parallel_local_port:
         name: Lokaler SIP-Port des Mobilruf-Kontos (erweitert)
         description: UDP-Port des Mobilruf-Kontos; standardmäßig 5071 und bei gleichzeitig aktivem Tür-Konto verschieden von dessen Port.
-  mobile_targets:
-    name: Benannte Mobilziele (Routenmodus)
-    description: Optionaler gemeinsamer Rufnummernkatalog für mehrere Klingeltaster. Jeder Eintrag erhält eine kurze ID (z. B. „markus“), einen Anzeigenamen und die zu wählende Rufnummer. Die Rufnummer muss dadurch nur einmal gepflegt werden. Die Liste wird erst zusammen mit „Anrufrouten“ aktiv.
-  call_routes:
-    name: Anrufrouten / Klingeltaster (Routenmodus)
-    description: Optional. Jeder Eintrag verbindet eine eindeutige Routen-ID und einen Anzeigenamen mit genau einem binary_sensor, optional einer FRITZ!Box-Klingeltaster-Nummer (z. B. 11) und bis zu drei IDs aus „Benannte Mobilziele“. Nicht verwendete Felder mobile_target_1 bis mobile_target_3 bleiben leer. Sobald mindestens eine Route vorhanden ist, ersetzt diese Liste die einfachen Felder Besucher-Sensor, Türziel und Mobilruf-Ziele.
   audio:
     name: Audio
     description: Echounterdrückung und WebRTC-Audiofilter. Die Reolink-Latenz wird beim Start automatisch kalibriert.
@@ -91,11 +79,8 @@ configuration:
         description: Aktiviert die WebRTC-Rauschunterdrückung mit festem, bewährtem Profil „moderate“.
   call:
     name: Anruf
-    description: Klingelauslöser, eingehende SIP-Anrufe und zeitliche Begrenzungen.
+    description: Eingehende SIP-Anrufe und zeitliche Begrenzungen. Die zugehörigen Klingelauslöser und Rufziele stehen direkt darunter in „Anrufrouten / Klingeltaster“.
     fields:
-      visitor_entity:
-        name: Reolink-Besucher-Sensor
-        description: Auslöser für den einfachen Modus ohne Anrufrouten. „auto“ verwendet automatisch den aktivierten Besucher-/Klingelsensor der Reolink-Integration. Im Routenmodus trägt jede Route ihren eigenen binary_sensor ein; weiterhin wird genau eine Reolink-Kamera verwendet.
       incoming_calls_enabled:
         name: Eingehende SIP-Anrufe auf allen Konten zulassen
         description: Gilt für jedes aktivierte SIP-Konto. Der erste eingehende Anruf erhält den exklusiven Reolink-Medienweg; weitere Anrufe werden mit 486 Busy Here abgewiesen. Es werden nur Anrufe vom Registrar und aus der Anruferliste akzeptiert. RFC-4733-DTMF wird auf beiden Konten ausgehandelt.
@@ -117,6 +102,31 @@ configuration:
       max_call_duration_seconds:
         name: Maximale Gesprächsdauer
         description: Sicherheitsbegrenzung für ein Gespräch.
+  call_routes:
+    name: Anrufrouten / Klingeltaster
+    description: Jede Route verbindet einen Besucher-Sensor mit einer optionalen FRITZ!Box-Klingeltaster-Nummer (z. B. 11) und bis zu drei direkt eingetragenen Mobilrufnummern. „auto“ beim Besucher-Sensor verwendet automatisch die aktivierte Reolink-Klingel-Entity. Die vorausgefüllte Standardroute ist vollständig editierbar. Wegen der Home-Assistant-Schematiefengrenze erscheint die Liste direkt unterhalb der Gruppe „Anruf“ statt innerhalb des aufklappbaren Blocks.
+    fields:
+      id:
+        name: Routen-ID
+        description: Stabiler technischer Bezeichner, z. B. „default“ oder „wohnung_unten“. Er beginnt mit einem Kleinbuchstaben und enthält nur Kleinbuchstaben, Ziffern und Unterstriche. Nach der Einrichtung nicht ändern, damit die Testanruf-Entity stabil bleibt.
+      name:
+        name: Anzeigename
+        description: Verständlicher Name der Route, z. B. „Wohnung unten“. Er erscheint auch am zugehörigen Testanruf.
+      visitor_entity:
+        name: Klingel-Entity
+        description: Home-Assistant-Binary-Sensor, der diese Route auslöst. „auto“ erkennt die eine aktivierte Reolink-Besucher-Entity automatisch und darf nur bei einer Route verwendet werden.
+      doorbell_number:
+        name: FRITZ!Box-Klingeltaster
+        description: Zielnummer der als IP-Türsprechanlage eingerichteten FRITZ!Box; z. B. 11 für Klingeltaster 1. Für eine reine Mobilroute leer lassen.
+      mobile_number_1:
+        name: Mobilrufnummer 1
+        description: Erste direkt anzurufende Nummer über das Mobilruf-Konto. Für keinen Mobilruf leer lassen.
+      mobile_number_2:
+        name: Mobilrufnummer 2
+        description: Zweite gleichzeitig anzurufende Nummer über dasselbe Mobilruf-Konto; optional.
+      mobile_number_3:
+        name: Mobilrufnummer 3
+        description: Dritte gleichzeitig anzurufende Nummer über dasselbe Mobilruf-Konto; optional.
   diagnostics:
     name: Betrieb & Diagnose
     description: Betriebsmodus und Protokollierung.

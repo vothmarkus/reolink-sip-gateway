@@ -1,12 +1,12 @@
-# Reolink SIP Gateway 1.2.1 – Dokumentation
+# Reolink SIP Gateway 1.2.2 – Dokumentation
 
 ## Zweck
 
-**1.2.1** unterstützt mehrere Klingeltaster-Routen über zwei unabhängig aktivierbare SIP-Konten an derselben FRITZ!Box: eine IP-Türsprechanlage und ein normales IP-Telefon für bis zu drei Mobilziele je Route. Mindestens ein Konto muss im Live-Betrieb aktiv sein. Der zuerst angenommene ausgehende Tür- oder Mobilzweig beziehungsweise der erste eingehende Anruf erhält den weiterhin einzigen Reolink-Medienweg.
+**1.2.2** unterstützt mehrere Klingeltaster-Routen über zwei unabhängig aktivierbare SIP-Konten an derselben FRITZ!Box: eine IP-Türsprechanlage und ein normales IP-Telefon für bis zu drei direkt in jeder Route eingetragene Mobilrufnummern. Mindestens ein Konto muss im Live-Betrieb aktiv sein. Der zuerst angenommene ausgehende Tür- oder Mobilzweig beziehungsweise der erste eingehende Anruf erhält den weiterhin einzigen Reolink-Medienweg.
 
-Die fünf bisherigen Konfigurationsgruppen und der flache Runtime-Vertrag bleiben bestehen. 1.2.0 ergänzt auf oberster Ebene die optionalen Listen `mobile_targets` und `call_routes`. Leere Listen ergeben automatisch die bisherige Einzelroute. Es gibt weiterhin nur eine konfigurierte Kamera und höchstens ein aktives Reolink-Gespräch. Die App bleibt ohne Companion-Integration vollständig funktionsfähig und erzeugt selbst keine HA-Entities oder Automationen.
+Die fünf bisherigen Konfigurationsgruppen und der flache Runtime-Vertrag bleiben bestehen. Die einzige zusätzliche Liste `call_routes` steht unmittelbar hinter der Gruppe **Anruf**. Sie kann wegen Home Assistants maximal unterstützter Konfigurationstiefe nicht innerhalb des aufklappbaren Gruppenobjekts liegen. Eine Neuinstallation enthält bereits eine editierbare Standardroute mit Sensor `auto`, Klingeltaster `11` und drei leeren Mobilnummern. Es gibt weiterhin nur eine konfigurierte Kamera und höchstens ein aktives Reolink-Gespräch. Die App bleibt ohne Companion-Integration vollständig funktionsfähig und erzeugt selbst keine HA-Entities oder Automationen.
 
-1.2.1 ändert nur die sichtbare Reihenfolge im SIP-Abschnitt: Auf die beiden zusammenhängenden Konto-Blöcke folgen Registrar-Port, lokaler Tür-Port und lokaler Mobil-Port als gemeinsamer erweiterter Portblock. Schlüssel, gespeicherte Werte und Runtimeübersetzung bleiben identisch.
+Die in 1.2.1 sortierte SIP-Darstellung bleibt bestehen: Auf die beiden zusammenhängenden Konto-Blöcke folgen Registrar-Port, lokaler Tür-Port und lokaler Mobil-Port als gemeinsamer erweiterter Portblock. 1.2.2 ersetzt ausschließlich die doppelten einfachen beziehungsweise katalogbasierten Routingfelder durch die direkte Routenliste.
 
 Das bestehende Branding verwendet PNG-Transparenz für den Außenbereich von `icon.png`, `logo.png` und dem eingebetteten Ingress-Logo. Der Go-Modulpfad entspricht dem öffentlichen Repository `github.com/vothmarkus/reolink-sip-gateway`.
 
@@ -133,46 +133,35 @@ Die Werte werden nur auf Debug-Protokollstufe detailliert ausgegeben. Die eigene
 
 ## Home Assistant Trigger
 
-Der WebSocket-State-Stream ist der normale Triggerweg. Im Routenmodus werden alle konfigurierten Entity-IDs in einer Subscription zusammengefasst; das ausgelöste Ereignis trägt die zugehörige Routen-ID bis in den Call-Controller. Jede Route besitzt ihren eigenen Entprellzustand. Bei Verbindungsproblemen bleibt eine REST-Abfrage als Fallback aktiv; die Sensorzustände werden parallel abgefragt und das Intervall ist intern auf eine Sekunde festgelegt.
+Der WebSocket-State-Stream ist der normale Triggerweg. Alle konfigurierten Entity-IDs werden in einer Subscription zusammengefasst; das ausgelöste Ereignis trägt die zugehörige Routen-ID bis in den Call-Controller. Jede Route besitzt ihren eigenen Entprellzustand. Bei Verbindungsproblemen bleibt eine REST-Abfrage als Fallback aktiv; die Sensorzustände werden parallel abgefragt und das Intervall ist intern auf eine Sekunde festgelegt.
 
 ## Routen und Klingeltaster
 
-Die Konfigurationsoberfläche trennt Rufnummern von deren Verwendung:
-
-1. Unter **Benannte Mobilziele (Routenmodus)** werden die Rufnummern einmalig mit stabiler ID und gut lesbarem Namen angelegt.
-2. Unter **Anrufrouten / Klingeltaster (Routenmodus)** wird für jeden Besucher-Sensor ein Name, die FRITZ!Box-Klingeltaster-Nummer und bis zu drei Mobilziel-IDs eingetragen.
+Die Konfigurationsoberfläche enthält unmittelbar unter **Anruf** die Liste **Anrufrouten / Klingeltaster**. Jede Route enthält einen stabilen Bezeichner, Anzeigenamen, Besucher-Sensor, die optionale FRITZ!Box-Klingeltaster-Nummer und bis zu drei direkte Mobilrufnummern. Die vorausgefüllte Standardroute reicht bereits für den üblichen Einfamilienhausbetrieb aus und kann vollständig bearbeitet werden.
 
 ```yaml
-mobile_targets:
-  - id: markus
-    name: Markus
-    destination: "0163..."
-  - id: bereitschaft
-    name: Bereitschaft
-    destination: "0151..."
-
 call_routes:
   - id: wohnung_1
     name: Wohnung 1
     visitor_entity: binary_sensor.klingeltaste_wohnung_1
     doorbell_number: "11"
-    mobile_target_1: markus
-    mobile_target_2: bereitschaft
-    mobile_target_3: ""
+    mobile_number_1: "0163..."
+    mobile_number_2: "0151..."
+    mobile_number_3: ""
   - id: wohnung_2
     name: Wohnung 2
     visitor_entity: binary_sensor.klingeltaste_wohnung_2
     doorbell_number: "12"
-    mobile_target_1: markus
-    mobile_target_2: ""
-    mobile_target_3: ""
+    mobile_number_1: "0163..."
+    mobile_number_2: ""
+    mobile_number_3: ""
 ```
 
-Eine ID beginnt mit einem Kleinbuchstaben und darf anschließend Kleinbuchstaben, Ziffern und Unterstriche enthalten. Sie sollte nach der Einrichtung nicht geändert werden, weil die Companion-Integration sie für stabile Testanruf-Entities verwendet. `mobile_target_1` bis `mobile_target_3` enthalten IDs aus dem Mobilzielkatalog, nicht die Rufnummer selbst. Eine Route kann ausschließlich den FRITZ!Box-Türweg, ausschließlich Mobilziele oder beide Wege verwenden. Leere Felder bleiben als leere Zeichenfolge erhalten.
+Eine ID beginnt mit einem Kleinbuchstaben und darf anschließend Kleinbuchstaben, Ziffern und Unterstriche enthalten. Sie sollte nach der Einrichtung nicht geändert werden, weil die Companion-Integration sie für stabile Testanruf-Entities verwendet. `mobile_number_1` bis `mobile_number_3` enthalten die Rufnummern direkt. Eine Route kann ausschließlich den FRITZ!Box-Türweg, ausschließlich Mobilziele oder beide Wege verwenden. Leere Felder bleiben als leere Zeichenfolge erhalten.
 
-Die FRITZ!Box 4050 interpretiert unterschiedliche `doorbell_number`-Werte als die dort konfigurierten Klingeltaster; beispielsweise steht `11` häufig für Klingeltaster 1 und `12` für Klingeltaster 2. Die tatsächliche Zuordnung in der FRITZ!Box ist maßgeblich. Jede Sensor-, Routen-, Klingeltaster- und Mobilziel-Zuordnung muss eindeutig sein. Unbekannte Referenzen, doppelte Ziele oder eine Route ohne aktivierten Rufweg führen absichtlich zu einem Startfehler.
+Die FRITZ!Box 4050 interpretiert unterschiedliche `doorbell_number`-Werte als die dort konfigurierten Klingeltaster; beispielsweise steht `11` häufig für Klingeltaster 1 und `12` für Klingeltaster 2. Die tatsächliche Zuordnung in der FRITZ!Box ist maßgeblich. Routen-ID, Besucher-Sensor und nicht leere Klingeltaster-Nummer müssen jeweils eindeutig sein. Dieselbe Mobilrufnummer darf dagegen bewusst in mehreren Routen vorkommen; nur eine doppelte Nummer innerhalb derselben Route ist ungültig. Eine Route ohne irgendeinen aktivierten Rufweg führt absichtlich zu einem Startfehler.
 
-Alle Routen teilen dieselbe Reolink-Konfiguration, Kalibrierung und Mediensitzung. Eine Kamera-, NVR-Kanal- oder Türöffnerauswahl je Route ist nicht Bestandteil von 1.2.0. Wird während eines laufenden oder gerade aufgebauten Gesprächs eine weitere Route ausgelöst, wird sie verworfen und nicht später nachgeholt.
+Alle Routen teilen dieselbe Reolink-Konfiguration, Kalibrierung und Mediensitzung. Eine Kamera-, NVR-Kanal- oder Türöffnerauswahl je Route ist nicht Bestandteil von 1.2.2. Wird während eines laufenden oder gerade aufgebauten Gesprächs eine weitere Route ausgelöst, wird sie verworfen und nicht später nachgeholt.
 
 ## SIP und RTP
 
@@ -188,13 +177,13 @@ PCMA, PCMU und `auto` bleiben als Codecpräferenz verfügbar.
 
 ### Unabhängige SIP-Konten und Mobil-Parallelruf
 
-`door_call_enabled: true` aktiviert das erste SIP-Konto. Es wird in der FRITZ!Box 4050 als **IP-Türsprechanlage** eingerichtet. `sip_destination` ist das dort verwendete Türziel beziehungsweise die Klingeltaste; beispielsweise steht `11` typischerweise für Klingeltaster 1. Maßgeblich ist die tatsächliche Zuordnung in der FRITZ!Box.
+`door_call_enabled: true` aktiviert das erste SIP-Konto. Es wird in der FRITZ!Box 4050 als **IP-Türsprechanlage** eingerichtet. `doorbell_number` in der jeweils ausgelösten Route ist das dort verwendete Türziel beziehungsweise die Klingeltaste; beispielsweise steht `11` typischerweise für Klingeltaster 1. Maßgeblich ist die tatsächliche Zuordnung in der FRITZ!Box.
 
 `parallel_call_enabled: true` aktiviert ein weiteres SIP-Konto am identischen Registrar. Dieses wird unter **Telefonie → Telefoniegeräte → Neues Gerät → Telefon → LAN/WLAN** als normales IP-Telefon angelegt. Die 4050 ist dabei Registrar und Telefonanlage. Eine vorgeschaltete FRITZ!Box 6690 kann ausschließlich das Kabelmodem bereitstellen. Bei deaktiviertem Tür-Konto kann das Mobilkonto allein betrieben werden; dann sind Tür-Benutzername, -Passwort und -Ziel nicht erforderlich. Im Live-Betrieb muss mindestens eines der Konten aktiviert sein.
 
 Das Mobilkonto verwendet `parallel_username`, `parallel_password` und den separaten lokalen Signalisierungsport `parallel_local_port` (Standard 5071). Registraradresse, Registrarport und Codecpräferenz werden von beiden Konten gemeinsam genutzt. Gleiche lokale Ports werden abgewiesen, wenn beide Konten gleichzeitig aktiv sind.
 
-Im einfachen Modus enthält `parallel_destinations` eine bis drei gleichzeitig zu wählende Nummern. Im Routenmodus stammen die Ziele aus `mobile_targets` und werden über die drei Referenzfelder der Route ausgewählt. Leerzeichen an den Rändern und doppelte Einträge werden beim Laden entfernt beziehungsweise als mehrdeutige Routenkonfiguration abgewiesen. Alle Mobilzweige verwenden dasselbe Konto und damit die in der FRITZ!Box diesem IP-Telefon zugewiesene ausgehende Rufnummer.
+Jede Route enthält mit `mobile_number_1` bis `mobile_number_3` bis zu drei gleichzeitig zu wählende Nummern direkt. Leerzeichen an den Rändern werden beim Laden entfernt; kanonisch doppelte Nummern innerhalb derselben Route werden als mehrdeutige Konfiguration abgewiesen. Alle Mobilzweige verwenden dasselbe Konto und damit die in der FRITZ!Box diesem IP-Telefon zugewiesene ausgehende Rufnummer.
 
 Das Gateway startet die `INVITE`-Zweige aller aktivierten Konten parallel. Der erste erfolgreiche `200 OK` wird Gewinner. Noch klingelnde Zweige erhalten `CANCEL`. Ein nahezu gleichzeitig angenommener Verlierer wird zwingend mit `ACK` bestätigt und anschließend mit `BYE` beendet. Für jeden Wählzweig existiert bis zur Gewinnerentscheidung ein eigener dynamischer RTP-Port; nur der Gewinner startet die Kamera-/AEC-Mediensitzung.
 
@@ -288,9 +277,11 @@ Die API läuft zusammen mit Statusseite und Healthcheck auf Port `18099`. Der vo
 
 Beim ersten normalen Start entstehen `/data/integration-api-instance-id` und `/data/integration-api-token`. Beide Dateien werden mit Rechten `0600` angelegt und über App-Updates sowie Backups erhalten. Das Token besteht aus 256 Zufallsbits und wird nicht protokolliert. Jeder `/api/v1`-Aufruf benötigt `Authorization: Bearer <token>`; zusätzlich sind nur Loopback-, private und Link-Local-Quelladressen zugelassen. Healthcheck und bestehende Ingress-Routen behalten ihre bisherigen Zugriffseigenschaften.
 
-Der Status unterscheidet aktuelle und letzte Werte: `call.direction`, `call.caller_number`, `call.route_id` und `call.route_name` werden nach dem Gespräch geleert, während die jeweiligen `last_*`-Felder erhalten bleiben. Bei eingehenden Anrufen ohne ausgelöste Klingelroute bleiben die Routenfelder leer. Die letzte anrufende Nummer wird nur durch einen zugelassenen eingehenden Anruf aktualisiert. Diagnosen und Fehlerantworten enthalten niemals Token, Zugangsdaten oder den Mobilzielkatalog.
+Der Status unterscheidet aktuelle und letzte Werte: `call.direction`, `call.caller_number`, `call.route_id` und `call.route_name` werden nach dem Gespräch geleert, während die jeweiligen `last_*`-Felder erhalten bleiben. Bei eingehenden Anrufen ohne ausgelöste Klingelroute bleiben die Routenfelder leer. Die letzte anrufende Nummer wird nur durch einen zugelassenen eingehenden Anruf aktualisiert. Diagnosen und Fehlerantworten enthalten niemals Token, Zugangsdaten oder konfigurierte Mobilrufnummern.
 
 ## Update von älteren Versionen
+
+1.2.2 führt einen einmaligen, abgesicherten Wechsel auf direkte Anrufrouten aus. Eine 1.1-Konfiguration wird als editierbare Route `default` übernommen; dabei bleiben Besucher-Sensor, Türziel und bis zu drei Mobilnummern erhalten. Vorhandene 1.2-Routen behalten ID, Name, Sensor und Klingeltaster. Ihre früheren Mobilziel-IDs werden über den vorhandenen Katalog in direkte Nummern aufgelöst. Wenn ein Benutzer bereits intuitiv eine Rufnummer direkt in ein früheres Referenzfeld eingetragen hatte, wird auch dieser Wert unverändert übernommen. Erst die vollständig erzeugte Ersatzkonfiguration wird in einem Supervisor-Schreibvorgang gespeichert. Der bestehende Vergleich-vor-Schreiben-Schutz verhindert, dass eine zeitgleiche Benutzeränderung überschrieben wird; danach bleiben normale Starts wieder schreibgeschützt.
 
 1.2.1 ordnet vorhandene SIP-Felder lediglich neu an. Es gibt keine neue Option und keine Datenmigration; alle gespeicherten Werte werden unverändert weiterverwendet.
 
@@ -325,7 +316,7 @@ Für **Reolink-Besucher-Sensor** kann `auto` verwendet werden. Das Gateway fragt
 
 Wird genau ein aktivierter Reolink-Besucher-Sensor gefunden, wird dessen Entity-ID nur in den privaten Runtime-Snapshot übernommen. Wird keiner gefunden, endet der Start mit einer klaren Fehlermeldung. Bei mehreren aktivierten Reolink-Türklingeln wird bewusst nicht geraten; in diesem Fall muss die gewünschte `binary_sensor...`-Entity manuell eingetragen werden. Ein manueller Wert hat immer Vorrang vor `auto`.
 
-Diese Automatik gilt nur für den einfachen Modus mit leerer `call_routes`-Liste. Im Routenmodus ist die explizite Entity-ID Bestandteil der gewünschten Klingeltaster-Zuordnung und wird deshalb nicht automatisch ersetzt.
+Diese Automatik darf genau eine Route verwenden. Bei der vorausgefüllten Standardroute steht deshalb `visitor_entity: auto`. Sobald weitere Klingeltaster-Routen eingerichtet werden, erhalten diese eine explizite Entity-ID; mehr als ein `auto` wird mit einer eindeutigen Startmeldung abgewiesen.
 
 ## Passivmodus
 
