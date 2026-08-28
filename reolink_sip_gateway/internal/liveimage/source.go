@@ -149,7 +149,7 @@ func (s *Source) fetchCGI(ctx context.Context, base string) ([]byte, error) {
 		return nil, fmt.Errorf("%s Reolink CGI request could not be created", u.Scheme)
 	}
 	req.Header.Set("Accept", "image/jpeg")
-	req.Header.Set("User-Agent", "ReolinkSIPGateway/1.3.0")
+	req.Header.Set("User-Agent", "ReolinkSIPGateway/1.3.1")
 	response, err := s.client.Do(req)
 	if err != nil {
 		// net/http errors can include the full URL, including its password.

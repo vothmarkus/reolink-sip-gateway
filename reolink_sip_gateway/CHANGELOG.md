@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.1
+
+- **FRITZ!Fon-Livebild** steht in der Home-Assistant-Konfiguration nun als vorletzte Gruppe unmittelbar über **Betrieb & Diagnose**.
+- Die Reihenfolge ist in `options`, `schema`, deutscher und englischer Übersetzung sowie der öffentlichen Testkonfiguration identisch und durch einen Regressionstest abgesichert. Optionsschlüssel, Defaults, gespeicherte Werte und Runtimeverhalten bleiben unverändert; eine Migration ist nicht erforderlich.
+- Versionskennungen und Dokumentation auf 1.3.1 aktualisiert. Der Livebildpfad wurde inzwischen auf der Zielinstallation mit FRITZ!Box 4050 und FRITZ!Fon erfolgreich bestätigt.
+
 ## 1.3.0
 
 - FRITZ!Fon-kompatiblen Livebildserver auf dem bestehenden lokalen Port 18099 ergänzt. Die Ingress-Seite zeigt die genaue Adresse für das FRITZ!Box-Feld **Live-Bild** und bietet einen direkten Browsertest; der Pfad endet fest auf `.jpg`.

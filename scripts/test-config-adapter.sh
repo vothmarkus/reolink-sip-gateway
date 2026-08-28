@@ -66,12 +66,12 @@ assert_group_sequence "${ROOT}/reolink_sip_gateway/translations/de.yaml" '^  (ca
 assert_group_sequence "${ROOT}/reolink_sip_gateway/translations/en.yaml" '^  (call|call_routes|diagnostics):$' 'call,call_routes,diagnostics'
 assert_group_sequence "${ROOT}/reolink_sip_gateway/testdata/options.valid.json" '^  "(call|call_routes|diagnostics)":' 'call,call_routes,diagnostics'
 
-# The optional live-image proxy is a compact group directly after its Reolink
-# source settings in every public representation.
-assert_group_sequence "${ROOT}/reolink_sip_gateway/config.yaml" '^  (reolink|live_image|sip|audio|call|call_routes|diagnostics):$' 'reolink,live_image,sip,audio,call,call_routes,diagnostics,reolink,live_image,sip,audio,call,call_routes,diagnostics'
-assert_group_sequence "${ROOT}/reolink_sip_gateway/translations/de.yaml" '^  (reolink|live_image|sip|audio|call|call_routes|diagnostics):$' 'reolink,live_image,sip,audio,call,call_routes,diagnostics'
-assert_group_sequence "${ROOT}/reolink_sip_gateway/translations/en.yaml" '^  (reolink|live_image|sip|audio|call|call_routes|diagnostics):$' 'reolink,live_image,sip,audio,call,call_routes,diagnostics'
-assert_group_sequence "${ROOT}/reolink_sip_gateway/testdata/options.valid.json" '^  "(reolink|live_image|sip|audio|call|call_routes|diagnostics)":' 'reolink,live_image,sip,audio,call,call_routes,diagnostics'
+# The optional live-image proxy is the penultimate group, immediately before
+# Operation & diagnostics, in every ordered public representation.
+assert_group_sequence "${ROOT}/reolink_sip_gateway/config.yaml" '^  (reolink|live_image|sip|audio|call|call_routes|diagnostics):$' 'reolink,sip,audio,call,call_routes,live_image,diagnostics,reolink,sip,audio,call,call_routes,live_image,diagnostics'
+assert_group_sequence "${ROOT}/reolink_sip_gateway/translations/de.yaml" '^  (reolink|live_image|sip|audio|call|call_routes|diagnostics):$' 'reolink,sip,audio,call,call_routes,live_image,diagnostics'
+assert_group_sequence "${ROOT}/reolink_sip_gateway/translations/en.yaml" '^  (reolink|live_image|sip|audio|call|call_routes|diagnostics):$' 'reolink,sip,audio,call,call_routes,live_image,diagnostics'
+assert_group_sequence "${ROOT}/reolink_sip_gateway/testdata/options.valid.json" '^  "(reolink|live_image|sip|audio|call|call_routes|diagnostics)":' 'reolink,sip,audio,call,call_routes,live_image,diagnostics'
 
 # Door- and mobile-account fields stay compact; the three advanced transport
 # ports form one final block in every public representation.

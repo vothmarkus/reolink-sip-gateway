@@ -1,10 +1,12 @@
-# Reolink SIP Gateway 1.3.0 – Dokumentation
+# Reolink SIP Gateway 1.3.1 – Dokumentation
 
 ## Zweck
 
-**1.3.0** ergänzt den bisherigen SIP-/Audiopfad um ein FRITZ!Fon-kompatibles Livebild. Die FRITZ!Box ruft dafür eine stabile lokale `.jpg`-Adresse des Gateways ohne Reolink-Zugangsdaten ab. Mehrere Klingeltaster-Routen, die zwei unabhängig aktivierbaren SIP-Konten und der weiterhin einzige Reolink-Audioweg bleiben gegenüber 1.2.2 unverändert.
+**1.3.1** enthält den in 1.3.0 ergänzten FRITZ!Fon-kompatiblen Livebildpfad und ordnet dessen Konfigurationsgruppe als vorletzten Block unmittelbar vor **Betrieb & Diagnose** ein. Die FRITZ!Box ruft dafür eine stabile lokale `.jpg`-Adresse des Gateways ohne Reolink-Zugangsdaten ab. Mehrere Klingeltaster-Routen, die zwei unabhängig aktivierbaren SIP-Konten und der weiterhin einzige Reolink-Audioweg bleiben gegenüber 1.2.2 unverändert.
 
 Die Konfigurationsoberfläche besitzt nun sechs Gruppen; **FRITZ!Fon-Livebild** enthält den standardmäßig aktiven Schalter `fritzfon_live_image_enabled`. Der flache Runtime-Vertrag bleibt bestehen. Die Liste `call_routes` steht weiterhin unmittelbar hinter **Anruf**, weil Home Assistant ihre Objekte nicht noch eine Ebene tiefer darstellen kann. Eine Neuinstallation enthält bereits eine editierbare Standardroute mit Sensor `auto`, Klingeltaster `11` und drei leeren Mobilnummern. Es gibt weiterhin nur eine konfigurierte Kamera und höchstens ein aktives Reolink-Gespräch. Die App bleibt ohne Companion-Integration vollständig funktionsfähig und erzeugt selbst keine HA-Entities oder Automationen.
+
+1.3.1 ändert ausschließlich die sichtbare Gruppenreihenfolge zu **Reolink**, **SIP-Telefonie**, **Audio**, **Anruf**, **Anrufrouten / Klingeltaster**, **FRITZ!Fon-Livebild** und **Betrieb & Diagnose**. Schlüssel, gespeicherte Werte, Defaults und Runtimeübersetzung bleiben identisch.
 
 Die in 1.2.1 sortierte SIP-Darstellung bleibt bestehen: Auf die beiden zusammenhängenden Konto-Blöcke folgen Registrar-Port, lokaler Tür-Port und lokaler Mobil-Port als gemeinsamer erweiterter Portblock. 1.2.2 ersetzt ausschließlich die doppelten einfachen beziehungsweise katalogbasierten Routingfelder durch die direkte Routenliste.
 
@@ -297,6 +299,8 @@ Beim ersten normalen Start entstehen `/data/integration-api-instance-id`, `/data
 Der Status unterscheidet aktuelle und letzte Werte: `call.direction`, `call.caller_number`, `call.route_id` und `call.route_name` werden nach dem Gespräch geleert, während die jeweiligen `last_*`-Felder erhalten bleiben. Bei eingehenden Anrufen ohne ausgelöste Klingelroute bleiben die Routenfelder leer. Die letzte anrufende Nummer wird nur durch einen zugelassenen eingehenden Anruf aktualisiert. Diagnosen und Fehlerantworten enthalten niemals Token, Zugangsdaten oder konfigurierte Mobilrufnummern.
 
 ## Update von älteren Versionen
+
+1.3.1 ordnet die vorhandene Gruppe `live_image` lediglich neu an. Es gibt keine neue Option und keine Datenmigration; alle gespeicherten Werte werden unverändert weiterverwendet.
 
 1.3.0 ergänzt die neue Gruppe `live_image` mit dem Standard `fritzfon_live_image_enabled: true`. Der Startadapter bildet sie auf den neuen flachen Runtimewert ab; Routen-, SIP-, Audio- und Reolink-Werte werden nicht migriert oder verändert. Beim ersten Start wird nur das unabhängige Livebild-Pfadtoken unter `/data` erzeugt. Wer keinen Bildabruf bereitstellen möchte, kann den Schalter vor oder nach dem Update deaktivieren.
 

@@ -40,7 +40,7 @@ SIP registration + HA visitor subscription
 
 ### Configuration boundary
 
-The Home Assistant UI exposes six groups plus the top-level `call_routes` list immediately after the Call group. The sixth group contains the FRITZ!Fon live-image toggle. A list of route mappings already reaches Home Assistant's supported nesting limit, so it cannot be embedded one level deeper inside `call`. The Go runtime deliberately retains the proven flat configuration contract. This keeps UI evolution away from the media implementation.
+The Home Assistant UI exposes the ordered groups Reolink, SIP telephony, Audio, Call, FRITZ!Fon live image and Operation & diagnostics, plus the top-level `call_routes` list immediately after the Call group. Since v1.3.1 the live-image group is therefore the penultimate visible block, directly before diagnostics. A list of route mappings already reaches Home Assistant's supported nesting limit, so it cannot be embedded one level deeper inside `call`. The Go runtime deliberately retains the proven flat configuration contract. This keeps UI evolution away from the media implementation.
 
 v0.5.10 uses a persistent marker for the grouped-layout migration. Before the marker exists, old flat values may take precedence over Supervisor-materialized defaults so direct upgrades preserve user configuration. After migration, grouped values are authoritative and normal starts are read-only with respect to Supervisor options.
 
@@ -84,6 +84,10 @@ v1.3.0 adds `live_image.fritzfon_live_image_enabled`, defaulting to `true`.
 The adapter passes it as a flat boolean without altering route or media values.
 A separate random path token is persisted under `/data` with mode `0600`; it
 is not accepted as an integration API bearer token.
+
+v1.3.1 only moves that existing public group to the penultimate UI position,
+directly before `diagnostics`. The ordered options, schema, translations and
+fixture remain aligned; no value or runtime mapping changes.
 
 ## Home Assistant integration boundary
 

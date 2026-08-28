@@ -1,8 +1,12 @@
-# Reolink SIP Gateway 1.3.0
+# Reolink SIP Gateway 1.3.1
 
 Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann SIP-Anrufe auslösen; optional lassen sich die aktivierten Gateway-Nebenstellen anrufen und direkt mit der Doorbell verbinden.
 
 > Community-Projekt. Nicht offiziell von Reolink oder Home Assistant bereitgestellt oder unterstützt.
+
+## 1.3.1: Livebild sinnvoll einsortiert
+
+Der Block **FRITZ!Fon-Livebild** steht nun als vorletzte Konfigurationsgruppe unmittelbar über **Betrieb & Diagnose**. Optionsschlüssel, gespeicherte Werte, Standard, Bildabruf und übriges Laufzeitverhalten bleiben unverändert; eine Migration ist nicht erforderlich.
 
 ## 1.3.0: Livebild auf dem FRITZ!Fon
 
@@ -176,9 +180,6 @@ reolink:
   reolink_rtsp_port: 554
   baichuan_port: 9000
 
-live_image:
-  fritzfon_live_image_enabled: true
-
 sip:
   sip_registrar: auto
   door_call_enabled: true
@@ -216,6 +217,9 @@ call_routes:
     mobile_number_1: "0163..."
     mobile_number_2: "0176..."
     mobile_number_3: ""
+
+live_image:
+  fritzfon_live_image_enabled: true
 
 diagnostics:
   dry_run: false
@@ -277,4 +281,4 @@ Zur Einrichtung unter **Telefonie → Telefoniegeräte** die IP-Türsprechanlage
 
 ## Hardwarestatus
 
-Der NVR-/Baichuan-Audiopfad wurde auf der Zielhardware mit nativer WebRTC-AEC erfolgreich getestet. Der neue 1.3.0-Livebildpfad ist vollständig softwaregetestet; die abschließende Prüfung mit FRITZ!Box 4050 und FRITZ!Fon steht noch aus.
+Der NVR-/Baichuan-Audiopfad wurde auf der Zielhardware mit nativer WebRTC-AEC erfolgreich getestet. Auch der FRITZ!Fon-Livebildpfad wurde inzwischen auf der Zielinstallation mit FRITZ!Box 4050 und FRITZ!Fon erfolgreich bestätigt.

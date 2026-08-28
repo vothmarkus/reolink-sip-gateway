@@ -24,13 +24,6 @@ configuration:
       baichuan_port:
         name: Baichuan-Port (erweitert)
         description: TCP-Port des Reolink Basic Service für den NVR-Modus; normalerweise 9000.
-  live_image:
-    name: FRITZ!Fon-Livebild
-    description: Lokaler, geschützter JPEG-Server für das Kamerabild beim Türruf.
-    fields:
-      fritzfon_live_image_enabled:
-        name: Livebild für FRITZ!Fon bereitstellen
-        description: Stellt auf Port 18099 eine geheime, dauerhaft stabile .jpg-Adresse bereit. Die genaue FRITZ!Box-Eingabe erscheint auf der App-Statusseite. Das Gateway holt ein aktuelles Reolink-Bild, passt große Auflösungen für das FRITZ!Fon an und gibt keine Kamera-Zugangsdaten an die FRITZ!Box weiter.
   sip:
     name: SIP-Telefonie
     description: Unabhängig aktivierbares Türsprechstellen- und Mobilruf-Konto an derselben Telefonanlage.
@@ -134,6 +127,13 @@ configuration:
       mobile_number_3:
         name: Mobilrufnummer 3
         description: Dritte gleichzeitig anzurufende Nummer über dasselbe Mobilruf-Konto; optional.
+  live_image:
+    name: FRITZ!Fon-Livebild
+    description: Lokaler, geschützter JPEG-Server für das Kamerabild beim Türruf.
+    fields:
+      fritzfon_live_image_enabled:
+        name: Livebild für FRITZ!Fon bereitstellen
+        description: Stellt auf Port 18099 eine geheime, dauerhaft stabile .jpg-Adresse bereit. Die genaue FRITZ!Box-Eingabe erscheint auf der App-Statusseite. Das Gateway holt ein aktuelles Reolink-Bild, passt große Auflösungen für das FRITZ!Fon an und gibt keine Kamera-Zugangsdaten an die FRITZ!Box weiter.
   diagnostics:
     name: Betrieb & Diagnose
     description: Betriebsmodus und Protokollierung.

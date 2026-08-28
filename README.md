@@ -6,7 +6,7 @@ Community Home Assistant app that bridges bidirectional audio between a Reolink 
 
 ## Current release
 
-**v1.3.0** adds a FRITZ!Fon-compatible live-image server. The Ingress page now provides the exact local address to enter for the IP door intercom after selecting `http://` in the FRITZ!Box. Its stable, secret path ends in `.jpg`, contains no Reolink credentials and returns a current JPEG sized for the phone display. The gateway first tries the Reolink snapshot CGI over HTTPS, then HTTP, and finally captures one frame through the existing RTSP/FFmpeg path.
+**v1.3.1** keeps the FRITZ!Fon-compatible live-image server introduced in v1.3.0 and moves its configuration group to the penultimate position, directly above **Operation & diagnostics**. Option keys, defaults and runtime behavior remain unchanged. The Ingress page provides the exact local address to enter for the IP door intercom after selecting `http://` in the FRITZ!Box. Its stable, secret path ends in `.jpg`, contains no Reolink credentials and returns a current JPEG sized for the phone display.
 
 The direct v1.2.2 call-route model remains unchanged: a fresh installation contains one editable `Standardroute` with visitor sensor `auto`, FRITZ!Box doorbell number `11` and three optional mobile-number fields. All routes continue to share one Reolink camera/media path and the same two optional SIP accounts.
 
@@ -73,9 +73,6 @@ reolink:
   reolink_rtsp_port: 554
   baichuan_port: 9000
 
-live_image:
-  fritzfon_live_image_enabled: true
-
 sip:
   sip_registrar: auto
   door_call_enabled: true
@@ -113,6 +110,9 @@ call_routes:
     mobile_number_1: "01630000000"
     mobile_number_2: "01760000000"
     mobile_number_3: ""
+
+live_image:
+  fritzfon_live_image_enabled: true
 
 diagnostics:
   dry_run: false
@@ -186,6 +186,8 @@ This design is intentional: hardware testing showed that the former Go live dela
 
 ## Configuration migration
 
+v1.3.1 only reorders the existing `live_image` group in the visible Home Assistant configuration. It introduces no option, default or data migration.
+
 v1.3.0 adds the `live_image` group with `fritzfon_live_image_enabled: true`. The adapter supplies that default when an older configuration has no group; it does not rewrite or migrate existing Reolink, SIP, audio or route values. The independent image-path token is created automatically under `/data`.
 
 v1.2.2 performs one guarded conversion to the direct route model:
@@ -205,7 +207,7 @@ v0.5.10 finalizes the grouped configuration introduced in v0.5.8:
 
 ## Hardware status
 
-The NVR/Baichuan audio path has been developed and hardware-tested with a Reolink Video Doorbell PoE behind an RLN8-410 NVR. The v1.3.0 live-image implementation is software-tested; its final FRITZ!Box 4050/FRITZ!Fon hardware verification is still pending. Other Reolink firmware/device combinations may differ; detailed debug logs are useful when reporting compatibility issues.
+The NVR/Baichuan audio path has been developed and hardware-tested with a Reolink Video Doorbell PoE behind an RLN8-410 NVR. The FRITZ!Fon live-image path has also been confirmed successfully on the target FRITZ!Box 4050/FRITZ!Fon installation. Other Reolink firmware/device combinations may differ; detailed debug logs are useful when reporting compatibility issues.
 
 ## Development
 

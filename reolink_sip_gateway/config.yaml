@@ -1,5 +1,5 @@
 name: Reolink SIP Gateway
-version: "1.3.0"
+version: "1.3.1"
 slug: reolink_sip_gateway
 description: Verbindet eine Reolink-Türklingel über Klingeltaster-Routen mit SIP, Zwei-Wege-Audio, FRITZ!Fon-Livebild und Home Assistant.
 url: https://github.com/vothmarkus/reolink-sip-gateway
@@ -26,8 +26,6 @@ options:
     nvr_channel_number: 1
     reolink_rtsp_port: 554
     baichuan_port: 9000
-  live_image:
-    fritzfon_live_image_enabled: true
   sip:
     sip_registrar: auto
     door_call_enabled: true
@@ -62,6 +60,8 @@ options:
       mobile_number_1: ""
       mobile_number_2: ""
       mobile_number_3: ""
+  live_image:
+    fritzfon_live_image_enabled: true
   diagnostics:
     dry_run: true
     log_level: info
@@ -74,8 +74,6 @@ schema:
     nvr_channel_number: int(1,256)
     reolink_rtsp_port: port
     baichuan_port: port
-  live_image:
-    fritzfon_live_image_enabled: bool
   sip:
     sip_registrar: str
     door_call_enabled: bool
@@ -110,6 +108,8 @@ schema:
       mobile_number_1: str
       mobile_number_2: str
       mobile_number_3: str
+  live_image:
+    fritzfon_live_image_enabled: bool
   diagnostics:
     dry_run: bool
     log_level: list(debug|info|warn|error)

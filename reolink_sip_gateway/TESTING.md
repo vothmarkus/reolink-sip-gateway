@@ -1,8 +1,8 @@
-# Prüfprotokoll 1.3.0
+# Prüfprotokoll 1.3.1
 
 ## Ziel
 
-1.3.0 stellt der FRITZ!Box ein aktuelles Reolink-JPEG unter einer stabilen geheimen `.jpg`-Adresse bereit. Zu prüfen sind CGI- und RTSP-Fallback, JPEG-Validierung und -Skalierung, Tokenpersistenz, die lokale HTTP-Grenze, die Anzeige auf FRITZ!Fon sowie die vollständige Regression des unveränderten 1.2.2-Routing-, SIP- und Audiopfads.
+1.3.0 stellt der FRITZ!Box ein aktuelles Reolink-JPEG unter einer stabilen geheimen `.jpg`-Adresse bereit. 1.3.1 verschiebt die bestehende Gruppe **FRITZ!Fon-Livebild** an die vorletzte Position unmittelbar vor **Betrieb & Diagnose**. Zu prüfen sind die identische öffentliche Gruppenreihenfolge, CGI- und RTSP-Fallback, JPEG-Validierung und -Skalierung, Tokenpersistenz, die lokale HTTP-Grenze, die Anzeige auf FRITZ!Fon sowie die vollständige Regression des unveränderten 1.2.2-Routing-, SIP- und Audiopfads.
 
 ## Softwareprüfungen vor Release
 
@@ -15,12 +15,18 @@
 - statischer amd64-Go-Releasebuild
 - UI-Adaptertest: gruppierte `testdata/options.valid.json` → flache `testdata/options.runtime.valid.json`; anschließend `-check-config` gegen die Runtime-Datei
 - YAML-/JSON-Prüfung von App-Konfiguration und Übersetzungen
-- identische sechs Gruppen sowie `call_routes` unmittelbar hinter `call` in `options`, `schema`, DE, EN und Testkonfiguration
+- identische sechs Gruppen sowie `call_routes` unmittelbar hinter `call` in `options`, `schema`, DE, EN und Testkonfiguration; `live_image` steht jeweils als vorletzte Gruppe direkt vor `diagnostics`
 - identische SIP-Feldreihenfolge in `options`, `schema`, DE, EN und Fixture: beide Konto-Blöcke vor `sip_registrar_port`, `sip_local_port` und `parallel_local_port`
 - Bash-Syntaxprüfung des s6-Startskripts
-- Versionsprüfung 1.3.0 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
+- Versionsprüfung 1.3.1 in App, Gateway, SIP-/RTSP-/Snapshot-User-Agent und CI-Buildargument
 - Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
 - expliziter Test der nativen Statistikbits 0…7
+
+## Ergänzungen 1.3.1
+
+- Die öffentliche Reihenfolge lautet durchgängig `reolink`, `sip`, `audio`, `call`, `call_routes`, `live_image`, `diagnostics`.
+- Die vorhandene Livebildoption wird nur sichtbar verschoben. Adapter, flacher Runtimewert, Standard, gespeicherte Optionen und Token bleiben unverändert.
+- Ein expliziter Reihenfolgetest prüft `options`, `schema`, DE, EN und die öffentliche JSON-Testkonfiguration.
 
 ## Ergänzungen 1.3.0
 
@@ -32,7 +38,7 @@
 - API-Token und separates 192-Bit-Livebildtoken bleiben über erneutes Laden stabil und liegen jeweils mit Modus `0600` vor. Das Livebildtoken erfüllt bewusst nicht die Validierung des 256-Bit-API-Tokens.
 - Die Statusseite zeigt Protokollauswahl-Anweisung, kopierbare Adresse und Browsertest nur bei aktivierter Funktion. Der Snapshot meldet den Aktivierungszustand additiv; API v1 bleibt ansonsten unverändert.
 
-## FRITZ!Box-4050-/FRITZ!Fon-Hardwaretest 1.3.0
+## FRITZ!Box-4050-/FRITZ!Fon-Hardwaretest 1.3.1
 
 1. App aktualisieren, starten und kontrollieren, dass im Ingress-Abschnitt **FRITZ!Fon-Livebild** eine lokale Adresse mit Port `18099` und Endung `.jpg` erscheint. Sie darf weder Reolink-Benutzer noch Passwort enthalten.
 2. **Aktuelles Kamerabild testen** öffnen. Der Browser muss ein aktuelles Bild des konfigurierten physischen NVR-Kanals anzeigen; wiederholte Aufrufe müssen neue Frames liefern.
@@ -282,6 +288,6 @@ Für einen ersten Call 60–120 s sprechen und im Debug-Log prüfen:
 
 Im 0.4.3-Hardwarelog war `native_stats_mask=0x3b`, aber Go zeigte nur einen Teil der gesetzten Felder. In 0.5.0 muss dieselbe Maske die Bits 0,1,3,4,5 als ERL, ERLE, Residual, Residual-Recent-Max und Delay sichtbar machen, sofern die WebRTC-Runtime diese Maske liefert.
 
-## Noch offen
+## Hardwarestand
 
-Die 1.3.0-Livebildanzeige an FRITZ!Box 4050 und FRITZ!Fon muss noch mit der Zielhardware ausgeführt werden. Double-Talk auf der Zielhardware wird ebenfalls später separat getestet. Der stabile 53-s-0.4.3-Einsprechtest bleibt bis dahin die Referenz für Single-Talk-Echoreduktion.
+Die Livebildanzeige wurde auf der Zielinstallation mit FRITZ!Box 4050 und FRITZ!Fon erfolgreich bestätigt. Double-Talk auf der Zielhardware wird weiterhin später separat getestet. Der stabile 53-s-0.4.3-Einsprechtest bleibt bis dahin die Referenz für Single-Talk-Echoreduktion.
