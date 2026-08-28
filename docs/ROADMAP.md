@@ -1,5 +1,24 @@
 # Roadmap
 
+## v1.3: FRITZ!Fon live image — implemented
+
+The gateway exposes a current Reolink frame through a stable local URL ending
+in `.jpg`, ready for the FRITZ!Box IP door-intercom live-image field. The
+Ingress page provides the exact address and browser test. Camera credentials
+are used only toward Reolink and never appear in the client-facing URL, which
+uses an independent 192-bit path token.
+
+Implemented invariants:
+
+- Reolink snapshot CGI over HTTPS first, HTTP second, then one-frame
+  RTSP/FFmpeg fallback;
+- validated JPEG output fitted inside 480×640 while preserving aspect ratio;
+- a short in-memory request-coalescing cache and explicit no-cache responses;
+- a read-only `GET`/`HEAD` endpoint whose token has no API v1 call-control
+  authority;
+- one toggle independent of call routes, SIP registration and the exclusive
+  Reolink audio session.
+
 ## v1.2: multiple doorbell buttons and routing matrix — implemented
 
 As finalized in v1.2.2, each route maps one Home Assistant visitor entity to an
@@ -46,5 +65,5 @@ Implemented invariants:
 ## Later candidates
 
 Multiple cameras, separate media paths, route-specific door openers and queued
-calls are intentionally outside v1.2. They require a different resource and
+calls remain intentionally outside the current architecture. They require a different resource and
 permission model rather than another field in the routing matrix.

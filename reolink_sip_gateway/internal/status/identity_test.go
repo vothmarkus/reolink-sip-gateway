@@ -12,7 +12,7 @@ func TestLoadOrCreateIdentityIsStableAndPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create identity: %v", err)
 	}
-	if !validInstanceID(first.InstanceID) || !validAPIToken(first.Token) {
+	if !validInstanceID(first.InstanceID) || !validAPIToken(first.Token) || !validLiveImageToken(first.LiveImageToken) {
 		t.Fatalf("invalid generated identity: %#v", first)
 	}
 	second, err := LoadOrCreateIdentity(dir)
@@ -22,7 +22,7 @@ func TestLoadOrCreateIdentityIsStableAndPrivate(t *testing.T) {
 	if second != first {
 		t.Fatalf("identity changed after reload: first=%#v second=%#v", first, second)
 	}
-	for _, name := range []string{instanceIDFile, apiTokenFile} {
+	for _, name := range []string{instanceIDFile, apiTokenFile, liveImageTokenFile} {
 		info, err := os.Stat(filepath.Join(dir, name))
 		if err != nil {
 			t.Fatalf("stat %s: %v", name, err)

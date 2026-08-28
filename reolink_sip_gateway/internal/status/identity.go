@@ -12,18 +12,20 @@ import (
 )
 
 const (
-	instanceIDFile = "integration-api-instance-id"
-	apiTokenFile   = "integration-api-token"
+	instanceIDFile     = "integration-api-instance-id"
+	apiTokenFile       = "integration-api-token"
+	liveImageTokenFile = "fritzfon-live-image-token"
 )
 
 type Identity struct {
-	InstanceID string
-	Token      string
+	InstanceID     string
+	Token          string
+	LiveImageToken string
 }
 
-// LoadOrCreateIdentity persists a non-secret instance identifier and a
-// 256-bit bearer token in the app data directory. Both survive app upgrades
-// and backups, keeping Home Assistant device/entity unique IDs stable.
+// LoadOrCreateIdentity persists a non-secret instance identifier, a 256-bit
+// integration bearer token and an independent live-image path token in the app
+// data directory. All values survive app upgrades and backups.
 func LoadOrCreateIdentity(dataDir string) (Identity, error) {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return Identity{}, fmt.Errorf("create identity directory: %w", err)
@@ -36,7 +38,11 @@ func LoadOrCreateIdentity(dataDir string) (Identity, error) {
 	if err != nil {
 		return Identity{}, fmt.Errorf("load integration API token: %w", err)
 	}
-	return Identity{InstanceID: instanceID, Token: token}, nil
+	liveImageToken, err := loadOrCreateValue(filepath.Join(dataDir, liveImageTokenFile), newLiveImageToken, validLiveImageToken)
+	if err != nil {
+		return Identity{}, fmt.Errorf("load FRITZ!Fon live image token: %w", err)
+	}
+	return Identity{InstanceID: instanceID, Token: token, LiveImageToken: liveImageToken}, nil
 }
 
 func loadOrCreateValue(path string, generate func() (string, error), validate func(string) bool) (string, error) {
@@ -99,7 +105,15 @@ func readIdentityValue(path string) (string, error) {
 }
 
 func newAPIToken() (string, error) {
-	b := make([]byte, 32)
+	return newRandomToken(32)
+}
+
+func newLiveImageToken() (string, error) {
+	return newRandomToken(24)
+}
+
+func newRandomToken(size int) (string, error) {
+	b := make([]byte, size)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
@@ -109,6 +123,11 @@ func newAPIToken() (string, error) {
 func validAPIToken(value string) bool {
 	b, err := base64.RawURLEncoding.DecodeString(value)
 	return err == nil && len(b) == 32
+}
+
+func validLiveImageToken(value string) bool {
+	b, err := base64.RawURLEncoding.DecodeString(value)
+	return err == nil && len(b) == 24
 }
 
 func newInstanceID() (string, error) {

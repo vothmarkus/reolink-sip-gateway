@@ -6,7 +6,7 @@ Reolink SIP Gateway connects three domains:
 
 1. Home Assistant supplies one or more doorbell/visitor triggers and, through the companion integration, consumes status and sends route-specific call-control commands.
 2. SIP provides outbound and optional incoming call setup plus telephone audio.
-3. Reolink RTSP/ONVIF or Baichuan provides doorbell receive/talkback audio.
+3. Reolink CGI/RTSP provides camera images, while RTSP/ONVIF or Baichuan provides doorbell receive/talkback audio.
 
 The gateway intentionally keeps profile selection, long-delay alignment, and real-time media transport separate.
 
@@ -24,9 +24,9 @@ UI -> flat runtime adapter
         +--> public NVR channel 2 -> internal channel 1
         |
         v
-load/create persistent API identity
+load/create persistent API and live-image identities
         |
-        +--> ingress + authenticated /api/v1 + health
+        +--> ingress + authenticated /api/v1 + secret JPEG + health
         |
         v
 Reolink profile detection / fixed profile
@@ -40,7 +40,7 @@ SIP registration + HA visitor subscription
 
 ### Configuration boundary
 
-The Home Assistant UI exposes five established groups plus the top-level `call_routes` list immediately after the Call group. A list of route mappings already reaches Home Assistant's supported nesting limit, so it cannot be embedded one level deeper inside `call`. The Go runtime deliberately retains the proven flat configuration contract. This keeps UI evolution away from the media implementation.
+The Home Assistant UI exposes six groups plus the top-level `call_routes` list immediately after the Call group. The sixth group contains the FRITZ!Fon live-image toggle. A list of route mappings already reaches Home Assistant's supported nesting limit, so it cannot be embedded one level deeper inside `call`. The Go runtime deliberately retains the proven flat configuration contract. This keeps UI evolution away from the media implementation.
 
 v0.5.10 uses a persistent marker for the grouped-layout migration. Before the marker exists, old flat values may take precedence over Supervisor-materialized defaults so direct upgrades preserve user configuration. After migration, grouped values are authoritative and normal starts are read-only with respect to Supervisor options.
 
@@ -80,6 +80,11 @@ v1.2.0/1.2.1 target catalogue, preserving existing route identity and values.
 A second persistent marker makes subsequent starts read-only again. No route
 contains a camera, NVR channel, media, DTMF or opener selector.
 
+v1.3.0 adds `live_image.fritzfon_live_image_enabled`, defaulting to `true`.
+The adapter passes it as a flat boolean without altering route or media values.
+A separate random path token is persisted under `/data` with mode `0600`; it
+is not accepted as an integration API bearer token.
+
 ## Home Assistant integration boundary
 
 The companion integration talks only to the versioned local HTTP API. It cannot construct SIP messages, reserve RTP ports, open Reolink sessions or mutate the media pipeline.
@@ -91,6 +96,28 @@ The companion integration talks only to the versioned local HTTP API. It cannot 
 - A 256-bit bearer token protects every v1 route. Constant-time comparison and a private/local source-address boundary protect the command surface; ingress-only legacy routes retain their stricter proxy/loopback rule.
 
 One Store remains the source of truth. The integration can use SSE for low-latency changes and `GET status` after reconnect as reconciliation, without creating a second state machine.
+
+## FRITZ!Fon live-image boundary
+
+The status server registers exactly one tokenized path ending in `.jpg` when
+the option is enabled. It accepts only `GET` and `HEAD` from loopback, private
+or link-local source addresses, returns validated JPEG bytes with no-cache
+headers, and exposes neither a directory nor a query-based credential. The
+FRITZ!Box therefore receives a read-only image capability, not the more
+powerful API v1 bearer token.
+
+The source is deliberately independent of call control and the exclusive
+audio session. It tries Reolink's snapshot CGI over local HTTPS first and local
+HTTP second. Cross-host redirects are refused. If neither result is a valid
+JPEG, a bounded FFmpeg process captures one frame from the existing configured
+RTSP URL. Transport errors are classified before logging so URLs containing
+camera credentials cannot leak.
+
+Decoded dimensions and total pixel count are bounded before allocation.
+Images outside a 480×640 bounding box are resized with their aspect ratio preserved; a
+750 ms in-memory cache coalesces nearly simultaneous phone requests. The
+server-facing provider interface contains only `FetchJPEG(context)`, keeping
+HTTP authorization and response behavior separate from camera transport.
 
 ## SIP call control
 

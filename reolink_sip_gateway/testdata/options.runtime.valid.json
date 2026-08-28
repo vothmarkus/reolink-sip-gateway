@@ -7,6 +7,7 @@
   "reolink_stream_path": "/Preview_02_sub",
   "baichuan_port": 9000,
   "nvr_channel": 1,
+  "fritzfon_live_image_enabled": true,
   "echo_cancellation_enabled": true,
   "echo_cancellation_search_window_ms": 300,
   "webrtc_high_pass_filter_enabled": true,

@@ -88,6 +88,7 @@ type Config struct {
 	ReolinkMode                    string      `json:"reolink_mode"`
 	BaichuanPort                   int         `json:"baichuan_port"`
 	NVRChannel                     int         `json:"nvr_channel"`
+	FritzFonLiveImageEnabled       bool        `json:"fritzfon_live_image_enabled"`
 	EchoCancellationEnabled        bool        `json:"echo_cancellation_enabled"`
 	EchoCancellationSearchWindowMS int         `json:"echo_cancellation_search_window_ms"`
 	WebRTCHighPassFilterEnabled    bool        `json:"webrtc_high_pass_filter_enabled"`
@@ -135,6 +136,7 @@ func Defaults() Config {
 		ReolinkMode:                    "auto",
 		BaichuanPort:                   9000,
 		NVRChannel:                     1,
+		FritzFonLiveImageEnabled:       true,
 		EchoCancellationEnabled:        true,
 		EchoCancellationSearchWindowMS: DefaultAECSearchWindowMS,
 		WebRTCHighPassFilterEnabled:    true,

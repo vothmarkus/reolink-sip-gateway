@@ -66,6 +66,13 @@ assert_group_sequence "${ROOT}/reolink_sip_gateway/translations/de.yaml" '^  (ca
 assert_group_sequence "${ROOT}/reolink_sip_gateway/translations/en.yaml" '^  (call|call_routes|diagnostics):$' 'call,call_routes,diagnostics'
 assert_group_sequence "${ROOT}/reolink_sip_gateway/testdata/options.valid.json" '^  "(call|call_routes|diagnostics)":' 'call,call_routes,diagnostics'
 
+# The optional live-image proxy is a compact group directly after its Reolink
+# source settings in every public representation.
+assert_group_sequence "${ROOT}/reolink_sip_gateway/config.yaml" '^  (reolink|live_image|sip|audio|call|call_routes|diagnostics):$' 'reolink,live_image,sip,audio,call,call_routes,diagnostics,reolink,live_image,sip,audio,call,call_routes,diagnostics'
+assert_group_sequence "${ROOT}/reolink_sip_gateway/translations/de.yaml" '^  (reolink|live_image|sip|audio|call|call_routes|diagnostics):$' 'reolink,live_image,sip,audio,call,call_routes,diagnostics'
+assert_group_sequence "${ROOT}/reolink_sip_gateway/translations/en.yaml" '^  (reolink|live_image|sip|audio|call|call_routes|diagnostics):$' 'reolink,live_image,sip,audio,call,call_routes,diagnostics'
+assert_group_sequence "${ROOT}/reolink_sip_gateway/testdata/options.valid.json" '^  "(reolink|live_image|sip|audio|call|call_routes|diagnostics)":' 'reolink,live_image,sip,audio,call,call_routes,diagnostics'
+
 # Door- and mobile-account fields stay compact; the three advanced transport
 # ports form one final block in every public representation.
 SIP_ORDER=(sip_registrar: door_call_enabled: sip_username: sip_password: sip_display_name: sip_codec_preference: parallel_call_enabled: parallel_username: parallel_password: sip_registrar_port: sip_local_port: parallel_local_port:)
@@ -79,6 +86,7 @@ assert_key_order "${ROOT}/reolink_sip_gateway/testdata/options.valid.json" 1 "${
 # Fresh-install defaults exposed by the HA adapter.
 fresh="$(normalize_public_options '{}' false)"
 assert_eq "$(jq -r .reolink.reolink_username <<<"${fresh}")" "admin"
+assert_eq "$(jq -r .live_image.fritzfon_live_image_enabled <<<"${fresh}")" "true"
 assert_eq "$(jq -r .sip.sip_registrar <<<"${fresh}")" "auto"
 assert_eq "$(jq -r .sip.door_call_enabled <<<"${fresh}")" "true"
 assert_eq "$(jq -r .call.incoming_calls_enabled <<<"${fresh}")" "false"
@@ -123,6 +131,7 @@ build_runtime_options "${normalized}"
 runtime="$(cat /tmp/reolink-sip-gateway-runtime-options.json)"
 assert_eq "$(jq -r .nvr_channel <<<"${runtime}")" "1"
 assert_eq "$(jq -r .reolink_stream_path <<<"${runtime}")" "/Preview_02_sub"
+assert_eq "$(jq -r .fritzfon_live_image_enabled <<<"${runtime}")" "true"
 assert_eq "$(jq -r .echo_cancellation_search_window_ms <<<"${runtime}")" "300"
 assert_eq "$(jq -r .incoming_calls_enabled <<<"${runtime}")" "false"
 assert_eq "$(jq -c .incoming_allowed_callers <<<"${runtime}")" '["*"]'

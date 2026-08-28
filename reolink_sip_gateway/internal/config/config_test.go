@@ -14,6 +14,9 @@ func TestDefaultsAreUserFriendlyV050(t *testing.T) {
 	if cfg.ReolinkUsername != "admin" || cfg.ReolinkMode != "auto" || cfg.ReolinkRTSPPort != 554 || cfg.BaichuanPort != 9000 || cfg.NVRChannel != 1 {
 		t.Fatalf("unexpected Reolink defaults: %#v", cfg)
 	}
+	if !cfg.FritzFonLiveImageEnabled {
+		t.Fatal("FRITZ!Fon live image must be enabled by default")
+	}
 	if !cfg.EchoCancellationEnabled || cfg.EchoCancellationSearchWindowMS != 300 || cfg.AECInitialDelayMS != 1450 || cfg.AECMinDelayMS != 1150 || cfg.AECMaxDelayMS != 1750 {
 		t.Fatalf("unexpected AEC defaults: %#v", cfg)
 	}

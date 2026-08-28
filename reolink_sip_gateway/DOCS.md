@@ -1,10 +1,10 @@
-# Reolink SIP Gateway 1.2.2 – Dokumentation
+# Reolink SIP Gateway 1.3.0 – Dokumentation
 
 ## Zweck
 
-**1.2.2** unterstützt mehrere Klingeltaster-Routen über zwei unabhängig aktivierbare SIP-Konten an derselben FRITZ!Box: eine IP-Türsprechanlage und ein normales IP-Telefon für bis zu drei direkt in jeder Route eingetragene Mobilrufnummern. Mindestens ein Konto muss im Live-Betrieb aktiv sein. Der zuerst angenommene ausgehende Tür- oder Mobilzweig beziehungsweise der erste eingehende Anruf erhält den weiterhin einzigen Reolink-Medienweg.
+**1.3.0** ergänzt den bisherigen SIP-/Audiopfad um ein FRITZ!Fon-kompatibles Livebild. Die FRITZ!Box ruft dafür eine stabile lokale `.jpg`-Adresse des Gateways ohne Reolink-Zugangsdaten ab. Mehrere Klingeltaster-Routen, die zwei unabhängig aktivierbaren SIP-Konten und der weiterhin einzige Reolink-Audioweg bleiben gegenüber 1.2.2 unverändert.
 
-Die fünf bisherigen Konfigurationsgruppen und der flache Runtime-Vertrag bleiben bestehen. Die einzige zusätzliche Liste `call_routes` steht unmittelbar hinter der Gruppe **Anruf**. Sie kann wegen Home Assistants maximal unterstützter Konfigurationstiefe nicht innerhalb des aufklappbaren Gruppenobjekts liegen. Eine Neuinstallation enthält bereits eine editierbare Standardroute mit Sensor `auto`, Klingeltaster `11` und drei leeren Mobilnummern. Es gibt weiterhin nur eine konfigurierte Kamera und höchstens ein aktives Reolink-Gespräch. Die App bleibt ohne Companion-Integration vollständig funktionsfähig und erzeugt selbst keine HA-Entities oder Automationen.
+Die Konfigurationsoberfläche besitzt nun sechs Gruppen; **FRITZ!Fon-Livebild** enthält den standardmäßig aktiven Schalter `fritzfon_live_image_enabled`. Der flache Runtime-Vertrag bleibt bestehen. Die Liste `call_routes` steht weiterhin unmittelbar hinter **Anruf**, weil Home Assistant ihre Objekte nicht noch eine Ebene tiefer darstellen kann. Eine Neuinstallation enthält bereits eine editierbare Standardroute mit Sensor `auto`, Klingeltaster `11` und drei leeren Mobilnummern. Es gibt weiterhin nur eine konfigurierte Kamera und höchstens ein aktives Reolink-Gespräch. Die App bleibt ohne Companion-Integration vollständig funktionsfähig und erzeugt selbst keine HA-Entities oder Automationen.
 
 Die in 1.2.1 sortierte SIP-Darstellung bleibt bestehen: Auf die beiden zusammenhängenden Konto-Blöcke folgen Registrar-Port, lokaler Tür-Port und lokaler Mobil-Port als gemeinsamer erweiterter Portblock. 1.2.2 ersetzt ausschließlich die doppelten einfachen beziehungsweise katalogbasierten Routingfelder durch die direkte Routenliste.
 
@@ -19,8 +19,8 @@ Die Home-Assistant-App überwacht alle in den Routen eingetragenen Besucher-Bin�
 Bei einem normalen Start führt das Gateway die folgenden Schritte aus:
 
 1. Konfiguration lesen und validieren.
-2. Persistente API-Instanz-ID und API-Token laden beziehungsweise beim ersten Start sicher erzeugen.
-3. Status-/Ingress-Seite, Healthcheck und Integrations-API starten; Steuerbefehle bleiben bis zum fertigen Runtimeaufbau gesperrt.
+2. Persistente API-Instanz-ID, API-Token und unabhängiges Livebild-Pfadtoken laden beziehungsweise beim ersten Start sicher erzeugen.
+3. Status-/Ingress-Seite, optionalen Livebildpfad, Healthcheck und Integrations-API starten; Steuerbefehle bleiben bis zum fertigen Runtimeaufbau gesperrt.
 4. Bei `reolink_mode: auto` ein vollständiges Reolink-Medienprofil erkennen.
 5. Bei aktivierter AEC die akustische Reolink-Latenz automatisch messen.
 6. Erfolgreiche Kalibrierung persistent speichern bzw. bei Messfehler einen passenden Cache oder 1450 ms verwenden.
@@ -260,9 +260,26 @@ Die bisherigen Schalter `debug_sip`, `debug_rtsp`, `debug_baichuan` sind entfern
 
 `reolink_stream_path` und der interne 0-basierte `nvr_channel` sind keine Benutzeroptionen mehr. Das Startskript bildet die UI-Einstellung unmittelbar vor dem Gatewaystart auf die bewährte 0.5.1-Runtimekonfiguration ab. Beispiel: NVR-Kanal 2 wird intern zu `nvr_channel=1` und `/Preview_02_sub`. Im expliziten Standalone-Modus wird die NVR-Kanalnummer ignoriert und `/Preview_01_sub` verwendet.
 
+## FRITZ!Fon-Livebild
+
+Ist `live_image.fritzfon_live_image_enabled` aktiv, registriert der bestehende Statusserver auf Port `18099` einen geheimen Pfad der Form `/fritzfon/<token>.jpg`. Die Ingress-Seite zeigt die vollständige lokale Adresse ohne Protokollpräfix sowie einen Browsertest. Dazu ermittelt das Gateway die lokale Home-Assistant-IPv4-Adresse anhand der Route zum SIP-Registrar, ohne ein Paket zu senden. Schlägt die Ermittlung fehl, erscheint der eindeutige Platzhalter `HOME-ASSISTANT-IP`, der durch die tatsächliche lokale Adresse des Home-Assistant-Hosts ersetzt werden muss.
+
+Einrichtung in der FRITZ!Box:
+
+1. Unter **Telefonie → Telefoniegeräte** die als IP-Türsprechanlage angelegte Nebenstelle bearbeiten.
+2. Beim Feld **Live-Bild** `http://` auswählen.
+3. Den auf der Gateway-Ingress-Seite gezeigten Wert ohne vorangestelltes `http://` in das Nachbarfeld kopieren und übernehmen.
+4. Zuerst den Browsertest, danach einen Türruf mit dem FRITZ!Fon prüfen.
+
+Jeder Abruf versucht nacheinander die Reolink-Snapshot-CGI am konfigurierten Kamera-/NVR-Host über HTTPS-Port 443 und HTTP-Port 80. Die Abfrage verwendet den intern 0-basierten physischen Kanal und bittet Reolink um die dokumentierte Substream-Größe 640×480. Antwortet die CGI nicht mit einem gültigen JPEG, liest FFmpeg genau einen Frame aus dem bereits konfigurierten RTSP-Stream. Das Gateway validiert JPEG-Signatur, Dekodierbarkeit, Größe und Pixelgrenze. Bilder werden seitenverhältnistreu in einen 480×640-Rahmen eingepasst; kleinere, bereits passende Bilder bleiben unverändert. Ein 750-ms-Speicher-Cache fasst fast gleichzeitige Abrufe zusammen. Antworten tragen `Content-Type: image/jpeg` und ausdrückliche No-Cache-Header.
+
+Das 192-Bit-Pfadtoken wird einmalig unter `/data/fritzfon-live-image-token` mit Rechten `0600` erzeugt und bleibt bei Update und Backup stabil. Es ist bewusst vom 256-Bit-Integrations-API-Token getrennt: Die Kenntnis der Bildadresse ermöglicht nur Bildabrufe und berechtigt weder zu Testanruf noch Auflegen. Trotzdem ist die komplette URL vertraulich zu behandeln. Zusätzlich weist der Server Anfragen außerhalb von Loopback-, privaten und Link-Local-Netzen ab. Zugangsdaten erscheinen weder in der URL noch in klassifizierten Fehlerantworten oder normalen Logs. Bei abgeschalteter Option wird der Pfad nicht registriert.
+
+AVM unterstützt für das Telefonbild JPG/JPEG, PNG und GIF und verlangt eine passende Dateiendung in der URL. Die von AVM genannte sinnvolle Größenordnung von etwa 240×320 bis 480×640 Pixeln bildet direkt den Ausgabe-Rahmen. Ein typisches Reolink-Landschaftsbild wird darin beispielsweise 480×360 Pixel groß. Die Reolink-CGI-Parameter entsprechen der offiziellen Snapshot-Schnittstelle.
+
 ## Ingress-Status
 
-Die Statusseite zeigt den konfigurierten und aktiven Modus, Medienprofil, Kalibrierungsstatus, kalibrierten Startwert, aktuellen Trackerwert, Suchfenster/-grenzen, WebRTC-Filter, SIP-/HA-Status, aktuelle/letzte Route, aktuelle/letzte Anrufrichtung, aktuelle/letzte anrufende Nummer und aktive Call-Medien. Zeitangaben werden kompakt formatiert; noch nicht vorhandene Zeitpunkte erscheinen als Gedankenstrich. Ein eigener administrativer Abschnitt zeigt den internen App-Hostnamen und das Token für die Einrichtung der Companion-Integration. Die Integration erzeugt daraus selbst `http://<Hostname>:18099/api/v1`.
+Die Statusseite zeigt den konfigurierten und aktiven Modus, Medienprofil, Kalibrierungsstatus, kalibrierten Startwert, aktuellen Trackerwert, Suchfenster/-grenzen, WebRTC-Filter, SIP-/HA-Status, aktuelle/letzte Route, aktuelle/letzte Anrufrichtung, aktuelle/letzte anrufende Nummer und aktive Call-Medien. Zeitangaben werden kompakt formatiert; noch nicht vorhandene Zeitpunkte erscheinen als Gedankenstrich. Ein eigener administrativer Abschnitt zeigt den internen App-Hostnamen und das Token für die Einrichtung der Companion-Integration. Die Integration erzeugt daraus selbst `http://<Hostname>:18099/api/v1`. Ein getrennter Abschnitt zeigt ausschließlich bei aktivierter Funktion die FRITZ!Fon-Adresse samt Browsertest.
 
 ## Home-Assistant-Integrations-API v1
 
@@ -275,11 +292,13 @@ Die API läuft zusammen mit Statusseite und Healthcheck auf Port `18099`. Der vo
 - `POST /api/v1/calls/test`: kompatibler Alt-Endpunkt; startet die erste aufgelöste Route und bleibt für ältere Integrationen verfügbar.
 - `POST /api/v1/calls/hangup`: beendet Wähl-, Vorbereitungs- oder Gesprächsphase beider Richtungen; im Leerlauf bestätigt `204` die idempotente Wirkung.
 
-Beim ersten normalen Start entstehen `/data/integration-api-instance-id` und `/data/integration-api-token`. Beide Dateien werden mit Rechten `0600` angelegt und über App-Updates sowie Backups erhalten. Das Token besteht aus 256 Zufallsbits und wird nicht protokolliert. Jeder `/api/v1`-Aufruf benötigt `Authorization: Bearer <token>`; zusätzlich sind nur Loopback-, private und Link-Local-Quelladressen zugelassen. Healthcheck und bestehende Ingress-Routen behalten ihre bisherigen Zugriffseigenschaften.
+Beim ersten normalen Start entstehen `/data/integration-api-instance-id`, `/data/integration-api-token` und `/data/fritzfon-live-image-token`. Die geheimen Dateien werden mit Rechten `0600` angelegt und alle drei Werte über App-Updates sowie Backups erhalten. Das API-Token besteht aus 256 Zufallsbits und wird nicht protokolliert. Jeder `/api/v1`-Aufruf benötigt `Authorization: Bearer <token>`; zusätzlich sind nur Loopback-, private und Link-Local-Quelladressen zugelassen. Das separate 192-Bit-Livebildtoken ist kein API-Bearer-Token. Healthcheck und bestehende Ingress-Routen behalten ihre bisherigen Zugriffseigenschaften.
 
 Der Status unterscheidet aktuelle und letzte Werte: `call.direction`, `call.caller_number`, `call.route_id` und `call.route_name` werden nach dem Gespräch geleert, während die jeweiligen `last_*`-Felder erhalten bleiben. Bei eingehenden Anrufen ohne ausgelöste Klingelroute bleiben die Routenfelder leer. Die letzte anrufende Nummer wird nur durch einen zugelassenen eingehenden Anruf aktualisiert. Diagnosen und Fehlerantworten enthalten niemals Token, Zugangsdaten oder konfigurierte Mobilrufnummern.
 
 ## Update von älteren Versionen
+
+1.3.0 ergänzt die neue Gruppe `live_image` mit dem Standard `fritzfon_live_image_enabled: true`. Der Startadapter bildet sie auf den neuen flachen Runtimewert ab; Routen-, SIP-, Audio- und Reolink-Werte werden nicht migriert oder verändert. Beim ersten Start wird nur das unabhängige Livebild-Pfadtoken unter `/data` erzeugt. Wer keinen Bildabruf bereitstellen möchte, kann den Schalter vor oder nach dem Update deaktivieren.
 
 1.2.2 führt einen einmaligen, abgesicherten Wechsel auf direkte Anrufrouten aus. Eine 1.1-Konfiguration wird als editierbare Route `default` übernommen; dabei bleiben Besucher-Sensor, Türziel und bis zu drei Mobilnummern erhalten. Vorhandene 1.2-Routen behalten ID, Name, Sensor und Klingeltaster. Ihre früheren Mobilziel-IDs werden über den vorhandenen Katalog in direkte Nummern aufgelöst. Wenn ein Benutzer bereits intuitiv eine Rufnummer direkt in ein früheres Referenzfeld eingetragen hatte, wird auch dieser Wert unverändert übernommen. Erst die vollständig erzeugte Ersatzkonfiguration wird in einem Supervisor-Schreibvorgang gespeichert. Der bestehende Vergleich-vor-Schreiben-Schutz verhindert, dass eine zeitgleiche Benutzeränderung überschrieben wird; danach bleiben normale Starts wieder schreibgeschützt.
 

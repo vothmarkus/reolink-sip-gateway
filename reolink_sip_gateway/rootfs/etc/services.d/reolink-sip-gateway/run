@@ -191,6 +191,9 @@ normalize_public_options() {
             reolink_rtsp_port: current("reolink"; "reolink_rtsp_port"; 554),
             baichuan_port: current("reolink"; "baichuan_port"; 9000)
           },
+          live_image: {
+            fritzfon_live_image_enabled: current("live_image"; "fritzfon_live_image_enabled"; true)
+          },
           sip: {
             sip_registrar: current("sip"; "sip_registrar"; "auto"),
             door_call_enabled: current("sip"; "door_call_enabled"; true),
@@ -330,7 +333,7 @@ build_runtime_options() {
         --arg detected_visitor "${detected_visitor:-}" \
         '
           . as $options
-          | ($options.reolink + $options.sip + $options.audio + $options.call + $options.diagnostics
+          | ($options.reolink + $options.live_image + $options.sip + $options.audio + $options.call + $options.diagnostics
              + {call_routes: ($options.call_routes // [])})
           | del(.nvr_channel_number)
           | .nvr_channel = $channel

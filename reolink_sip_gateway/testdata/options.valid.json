@@ -8,6 +8,9 @@
     "reolink_rtsp_port": 554,
     "baichuan_port": 9000
   },
+  "live_image": {
+    "fritzfon_live_image_enabled": true
+  },
   "sip": {
     "sip_registrar": "192.168.177.9",
     "door_call_enabled": true,

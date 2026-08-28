@@ -39,11 +39,14 @@ type CommandHandler interface {
 }
 
 type ServerOptions struct {
-	Port       int
-	Token      string
-	InstanceID string
-	Hostname   string
-	Commands   CommandHandler
+	Port              int
+	Token             string
+	InstanceID        string
+	Hostname          string
+	Commands          CommandHandler
+	LiveImageProvider JPEGProvider
+	LiveImageToken    string
+	LiveImageHost     string
 }
 
 type APIInfo struct {
