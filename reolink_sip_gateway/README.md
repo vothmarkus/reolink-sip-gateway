@@ -1,8 +1,14 @@
-# Reolink SIP Gateway 1.3.1
+# Reolink SIP Gateway 1.4.0
 
 Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann SIP-Anrufe auslösen; optional lassen sich die aktivierten Gateway-Nebenstellen anrufen und direkt mit der Doorbell verbinden.
 
 > Community-Projekt. Nicht offiziell von Reolink oder Home Assistant bereitgestellt oder unterstützt.
+
+## 1.4.0: alle aktiven NVR-Kameras auf dem FRITZ!Fon
+
+Bei aktiviertem **FRITZ!Fon-Livebilder** fragt das Gateway beim Start automatisch den Kanalstatus eines konfigurierten Reolink NVR ab. Die Ingress-Seite zeigt für jeden Online-Kanal Nummer, Kameraname, eine kopierbare stabile `.jpg`-Adresse und einen Browsertest. Die zusätzlichen Pfade lauten `/fritzfon/<token>/channel-1.jpg`, `/channel-2.jpg` usw. und verwenden dieselbe öffentliche 1-basierte Nummerierung wie die App-Konfiguration.
+
+Der bisherige Tür-Livebild-Link `/fritzfon/<token>.jpg` bleibt unverändert und zeigt weiterhin den konfigurierten Hauptkanal. Schlägt die Erkennung fehl, bleibt genau dieser Link samt Hauptkanal verfügbar. Jeder Kanal besitzt einen eigenen kurzen Bildcache und fällt nach HTTPS-/HTTP-Snapshot-CGI auf seinen NVR-RTSP-Substream zurück. Es gibt keine neue Option oder Migration; SIP, Routing, Zwei-Wege-Audio und API v1 werden nicht verändert.
 
 ## 1.3.1: Livebild sinnvoll einsortiert
 
@@ -275,10 +281,10 @@ Die Ingress-Seite zeigt unter anderem:
 - kalibrierte und aktuelle AEC-Latenz,
 - den daraus berechneten Suchbereich,
 - SIP-/Home-Assistant-Verbindungsstatus und aktuelle Call-Medien.
-- die geheime FRITZ!Fon-Livebild-Adresse samt Browsertest, wenn die Funktion aktiviert ist.
+- den unveränderten geheimen Tür-Livebild-Link sowie automatisch erkannte NVR-Kanäle mit jeweils kopierbarer Adresse und Browsertest.
 
-Zur Einrichtung unter **Telefonie → Telefoniegeräte** die IP-Türsprechanlage bearbeiten, beim Livebild `http://` auswählen und den auf der Ingress-Seite angezeigten Wert ohne `http://` einfügen. Die Kamera-Zugangsdaten werden nicht in der FRITZ!Box hinterlegt.
+Zur Einrichtung unter **Telefonie → Telefoniegeräte** die IP-Türsprechanlage bearbeiten, beim Livebild `http://` auswählen und den gewünschten auf der Ingress-Seite angezeigten Wert ohne `http://` einfügen. Nach einer Änderung der NVR-Kanalbelegung die App neu starten. Die Kamera-Zugangsdaten werden nicht in der FRITZ!Box hinterlegt.
 
 ## Hardwarestatus
 
-Der NVR-/Baichuan-Audiopfad wurde auf der Zielhardware mit nativer WebRTC-AEC erfolgreich getestet. Auch der FRITZ!Fon-Livebildpfad wurde inzwischen auf der Zielinstallation mit FRITZ!Box 4050 und FRITZ!Fon erfolgreich bestätigt.
+Der NVR-/Baichuan-Audiopfad wurde auf der Zielhardware mit nativer WebRTC-AEC erfolgreich getestet. Auch der unveränderte primäre FRITZ!Fon-Livebildpfad wurde auf der Zielinstallation mit FRITZ!Box 4050 und FRITZ!Fon erfolgreich bestätigt. Die neuen Mehrkanalpfade sind automatisiert getestet; die Bestätigung mit mehreren echten Kamerakanälen steht noch aus.

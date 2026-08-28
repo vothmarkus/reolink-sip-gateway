@@ -128,12 +128,12 @@ configuration:
         name: Mobile number 3
         description: Optional third number called simultaneously through the same mobile-call account.
   live_image:
-    name: FRITZ!Fon live image
-    description: Local protected JPEG server for the camera image shown during a door call.
+    name: FRITZ!Fon live images
+    description: Local protected JPEG server for the doorbell and automatically detected NVR camera channels.
     fields:
       fritzfon_live_image_enabled:
-        name: Provide live image for FRITZ!Fon
-        description: Provides a secret, stable .jpg address on port 18099. The exact value for the FRITZ!Box is shown on the app status page. The gateway obtains a current Reolink image, adapts oversized frames for the FRITZ!Fon, and never gives the camera credentials to the FRITZ!Box.
+        name: Provide live images for FRITZ!Fon
+        description: Provides secret, stable .jpg addresses on port 18099. The app status page shows the existing door link and every automatically detected active NVR channel with a copy button. The gateway adapts oversized images for the FRITZ!Fon and never gives the camera credentials to the FRITZ!Box.
   diagnostics:
     name: Operation & diagnostics
     description: Operating mode and logging.

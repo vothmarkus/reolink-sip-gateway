@@ -40,7 +40,7 @@ SIP registration + HA visitor subscription
 
 ### Configuration boundary
 
-The Home Assistant UI exposes the ordered groups Reolink, SIP telephony, Audio, Call, FRITZ!Fon live image and Operation & diagnostics, plus the top-level `call_routes` list immediately after the Call group. Since v1.3.1 the live-image group is therefore the penultimate visible block, directly before diagnostics. A list of route mappings already reaches Home Assistant's supported nesting limit, so it cannot be embedded one level deeper inside `call`. The Go runtime deliberately retains the proven flat configuration contract. This keeps UI evolution away from the media implementation.
+The Home Assistant UI exposes the ordered groups Reolink, SIP telephony, Audio, Call, FRITZ!Fon live images and Operation & diagnostics, plus the top-level `call_routes` list immediately after the Call group. Since v1.3.1 the live-image group is therefore the penultimate visible block, directly before diagnostics. A list of route mappings already reaches Home Assistant's supported nesting limit, so it cannot be embedded one level deeper inside `call`. The Go runtime deliberately retains the proven flat configuration contract. This keeps UI evolution away from the media implementation.
 
 v0.5.10 uses a persistent marker for the grouped-layout migration. Before the marker exists, old flat values may take precedence over Supervisor-materialized defaults so direct upgrades preserve user configuration. After migration, grouped values are authoritative and normal starts are read-only with respect to Supervisor options.
 
@@ -89,6 +89,11 @@ v1.3.1 only moves that existing public group to the penultimate UI position,
 directly before `diagnostics`. The ordered options, schema, translations and
 fixture remain aligned; no value or runtime mapping changes.
 
+v1.4.0 adds no option or migration. In NVR/auto mode, the live-image catalog
+uses Reolink's read-only `GetChannelstatus` request during startup to derive
+additional public image channels. It never alters the configured primary
+channel or the exclusive audio/media resource.
+
 ## Home Assistant integration boundary
 
 The companion integration talks only to the versioned local HTTP API. It cannot construct SIP messages, reserve RTP ports, open Reolink sessions or mutate the media pipeline.
@@ -103,25 +108,33 @@ One Store remains the source of truth. The integration can use SSE for low-laten
 
 ## FRITZ!Fon live-image boundary
 
-The status server registers exactly one tokenized path ending in `.jpg` when
-the option is enabled. It accepts only `GET` and `HEAD` from loopback, private
-or link-local source addresses, returns validated JPEG bytes with no-cache
-headers, and exposes neither a directory nor a query-based credential. The
+The status server preserves the v1.3 primary path `/fritzfon/<token>.jpg` and
+optionally registers exact channel resources below
+`/fritzfon/<token>/channel-N.jpg`. It accepts only `GET` and `HEAD` from
+loopback, private or link-local source addresses, returns validated JPEG bytes
+with no-cache headers, and exposes neither directory listing nor a query-based
+credential. Only catalogued 1-based channel numbers are routable. The
 FRITZ!Box therefore receives a read-only image capability, not the more
 powerful API v1 bearer token.
 
-The source is deliberately independent of call control and the exclusive
-audio session. It tries Reolink's snapshot CGI over local HTTPS first and local
+The catalog and per-channel sources are deliberately independent of call
+control and the exclusive audio session. Startup discovery tries Reolink's
+channel-status CGI over local HTTPS and then HTTP, filters for `online=1`,
+normalizes the optional display names and converts protocol channel 0 to public
+channel 1. Discovery failure is non-fatal and retains the configured primary
+source. Each source then tries snapshot CGI over local HTTPS first and local
 HTTP second. Cross-host redirects are refused. If neither result is a valid
-JPEG, a bounded FFmpeg process captures one frame from the existing configured
-RTSP URL. Transport errors are classified before logging so URLs containing
-camera credentials cannot leak.
+JPEG, a bounded FFmpeg process captures one frame from the configured primary
+RTSP URL or the corresponding NVR `/Preview_NN_sub` URL. Transport errors are
+classified before logging so URLs containing camera credentials cannot leak.
 
 Decoded dimensions and total pixel count are bounded before allocation.
-Images outside a 480×640 bounding box are resized with their aspect ratio preserved; a
-750 ms in-memory cache coalesces nearly simultaneous phone requests. The
-server-facing provider interface contains only `FetchJPEG(context)`, keeping
-HTTP authorization and response behavior separate from camera transport.
+Images outside a 480×640 bounding box are resized with their aspect ratio preserved;
+an independent 750 ms in-memory cache per channel coalesces nearly simultaneous
+phone requests. The server-facing base provider still contains only
+`FetchJPEG(context)` for v1.3 compatibility. An optional multi-channel
+interface adds immutable channel metadata and indexed fetches, keeping HTTP
+authorization and response behavior separate from camera transport.
 
 ## SIP call control
 

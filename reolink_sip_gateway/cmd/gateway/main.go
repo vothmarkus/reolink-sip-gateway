@@ -24,7 +24,7 @@ import (
 	statuspkg "github.com/vothmarkus/reolink-sip-gateway/internal/status"
 )
 
-const version = "1.3.1"
+const version = "1.4.0"
 
 func main() {
 	configPath := flag.String("config", "/data/options.json", "path to Home Assistant app options JSON")
@@ -79,9 +79,11 @@ func main() {
 	store := statuspkg.New(version)
 	store.SetRoutes(statusRouteDefinitions(cfg, routes))
 	var liveImageProvider statuspkg.JPEGProvider
+	var liveImageCatalog *liveimage.Catalog
 	liveImageHost := ""
 	if cfg.FritzFonLiveImageEnabled {
-		liveImageProvider = liveimage.New(cfg, logger.With("component", "fritzfon_live_image"))
+		liveImageCatalog = liveimage.NewCatalog(cfg, logger.With("component", "fritzfon_live_image"))
+		liveImageProvider = liveImageCatalog
 		discoveryCtx, discoveryCancel := context.WithTimeout(ctx, 2*time.Second)
 		liveImageHost, err = localIPv4ForRemote(discoveryCtx, cfg.SIPRegistrar, cfg.SIPRegistrarPort)
 		discoveryCancel()
@@ -121,7 +123,19 @@ func main() {
 	}()
 	logger.Info("Home Assistant integration API ready", "api_version", statuspkg.APIVersion, "port", cfg.StatusPort, "instance_id", identity.InstanceID)
 	if cfg.FritzFonLiveImageEnabled {
-		logger.Info("FRITZ!Fon live image server ready", "port", cfg.StatusPort, "format", "JPEG", "protected_path", true)
+		logger.Info("FRITZ!Fon live image server ready", "port", cfg.StatusPort, "format", "JPEG", "protected_path", true, "multi_channel", true)
+		if cfg.ReolinkMode != "standalone" {
+			go func() {
+				discoveryCtx, discoveryCancel := context.WithTimeout(ctx, 12*time.Second)
+				defer discoveryCancel()
+				channels, discoverErr := liveImageCatalog.Discover(discoveryCtx)
+				if discoverErr != nil {
+					logger.Warn("Reolink NVR channel auto-detection unavailable; configured live-image channel remains active", "error", discoverErr, "channels", len(channels))
+					return
+				}
+				logger.Info("Reolink NVR live-image channels detected", "channels", len(channels))
+			}()
+		}
 	}
 
 	token := os.Getenv("SUPERVISOR_TOKEN")

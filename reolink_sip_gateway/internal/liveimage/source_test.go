@@ -154,6 +154,20 @@ func TestSameHostRedirectsRejectsCredentialForwardingToAnotherHost(t *testing.T)
 	}
 }
 
+func TestChannelRTSPURLKeepsPrimaryAndBuildsOtherNVRPaths(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.ReolinkHost = "192.168.177.82"
+	cfg.ReolinkRTSPPort = 8554
+	cfg.NVRChannel = 1
+	cfg.ReolinkStreamPath = "/Preview_02_sub"
+	if got := channelRTSPURL(cfg, 1); got != cfg.RTSPURL() {
+		t.Fatalf("primary RTSP URL=%q", got)
+	}
+	if got := channelRTSPURL(cfg, 2); got != "rtsp://192.168.177.82:8554/Preview_03_sub" {
+		t.Fatalf("channel 3 RTSP URL=%q", got)
+	}
+}
+
 func testJPEG(t *testing.T, width, height int) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, width, height))

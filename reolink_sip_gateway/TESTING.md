@@ -1,8 +1,8 @@
-# Prüfprotokoll 1.3.1
+# Prüfprotokoll 1.4.0
 
 ## Ziel
 
-1.3.0 stellt der FRITZ!Box ein aktuelles Reolink-JPEG unter einer stabilen geheimen `.jpg`-Adresse bereit. 1.3.1 verschiebt die bestehende Gruppe **FRITZ!Fon-Livebild** an die vorletzte Position unmittelbar vor **Betrieb & Diagnose**. Zu prüfen sind die identische öffentliche Gruppenreihenfolge, CGI- und RTSP-Fallback, JPEG-Validierung und -Skalierung, Tokenpersistenz, die lokale HTTP-Grenze, die Anzeige auf FRITZ!Fon sowie die vollständige Regression des unveränderten 1.2.2-Routing-, SIP- und Audiopfads.
+1.4.0 erkennt Online-Kanäle eines Reolink NVR automatisch und stellt für jeden eine stabile geheime `.jpg`-Adresse bereit. Zu prüfen sind Reolinks 0-basierte zu öffentlich 1-basierte Kanalabbildung, Online-Filter und Namen, unveränderter Türlink, kanalgetrennter CGI-/RTSP-Abruf und Cache, sichere Fehlerfälle, die Anzeige mehrerer Bilder auf FRITZ!Fon sowie die vollständige Regression des Routing-, SIP- und Audiopfads.
 
 ## Softwareprüfungen vor Release
 
@@ -18,9 +18,18 @@
 - identische sechs Gruppen sowie `call_routes` unmittelbar hinter `call` in `options`, `schema`, DE, EN und Testkonfiguration; `live_image` steht jeweils als vorletzte Gruppe direkt vor `diagnostics`
 - identische SIP-Feldreihenfolge in `options`, `schema`, DE, EN und Fixture: beide Konto-Blöcke vor `sip_registrar_port`, `sip_local_port` und `parallel_local_port`
 - Bash-Syntaxprüfung des s6-Startskripts
-- Versionsprüfung 1.3.1 in App, Gateway, SIP-/RTSP-/Snapshot-User-Agent und CI-Buildargument
+- Versionsprüfung 1.4.0 in App, Gateway, SIP-/RTSP-/Snapshot-/Kanalerkennungs-User-Agent und CI-Buildargument
 - Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
 - expliziter Test der nativen Statistikbits 0…7
+
+## Ergänzungen 1.4.0
+
+- Ein Mock-NVR prüft den read-only-Aufruf `GET /api.cgi?cmd=GetChannelstatus`, Credentials, Online-Filter, ungültige Kanäle, normalisierte Namen sowie die Umrechnung von intern 0-basiert auf öffentlich 1-basiert.
+- Die erkannten Kanäle werden sortiert und dedupliziert. Der konfigurierte Hauptkanal bleibt bei leerer, unvollständiger oder fehlerhafter Discovery-Antwort erhalten; Passwörter dürfen in keinem Fehler erscheinen.
+- Jeder Kanalpfad akzeptiert nur das exakte Muster `/fritzfon/<token>/channel-N.jpg`; falsches Token, unbekannter/offline Kanal, führende Null, falsche Endung und zusätzliche Pfadsegmente ergeben kein Bild.
+- Snapshot-Tests beweisen, dass `channel-1.jpg` Reolink-Kanal `0`, `channel-2.jpg` Reolink-Kanal `1` usw. abfragt. Der Hauptkanal verwendet weiterhin exakt den konfigurierten RTSP-Pfad, weitere Kanäle `/Preview_NN_sub`.
+- Die Statusseite sortiert die automatisch erkannten Kanäle und zeigt Namen, stabile Adressen, Kopierknöpfe und Browsertests. Der bisherige `/fritzfon/<token>.jpg`-Link bleibt unverändert an erster Stelle.
+- Konfiguration, Adapter, persistentes Token, API v1, SIP, Routing und Audio erhalten keine neue Option und keine Verhaltensänderung.
 
 ## Ergänzungen 1.3.1
 
@@ -37,6 +46,16 @@
 - Der geheime HTTP-Pfad akzeptiert nur lokale/private/link-lokale `GET`- und `HEAD`-Anfragen, liefert `image/jpeg`, eine feste `.jpg`-Disposition und No-Cache-/Nosniff-Header. Öffentliche Quelladressen und falsche Pfade bleiben unerreichbar; Providerfehler ergeben eine generische `502`-Antwort.
 - API-Token und separates 192-Bit-Livebildtoken bleiben über erneutes Laden stabil und liegen jeweils mit Modus `0600` vor. Das Livebildtoken erfüllt bewusst nicht die Validierung des 256-Bit-API-Tokens.
 - Die Statusseite zeigt Protokollauswahl-Anweisung, kopierbare Adresse und Browsertest nur bei aktivierter Funktion. Der Snapshot meldet den Aktivierungszustand additiv; API v1 bleibt ansonsten unverändert.
+
+## FRITZ!Box-4050-/FRITZ!Fon-Hardwaretest 1.4.0
+
+1. Mindestens zwei NVR-Kanäle online schalten, App starten und im Ingress-Abschnitt **FRITZ!Fon-Livebilder** prüfen, dass beide Kanäle mit korrekter 1-basierter Nummer, Reolink-Name, Kopierknopf und `.jpg`-Browsertest erscheinen.
+2. Jeden Testlink öffnen und anhand des Motivs sicherstellen, dass Nummer und Kamera zusammenpassen. Benutzername und Passwort dürfen in keiner angezeigten Adresse vorkommen.
+3. Den bisherigen **Tür-Livebild (bestehender Link)** testen und mit der vor dem Update gespeicherten FRITZ!Box-Adresse vergleichen. Pfad, Token und konfigurierter Türkanal müssen unverändert sein.
+4. In der FRITZ!Box die gewünschten Kanaladressen ohne `http://` als mehrere Livebilder eintragen und jedes Bild am FRITZ!Fon abrufen. Wiederholungen müssen aktuelle Frames zeigen.
+5. Einen Kanal offline schalten und die App neu starten. Der Kanal darf aus der automatisch erkannten Liste verschwinden; ist er der konfigurierte Hauptkanal, muss er als kompatibler Fallback weiterhin angeboten werden.
+6. Die NVR-Kanalerkennung vorübergehend blockieren und neu starten. Die App muss mit Warnung weiterlaufen, der bestehende Türlink weiter funktionieren und SIP-/Audio-Start dürfen nicht blockiert werden.
+7. Nach Wiederherstellung jeweils einen Türruf, Mobilruf, eingehenden Anruf, DTMF und Zwei-Wege-Audio stichprobenartig prüfen. Gleichzeitige Bildabrufe dürfen keinen Call-Slot belegen.
 
 ## FRITZ!Box-4050-/FRITZ!Fon-Hardwaretest 1.3.1
 
@@ -290,4 +309,4 @@ Im 0.4.3-Hardwarelog war `native_stats_mask=0x3b`, aber Go zeigte nur einen Teil
 
 ## Hardwarestand
 
-Die Livebildanzeige wurde auf der Zielinstallation mit FRITZ!Box 4050 und FRITZ!Fon erfolgreich bestätigt. Double-Talk auf der Zielhardware wird weiterhin später separat getestet. Der stabile 53-s-0.4.3-Einsprechtest bleibt bis dahin die Referenz für Single-Talk-Echoreduktion.
+Die unveränderte primäre Livebildanzeige wurde auf der Zielinstallation mit FRITZ!Box 4050 und FRITZ!Fon erfolgreich bestätigt. Die Mehrkanal-Erweiterung aus 1.4.0 ist automatisiert getestet, aber noch nicht auf dieser Zielinstallation bestätigt. Double-Talk auf der Zielhardware wird weiterhin später separat getestet. Der stabile 53-s-0.4.3-Einsprechtest bleibt bis dahin die Referenz für Single-Talk-Echoreduktion.

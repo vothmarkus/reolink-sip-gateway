@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.0
+
+- Automatische read-only Erkennung aller online gemeldeten Reolink-NVR-Kanäle über `GetChannelstatus`; interne 0-basierte Kanäle werden konsistent als öffentliche 1-basierte Nummern dargestellt und Kameranamen sicher normalisiert.
+- Für jeden erkannten Kanal steht unter `/fritzfon/<token>/channel-N.jpg` ein eigener FRITZ!Fon-kompatibler Abruf bereit. Der bisherige `/fritzfon/<token>.jpg`-Türlink bleibt unverändert und ist auch bei fehlgeschlagener Erkennung verfügbar.
+- Die Ingress-Seite zeigt den bestehenden Türlink und alle erkannten Kanäle sortiert mit Namen, kopierbarer Adresse und Browsertest. Jeder Kanal besitzt einen getrennten 750-ms-Cache und einen passenden Snapshot-/RTSP-Fallback.
+- Nur bekannte Kanäle und exakte `.jpg`-Pfade sind erreichbar. Das persistente 192-Bit-Token, die private/lokale Netzgrenze, credential-freie Client-URLs und generische Fehlerantworten gelten unverändert für alle Bilder.
+- Keine neue Option oder Migration. Der konfigurierte Hauptkanal bleibt alleiniger Audio-/Türkanal; Klingelrouten, SIP, Zwei-Wege-Audio, AEC und API v1 bleiben funktional unverändert.
+- Unit-, HTTP-, Discovery-, Fallback-, UI-, Adapter-, Race- und Containerprüfungen sowie Versionskennungen auf 1.4.0 aktualisiert. Der primäre Livebildpfad ist auf der Zielhardware bestätigt; die Mehrkanal-Hardwareprüfung steht noch aus.
+
 ## 1.3.1
 
 - **FRITZ!Fon-Livebild** steht in der Home-Assistant-Konfiguration nun als vorletzte Gruppe unmittelbar über **Betrieb & Diagnose**.

@@ -128,12 +128,12 @@ configuration:
         name: Mobilrufnummer 3
         description: Dritte gleichzeitig anzurufende Nummer über dasselbe Mobilruf-Konto; optional.
   live_image:
-    name: FRITZ!Fon-Livebild
-    description: Lokaler, geschützter JPEG-Server für das Kamerabild beim Türruf.
+    name: FRITZ!Fon-Livebilder
+    description: Lokaler, geschützter JPEG-Server für Türklingel und automatisch erkannte NVR-Kamerakanäle.
     fields:
       fritzfon_live_image_enabled:
-        name: Livebild für FRITZ!Fon bereitstellen
-        description: Stellt auf Port 18099 eine geheime, dauerhaft stabile .jpg-Adresse bereit. Die genaue FRITZ!Box-Eingabe erscheint auf der App-Statusseite. Das Gateway holt ein aktuelles Reolink-Bild, passt große Auflösungen für das FRITZ!Fon an und gibt keine Kamera-Zugangsdaten an die FRITZ!Box weiter.
+        name: Livebilder für FRITZ!Fon bereitstellen
+        description: Stellt auf Port 18099 geheime, dauerhaft stabile .jpg-Adressen bereit. Die App-Statusseite zeigt den bisherigen Tür-Link und automatisch erkannte aktive NVR-Kanäle jeweils zum Kopieren. Das Gateway passt große Bilder für das FRITZ!Fon an und gibt keine Kamera-Zugangsdaten an die FRITZ!Box weiter.
   diagnostics:
     name: Betrieb & Diagnose
     description: Betriebsmodus und Protokollierung.

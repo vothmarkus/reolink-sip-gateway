@@ -38,6 +38,8 @@ const (
 // coalesces simultaneous requests from multiple phones.
 type Source struct {
 	cfg      config.Config
+	channel  int
+	rtspURL  string
 	logger   *slog.Logger
 	client   *http.Client
 	cgiBases []string
@@ -49,6 +51,10 @@ type Source struct {
 }
 
 func New(cfg config.Config, logger *slog.Logger) *Source {
+	return newChannelSource(cfg, logger, cfg.NVRChannel)
+}
+
+func newChannelSource(cfg config.Config, logger *slog.Logger, channel int) *Source {
 	transport := &http.Transport{
 		Proxy:                 nil,
 		DialContext:           (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
@@ -68,6 +74,8 @@ func New(cfg config.Config, logger *slog.Logger) *Source {
 	}
 	s := &Source{
 		cfg:      cfg,
+		channel:  channel,
+		rtspURL:  channelRTSPURL(cfg, channel),
 		logger:   logger,
 		client:   &http.Client{Transport: transport, Timeout: 5 * time.Second},
 		cgiBases: snapshotCGIBases(cfg.ReolinkHost),
@@ -136,7 +144,7 @@ func (s *Source) fetchCGI(ctx context.Context, base string) ([]byte, error) {
 	u.RawQuery = ""
 	query := u.Query()
 	query.Set("cmd", "Snap")
-	query.Set("channel", strconv.Itoa(s.cfg.NVRChannel))
+	query.Set("channel", strconv.Itoa(s.channel))
 	query.Set("rs", strconv.FormatInt(time.Now().UnixNano(), 36))
 	query.Set("user", s.cfg.ReolinkUsername)
 	query.Set("password", s.cfg.ReolinkPassword)
@@ -149,7 +157,7 @@ func (s *Source) fetchCGI(ctx context.Context, base string) ([]byte, error) {
 		return nil, fmt.Errorf("%s Reolink CGI request could not be created", u.Scheme)
 	}
 	req.Header.Set("Accept", "image/jpeg")
-	req.Header.Set("User-Agent", "ReolinkSIPGateway/1.3.1")
+	req.Header.Set("User-Agent", "ReolinkSIPGateway/1.4.0")
 	response, err := s.client.Do(req)
 	if err != nil {
 		// net/http errors can include the full URL, including its password.
@@ -171,7 +179,7 @@ func (s *Source) fetchCGI(ctx context.Context, base string) ([]byte, error) {
 }
 
 func (s *Source) fetchRTSP(ctx context.Context) ([]byte, error) {
-	u, err := url.Parse(s.cfg.RTSPURL())
+	u, err := url.Parse(s.rtspURL)
 	if err != nil {
 		return nil, errors.New("RTSP snapshot URL is invalid")
 	}
@@ -194,6 +202,14 @@ func (s *Source) fetchRTSP(ctx context.Context) ([]byte, error) {
 		return nil, errors.New("RTSP snapshot fallback returned an invalid image size")
 	}
 	return imageBytes, nil
+}
+
+func channelRTSPURL(cfg config.Config, channel int) string {
+	if channel == cfg.NVRChannel {
+		return cfg.RTSPURL()
+	}
+	path := fmt.Sprintf("/Preview_%02d_sub", channel+1)
+	return fmt.Sprintf("rtsp://%s%s", net.JoinHostPort(cfg.ReolinkHost, strconv.Itoa(cfg.ReolinkRTSPPort)), path)
 }
 
 func snapshotCGIBases(host string) []string {

@@ -1,5 +1,25 @@
 # Roadmap
 
+## v1.4: FRITZ!Fon images for every NVR channel — implemented
+
+At startup the gateway uses Reolink's read-only channel-status API to detect
+online NVR channels and publishes a stable tokenized `.jpg` URL for each one.
+The Ingress page presents sorted 1-based channel numbers, optional camera names,
+copy controls and browser tests.
+
+Implemented invariants:
+
+- the v1.3 `/fritzfon/<token>.jpg` primary/door URL remains unchanged;
+- exact `/fritzfon/<token>/channel-N.jpg` resources exist only for detected
+  online channels plus the configured primary fallback;
+- discovery errors never block startup, SIP registration, audio or the primary
+  image;
+- every channel uses its own snapshot source, RTSP fallback and short cache;
+- the existing token, local-network boundary, JPEG validation and credential
+  isolation apply to every resource;
+- no configuration migration, API v1 change, camera selector in call routes or
+  additional Reolink audio session.
+
 ## v1.3: FRITZ!Fon live image — implemented
 
 The gateway exposes a current Reolink frame through a stable local URL ending
@@ -64,6 +84,9 @@ Implemented invariants:
 
 ## Later candidates
 
-Multiple cameras, separate media paths, route-specific door openers and queued
-calls remain intentionally outside the current architecture. They require a different resource and
-permission model rather than another field in the routing matrix.
+Multiple simultaneous camera/audio sessions, route-specific camera selection,
+route-specific door openers and queued calls remain intentionally outside the
+current architecture. They require a different resource and permission model
+rather than another field in the routing matrix. v1.4's additional read-only
+snapshots do not allocate media sessions and therefore do not change that
+boundary.

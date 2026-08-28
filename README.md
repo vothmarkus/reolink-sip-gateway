@@ -6,7 +6,7 @@ Community Home Assistant app that bridges bidirectional audio between a Reolink 
 
 ## Current release
 
-**v1.3.1** keeps the FRITZ!Fon-compatible live-image server introduced in v1.3.0 and moves its configuration group to the penultimate position, directly above **Operation & diagnostics**. Option keys, defaults and runtime behavior remain unchanged. The Ingress page provides the exact local address to enter for the IP door intercom after selecting `http://` in the FRITZ!Box. Its stable, secret path ends in `.jpg`, contains no Reolink credentials and returns a current JPEG sized for the phone display.
+**v1.4.0** automatically detects online channels of a configured Reolink NVR and publishes a separate, stable FRITZ!Fon-compatible `.jpg` address for each one. The Ingress page lists the detected channel numbers and names with copy and browser-test controls. The existing door-live-image address from v1.3 remains byte-for-byte unchanged and continues to use the configured primary channel if discovery is unavailable.
 
 The direct v1.2.2 call-route model remains unchanged: a fresh installation contains one editable `Standardroute` with visitor sensor `auto`, FRITZ!Box doorbell number `11` and three optional mobile-number fields. All routes continue to share one Reolink camera/media path and the same two optional SIP accounts.
 
@@ -30,7 +30,7 @@ Highlights:
 - Configurable SIP RTP inactivity watchdog for deterministic cleanup of broken calls.
 - Home Assistant Reolink visitor binary sensor as call trigger, with entity-registry auto-discovery or manual override.
 - Reolink standalone and NVR media profiles.
-- Optional local FRITZ!Fon live-image endpoint with a persistent independent path token, JPEG validation and output fitted inside AVM's approximately 480×640-pixel frame.
+- Optional local FRITZ!Fon live-image endpoints with automatic online-NVR-channel discovery, one stable copyable URL per channel, a persistent independent path token, JPEG validation and output fitted inside AVM's approximately 480×640-pixel frame.
 - Bidirectional audio via RTSP/ONVIF or Reolink Baichuan, depending on profile.
 - Native WebRTC AudioProcessing echo cancellation.
 - Automatic acoustic startup-delay calibration.
@@ -148,11 +148,13 @@ required per route.
 
 `nvr_channel_number` is deliberately **1-based** in the user interface. The startup adapter translates it to the internal Reolink channel representation without exposing the protocol-specific zero-based value.
 
-### FRITZ!Fon live image
+### FRITZ!Fon live images
 
-With `fritzfon_live_image_enabled: true`, the gateway exposes one read-only JPEG endpoint on the existing local port `18099`. Open the app's Ingress page, find **FRITZ!Fon live image**, and test the displayed link in a browser. In **Telephony → Telephony Devices**, edit the FRITZ!Box IP door intercom, select `http://` for **Live image**, and paste the displayed address **without** a scheme into the adjacent field. The value already ends in `.jpg`, as required by FRITZ!OS.
+With `fritzfon_live_image_enabled: true`, the gateway exposes the existing read-only door JPEG and, in NVR or automatic mode, asks the Reolink `GetChannelstatus` API which channels are online. Open the app's Ingress page and find **FRITZ!Fon live images**. The first entry is the unchanged door link; below it, every detected channel has its own copy button and browser test. Channel URLs are stable and use the public 1-based NVR number, for example `/fritzfon/<token>/channel-1.jpg` and `/fritzfon/<token>/channel-2.jpg`. Restart the app after adding, removing or renaming NVR channels so the list is detected again.
 
-The URL contains a separate random token stored with mode `0600` under `/data`; it remains stable across updates and backups. Treat the complete URL as a secret. It can fetch a camera image but cannot call, hang up or use API v1, and requests from outside loopback, private or link-local networks are rejected. Camera/NVR credentials are never placed in the FRITZ!Box URL. The source request prefers local HTTPS, falls back to local HTTP for Reolink firmware without usable HTTPS snapshot support, and uses the configured RTSP stream only if both CGI attempts fail. Requests within 750 ms share one in-memory frame.
+In **Telephony → Telephony Devices**, edit the FRITZ!Box IP door intercom, select `http://` for **Live image**, and paste the displayed address **without** a scheme into the adjacent field. The values already end in `.jpg`, as required by FRITZ!OS. If automatic discovery fails or the host is a standalone camera, the configured primary image remains available and no SIP, audio or call-routing behavior changes.
+
+All URLs share a separate random token stored with mode `0600` under `/data`; it remains stable across updates and backups. Treat every complete URL as a secret. It can fetch camera images but cannot call, hang up or use API v1, and requests from outside loopback, private or link-local networks are rejected. Camera/NVR credentials are never placed in a FRITZ!Box URL. Each channel independently prefers local HTTPS snapshot CGI, falls back to local HTTP and finally captures one frame from that channel's NVR RTSP substream. Requests for the same channel within 750 ms share one in-memory frame.
 
 AVM documents JPEG/JPG, PNG and GIF image URLs and recommends roughly 240×320 through 480×640 pixels for FRITZ!Fon displays. This gateway fits every JPEG inside a 480×640 box without changing its aspect ratio. See AVM's [live-image instructions](https://fritz.com/apps/knowledge-base/fritz-box-7590/1602_live-bild-einer-ip-kamera-am-fritz-fon-anzeigen) and [IP door-intercom setup](https://fritz.com/apps/knowledge-base/fritz-box-4050/3513_ip-tursprechanlage-in-fritz-box-einrichten).
 
@@ -186,6 +188,8 @@ This design is intentional: hardware testing showed that the former Go live dela
 
 ## Configuration migration
 
+v1.4.0 adds no option or data migration. When live images are enabled, NVR/auto mode performs read-only channel discovery at startup and derives the additional channel URLs from the existing persistent path token. The previous door URL and configured `nvr_channel_number` behavior are unchanged.
+
 v1.3.1 only reorders the existing `live_image` group in the visible Home Assistant configuration. It introduces no option, default or data migration.
 
 v1.3.0 adds the `live_image` group with `fritzfon_live_image_enabled: true`. The adapter supplies that default when an older configuration has no group; it does not rewrite or migrate existing Reolink, SIP, audio or route values. The independent image-path token is created automatically under `/data`.
@@ -207,7 +211,7 @@ v0.5.10 finalizes the grouped configuration introduced in v0.5.8:
 
 ## Hardware status
 
-The NVR/Baichuan audio path has been developed and hardware-tested with a Reolink Video Doorbell PoE behind an RLN8-410 NVR. The FRITZ!Fon live-image path has also been confirmed successfully on the target FRITZ!Box 4050/FRITZ!Fon installation. Other Reolink firmware/device combinations may differ; detailed debug logs are useful when reporting compatibility issues.
+The NVR/Baichuan audio path has been developed and hardware-tested with a Reolink Video Doorbell PoE behind an RLN8-410 NVR. The unchanged primary FRITZ!Fon live-image path has also been confirmed successfully on the target FRITZ!Box 4050/FRITZ!Fon installation. The new v1.4 multi-channel discovery and URLs are covered by automated tests but still require confirmation on that target hardware. Other Reolink firmware/device combinations may differ; detailed debug logs are useful when reporting compatibility issues.
 
 ## Development
 

@@ -36,6 +36,10 @@ func TestStatusPageContainsLogo(t *testing.T) {
 	if err := page.Execute(&out, pageData{
 		Snapshot: Snapshot{FritzFonLiveImageEnabled: true}, APIHostname: "1c33278a-reolink-sip-gateway", APIToken: "secret-token",
 		LiveImageAvailable: true, LiveImageAddress: "192.168.177.5:18099/fritzfon/image-token.jpg", LiveImageURL: "http://192.168.177.5:18099/fritzfon/image-token.jpg",
+		LiveImageChannels: []liveImagePageChannel{
+			{Number: 1, Name: "Einfahrt", Address: "192.168.177.5:18099/fritzfon/image-token/channel-1.jpg", URL: "http://192.168.177.5:18099/fritzfon/image-token/channel-1.jpg"},
+			{Number: 2, Name: "Video Doorbell", Address: "192.168.177.5:18099/fritzfon/image-token/channel-2.jpg", URL: "http://192.168.177.5:18099/fritzfon/image-token/channel-2.jpg"},
+		},
 	}); err != nil {
 		t.Fatalf("render status page: %v", err)
 	}
@@ -50,6 +54,9 @@ func TestStatusPageContainsLogo(t *testing.T) {
 	}
 	if !bytes.Contains(out.Bytes(), []byte(`192.168.177.5:18099/fritzfon/image-token.jpg`)) || !bytes.Contains(out.Bytes(), []byte(`http://`)) {
 		t.Fatal("status page does not contain the FRITZ!Fon live image setup data")
+	}
+	if !bytes.Contains(out.Bytes(), []byte(`Video Doorbell`)) || !bytes.Contains(out.Bytes(), []byte(`/fritzfon/image-token/channel-2.jpg`)) {
+		t.Fatal("status page does not contain the detected FRITZ!Fon channel links")
 	}
 }
 
