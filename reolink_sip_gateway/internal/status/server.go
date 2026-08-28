@@ -58,6 +58,7 @@ type Snapshot struct {
 	LastCalibration               time.Time `json:"last_calibration,omitempty"`
 	WebRTCHighPassFilterEnabled   bool      `json:"webrtc_high_pass_filter_enabled"`
 	WebRTCNoiseSuppressionEnabled bool      `json:"webrtc_noise_suppression_enabled"`
+	FritzFonLiveImageEnabled      bool      `json:"fritzfon_live_image_enabled"`
 	ActiveEchoCancellation        string    `json:"active_echo_cancellation,omitempty"`
 	ActiveTalkback                string    `json:"active_talkback,omitempty"`
 	TalkbackDetails               string    `json:"talkback_details,omitempty"`
@@ -226,8 +227,17 @@ func (s *Store) Serve(ctx context.Context, options ServerOptions) error {
 	if !validAPIToken(options.Token) || !validInstanceID(options.InstanceID) {
 		return errors.New("integration API identity is invalid")
 	}
+	if options.LiveImageProvider != nil && !validLiveImageToken(options.LiveImageToken) {
+		return errors.New("FRITZ!Fon live image identity is invalid")
+	}
 	mux := http.NewServeMux()
 	s.registerAPIRoutes(mux, options)
+	liveImageEnabled := options.LiveImageProvider != nil
+	liveImageAddressValue := ""
+	if liveImageEnabled {
+		liveImageAddressValue = liveImageAddress(options.LiveImageHost, options.Port, options.LiveImageToken)
+		mux.Handle(liveImagePath(options.LiveImageToken), localLiveImageOnly(liveImageHandler(options.LiveImageProvider)))
+	}
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
@@ -250,7 +260,11 @@ func (s *Store) Serve(ctx context.Context, options ServerOptions) error {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'self'")
-		_ = page.Execute(w, pageData{Snapshot: s.Get(), APIHostname: setupHostname(options.Hostname), APIToken: options.Token})
+		_ = page.Execute(w, pageData{
+			Snapshot: s.Get(), APIHostname: setupHostname(options.Hostname), APIToken: options.Token,
+			LiveImageAvailable: liveImageEnabled, LiveImageAddress: liveImageAddressValue,
+			LiveImageURL: fullLiveImageURL(liveImageAddressValue),
+		})
 	})))
 
 	srv := &http.Server{
@@ -316,15 +330,18 @@ func formatTime(v time.Time) string {
 
 type pageData struct {
 	Snapshot
-	APIHostname string
-	APIToken    string
+	APIHostname        string
+	APIToken           string
+	LiveImageAvailable bool
+	LiveImageAddress   string
+	LiveImageURL       string
 }
 
 func setupHostname(value string) string {
 	return strings.ReplaceAll(strings.TrimSpace(value), "_", "-")
 }
 
-var page = template.Must(template.New("status").Funcs(template.FuncMap{"time": formatTime}).Parse(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reolink SIP Gateway</title><style>body{font:16px system-ui;margin:2rem;max-width:820px}.brand{display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem}.brand img{width:72px;height:72px;border-radius:16px}.brand h1{margin:0}.brand p{margin:.25rem 0 0;color:#666}.integration{background:#f4f6f8;border-radius:10px;padding:1rem;margin:0 0 1.25rem}.integration h2{font-size:1.1rem;margin:0 0 .65rem}.integration p{margin:.4rem 0}.credential{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}.credential code{overflow-wrap:anywhere}.credential button{padding:.35rem .65rem}table{border-collapse:collapse;width:100%}td{padding:.55rem;border-bottom:1px solid #ddd;vertical-align:top}td:first-child{font-weight:600;width:40%}.ok{color:#087f23}.bad{color:#b00020}.muted{color:#666}code{background:#eee;padding:.15rem .3rem;border-radius:4px}@media(max-width:520px){body{margin:1rem}.brand img{width:60px;height:60px}.brand h1{font-size:1.55rem}}</style></head><body><div class="brand"><img src="./logo.png" alt="Reolink SIP Gateway"><div><h1>Reolink SIP Gateway</h1><p>Reolink ↔ SIP Zwei-Wege-Audio</p></div></div><section class="integration"><h2>Home-Assistant-Integration</h2><div class="credential"><span>Add-on-Hostname:</span><code id="api-hostname">{{.APIHostname}}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('api-hostname').textContent)">kopieren</button></div><div class="credential"><span>API-Token:</span><code id="api-token">{{.APIToken}}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('api-token').textContent)">kopieren</button></div><p class="muted">Die Integration erzeugt die API-Adresse automatisch. Token vertraulich behandeln; es berechtigt zu Testanruf und Auflegen.</p></section><table>
+var page = template.Must(template.New("status").Funcs(template.FuncMap{"time": formatTime}).Parse(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reolink SIP Gateway</title><style>body{font:16px system-ui;margin:2rem;max-width:820px}.brand{display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem}.brand img{width:72px;height:72px;border-radius:16px}.brand h1{margin:0}.brand p{margin:.25rem 0 0;color:#666}.integration{background:#f4f6f8;border-radius:10px;padding:1rem;margin:0 0 1.25rem}.integration h2{font-size:1.1rem;margin:0 0 .65rem}.integration p{margin:.4rem 0}.credential{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}.credential code{overflow-wrap:anywhere}.credential button{padding:.35rem .65rem}table{border-collapse:collapse;width:100%}td{padding:.55rem;border-bottom:1px solid #ddd;vertical-align:top}td:first-child{font-weight:600;width:40%}.ok{color:#087f23}.bad{color:#b00020}.muted{color:#666}code{background:#eee;padding:.15rem .3rem;border-radius:4px}@media(max-width:520px){body{margin:1rem}.brand img{width:60px;height:60px}.brand h1{font-size:1.55rem}}</style></head><body><div class="brand"><img src="./logo.png" alt="Reolink SIP Gateway"><div><h1>Reolink SIP Gateway</h1><p>Reolink ↔ SIP Zwei-Wege-Audio + FRITZ!Fon-Livebild</p></div></div><section class="integration"><h2>Home-Assistant-Integration</h2><div class="credential"><span>Add-on-Hostname:</span><code id="api-hostname">{{.APIHostname}}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('api-hostname').textContent)">kopieren</button></div><div class="credential"><span>API-Token:</span><code id="api-token">{{.APIToken}}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('api-token').textContent)">kopieren</button></div><p class="muted">Die Integration erzeugt die API-Adresse automatisch. Token vertraulich behandeln; es berechtigt zu Testanruf und Auflegen.</p></section><section class="integration"><h2>FRITZ!Fon-Livebild</h2>{{if .LiveImageAvailable}}<p>In der FRITZ!Box bei <strong>Live-Bild</strong> <code>http://</code> auswählen und diesen Wert eintragen:</p><div class="credential"><code id="live-image-address">{{.LiveImageAddress}}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('live-image-address').textContent)">kopieren</button></div><p><a href="{{.LiveImageURL}}" target="_blank" rel="noreferrer">Aktuelles Kamerabild testen</a></p><p class="muted">Die geheime, dauerhaft stabile Adresse endet FRITZ!Box-kompatibel auf <code>.jpg</code>. Reolink-Zugangsdaten werden nicht an die FRITZ!Box übergeben.</p>{{else}}<p class="muted">In den App-Optionen unter „FRITZ!Fon-Livebild“ deaktiviert.</p>{{end}}</section><table>
 <tr><td>Status</td><td><code>{{.State}}</code></td></tr>
 {{if .DoorCallEnabled}}<tr><td>Tür-SIP registriert</td><td>{{if .SIPRegistered}}<span class="ok">ja</span>{{else}}<span class="bad">nein</span>{{end}}</td></tr>{{end}}
 {{if .ParallelCallEnabled}}<tr><td>Mobilruf-SIP registriert</td><td>{{if .ParallelSIPRegistered}}<span class="ok">ja</span>{{else}}<span class="bad">nein</span>{{end}}</td></tr>{{end}}
@@ -333,6 +350,7 @@ var page = template.Must(template.New("status").Funcs(template.FuncMap{"time": f
 <tr><td>Aktiver Reolink-Modus</td><td>{{if .ActiveReolinkMode}}{{.ActiveReolinkMode}}{{else}}<span class="muted">noch nicht ermittelt</span>{{end}}</td></tr>
 <tr><td>Medienweg</td><td>{{if .MediaProfile}}{{.MediaProfile}}{{else}}<span class="muted">noch nicht ermittelt</span>{{end}}</td></tr>
 <tr><td>WebRTC AEC</td><td>{{if .EchoCancellationEnabled}}an, Go-Tracking aus (AEC3 intern), Hochpass {{if .WebRTCHighPassFilterEnabled}}an{{else}}aus{{end}}, Rauschfilter {{if .WebRTCNoiseSuppressionEnabled}}moderate{{else}}aus{{end}}{{else}}aus{{end}}</td></tr>
+<tr><td>FRITZ!Fon-Livebild</td><td>{{if .FritzFonLiveImageEnabled}}aktiv{{else}}aus{{end}}</td></tr>
 <tr><td>Automatische Kalibrierung</td><td>{{.CalibrationStatus}}{{if .CalibrationDetails}} – {{.CalibrationDetails}}{{end}}</td></tr>
 <tr><td>Kalibrierte Latenz</td><td>{{if .EchoCancellationEnabled}}{{.CalibratedDelayMS}} ms{{else}}–{{end}}</td></tr>
 <tr><td>Aktuelle Latenz</td><td>{{if .EchoCancellationEnabled}}{{.CurrentDelayMS}} ms{{else}}–{{end}}</td></tr>

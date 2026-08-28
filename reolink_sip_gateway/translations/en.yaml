@@ -24,6 +24,13 @@ configuration:
       baichuan_port:
         name: Baichuan port (advanced)
         description: TCP port of Reolink Basic Service used in NVR mode, usually 9000.
+  live_image:
+    name: FRITZ!Fon live image
+    description: Local protected JPEG server for the camera image shown during a door call.
+    fields:
+      fritzfon_live_image_enabled:
+        name: Provide live image for FRITZ!Fon
+        description: Provides a secret, stable .jpg address on port 18099. The exact value for the FRITZ!Box is shown on the app status page. The gateway obtains a current Reolink image, adapts oversized frames for the FRITZ!Fon, and never gives the camera credentials to the FRITZ!Box.
   sip:
     name: SIP telephony
     description: Independently enabled door-station and mobile-call accounts on the same PBX.

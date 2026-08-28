@@ -33,7 +33,10 @@ func TestEmbeddedLogoPNG(t *testing.T) {
 
 func TestStatusPageContainsLogo(t *testing.T) {
 	var out bytes.Buffer
-	if err := page.Execute(&out, pageData{Snapshot: Snapshot{}, APIHostname: "1c33278a-reolink-sip-gateway", APIToken: "secret-token"}); err != nil {
+	if err := page.Execute(&out, pageData{
+		Snapshot: Snapshot{FritzFonLiveImageEnabled: true}, APIHostname: "1c33278a-reolink-sip-gateway", APIToken: "secret-token",
+		LiveImageAvailable: true, LiveImageAddress: "192.168.177.5:18099/fritzfon/image-token.jpg", LiveImageURL: "http://192.168.177.5:18099/fritzfon/image-token.jpg",
+	}); err != nil {
 		t.Fatalf("render status page: %v", err)
 	}
 	if !bytes.Contains(out.Bytes(), []byte(`src="./logo.png"`)) {
@@ -44,6 +47,9 @@ func TestStatusPageContainsLogo(t *testing.T) {
 	}
 	if bytes.Contains(out.Bytes(), []byte(`Home-Assistant-IP`)) {
 		t.Fatal("status page must ask for the add-on hostname, not an API URL")
+	}
+	if !bytes.Contains(out.Bytes(), []byte(`192.168.177.5:18099/fritzfon/image-token.jpg`)) || !bytes.Contains(out.Bytes(), []byte(`http://`)) {
+		t.Fatal("status page does not contain the FRITZ!Fon live image setup data")
 	}
 }
 

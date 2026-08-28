@@ -17,13 +17,14 @@ import (
 	"github.com/vothmarkus/reolink-sip-gateway/internal/callcontrol"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/config"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/ha"
+	"github.com/vothmarkus/reolink-sip-gateway/internal/liveimage"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/media"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/sip"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/startup"
 	statuspkg "github.com/vothmarkus/reolink-sip-gateway/internal/status"
 )
 
-const version = "1.2.2"
+const version = "1.3.0"
 
 func main() {
 	configPath := flag.String("config", "/data/options.json", "path to Home Assistant app options JSON")
@@ -67,7 +68,7 @@ func main() {
 
 	identity, err := statuspkg.LoadOrCreateIdentity("/data")
 	if err != nil {
-		logger.Error("cannot initialize Home Assistant integration API identity", "error", err)
+		logger.Error("cannot initialize persistent gateway identity", "error", err)
 		os.Exit(1)
 	}
 	commands := &gatewayCommands{}
@@ -77,6 +78,17 @@ func main() {
 	}
 	store := statuspkg.New(version)
 	store.SetRoutes(statusRouteDefinitions(cfg, routes))
+	var liveImageProvider statuspkg.JPEGProvider
+	liveImageHost := ""
+	if cfg.FritzFonLiveImageEnabled {
+		liveImageProvider = liveimage.New(cfg, logger.With("component", "fritzfon_live_image"))
+		discoveryCtx, discoveryCancel := context.WithTimeout(ctx, 2*time.Second)
+		liveImageHost, err = localIPv4ForRemote(discoveryCtx, cfg.SIPRegistrar, cfg.SIPRegistrarPort)
+		discoveryCancel()
+		if err != nil {
+			logger.Warn("cannot determine Home Assistant IPv4 address for the FRITZ!Fon live image setup hint", "error", err)
+		}
+	}
 	store.Update(func(s *statuspkg.Snapshot) {
 		s.DryRun = cfg.DryRun
 		s.DoorCallEnabled = cfg.DoorCallEnabled
@@ -90,6 +102,7 @@ func main() {
 		s.AECMaxDelayMS = cfg.AECMaxDelayMS
 		s.WebRTCHighPassFilterEnabled = cfg.WebRTCHighPassFilterEnabled
 		s.WebRTCNoiseSuppressionEnabled = cfg.WebRTCNoiseSuppressionEnabled
+		s.FritzFonLiveImageEnabled = cfg.FritzFonLiveImageEnabled
 		if cfg.EchoCancellationEnabled {
 			s.CalibrationStatus = "pending"
 		} else {
@@ -99,6 +112,7 @@ func main() {
 	go func() {
 		serverOptions := statuspkg.ServerOptions{
 			Port: cfg.StatusPort, Token: identity.Token, InstanceID: identity.InstanceID, Hostname: addonHostname, Commands: commands,
+			LiveImageProvider: liveImageProvider, LiveImageToken: identity.LiveImageToken, LiveImageHost: liveImageHost,
 		}
 		if err := store.Serve(ctx, serverOptions); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("status server stopped", "error", err)
@@ -106,6 +120,9 @@ func main() {
 		}
 	}()
 	logger.Info("Home Assistant integration API ready", "api_version", statuspkg.APIVersion, "port", cfg.StatusPort, "instance_id", identity.InstanceID)
+	if cfg.FritzFonLiveImageEnabled {
+		logger.Info("FRITZ!Fon live image server ready", "port", cfg.StatusPort, "format", "JPEG", "protected_path", true)
+	}
 
 	token := os.Getenv("SUPERVISOR_TOKEN")
 	if token == "" {
@@ -336,6 +353,20 @@ func main() {
 			}
 		}
 	}
+}
+
+func localIPv4ForRemote(ctx context.Context, host string, port int) (string, error) {
+	address := net.JoinHostPort(strings.TrimSpace(host), fmt.Sprintf("%d", port))
+	connection, err := (&net.Dialer{}).DialContext(ctx, "udp4", address)
+	if err != nil {
+		return "", fmt.Errorf("select IPv4 route to %s: %w", host, err)
+	}
+	defer connection.Close()
+	local, ok := connection.LocalAddr().(*net.UDPAddr)
+	if !ok || local.IP.To4() == nil || local.IP.IsUnspecified() {
+		return "", errors.New("selected route has no usable local IPv4 address")
+	}
+	return local.IP.String(), nil
 }
 
 func doorSIPConfig(cfg config.Config) sip.Config {

@@ -6,7 +6,9 @@ Community Home Assistant app that bridges bidirectional audio between a Reolink 
 
 ## Current release
 
-**v1.2.2** makes call routes the single, direct configuration model. A fresh installation contains one editable `Standardroute` with visitor sensor `auto`, FRITZ!Box doorbell number `11` and three optional mobile-number fields. Additional routes map further Home Assistant visitor sensors to further FRITZ!Box doorbell buttons while all routes continue to share one Reolink camera/media path and the same two optional SIP accounts. The former named-target catalogue and simple-mode destination fields are migrated losslessly and removed from the public form.
+**v1.3.0** adds a FRITZ!Fon-compatible live-image server. The Ingress page now provides the exact local address to enter for the IP door intercom after selecting `http://` in the FRITZ!Box. Its stable, secret path ends in `.jpg`, contains no Reolink credentials and returns a current JPEG sized for the phone display. The gateway first tries the Reolink snapshot CGI over HTTPS, then HTTP, and finally captures one frame through the existing RTSP/FFmpeg path.
+
+The direct v1.2.2 call-route model remains unchanged: a fresh installation contains one editable `Standardroute` with visitor sensor `auto`, FRITZ!Box doorbell number `11` and three optional mobile-number fields. All routes continue to share one Reolink camera/media path and the same two optional SIP accounts.
 
 Still-ringing losers receive `CANCEL`. If two peers answer across the winner decision, every `200 OK` is acknowledged and the losing dialog is immediately closed with `BYE`. The machine-readable integration contract remains API v1 and is documented in [`docs/api-v1.openapi.yaml`](docs/api-v1.openapi.yaml).
 
@@ -28,12 +30,13 @@ Highlights:
 - Configurable SIP RTP inactivity watchdog for deterministic cleanup of broken calls.
 - Home Assistant Reolink visitor binary sensor as call trigger, with entity-registry auto-discovery or manual override.
 - Reolink standalone and NVR media profiles.
+- Optional local FRITZ!Fon live-image endpoint with a persistent independent path token, JPEG validation and output fitted inside AVM's approximately 480×640-pixel frame.
 - Bidirectional audio via RTSP/ONVIF or Reolink Baichuan, depending on profile.
 - Native WebRTC AudioProcessing echo cancellation.
 - Automatic acoustic startup-delay calibration.
 - Fixed calibrated coarse AEC delay during calls; no competing live Go delay-control loop.
 - Zero-lookahead elastic SIP-to-Baichuan talkback playout with bounded ± correction and soft residual discontinuities.
-- Five grouped Home Assistant configuration sections plus the Call routes list placed immediately below Call, at Home Assistant's supported schema depth.
+- Six grouped Home Assistant configuration sections plus the Call routes list placed immediately below Call, at Home Assistant's supported schema depth.
 - Transparent PNG icon/logo without the former white outer canvas.
 - `sip_registrar: auto` resolves the Home Assistant host's IPv4 default gateway at startup; a manual IP/DNS registrar remains supported.
 - Fresh installs default the Reolink username to `admin`.
@@ -69,6 +72,9 @@ reolink:
   nvr_channel_number: 2
   reolink_rtsp_port: 554
   baichuan_port: 9000
+
+live_image:
+  fritzfon_live_image_enabled: true
 
 sip:
   sip_registrar: auto
@@ -142,6 +148,14 @@ required per route.
 
 `nvr_channel_number` is deliberately **1-based** in the user interface. The startup adapter translates it to the internal Reolink channel representation without exposing the protocol-specific zero-based value.
 
+### FRITZ!Fon live image
+
+With `fritzfon_live_image_enabled: true`, the gateway exposes one read-only JPEG endpoint on the existing local port `18099`. Open the app's Ingress page, find **FRITZ!Fon live image**, and test the displayed link in a browser. In **Telephony → Telephony Devices**, edit the FRITZ!Box IP door intercom, select `http://` for **Live image**, and paste the displayed address **without** a scheme into the adjacent field. The value already ends in `.jpg`, as required by FRITZ!OS.
+
+The URL contains a separate random token stored with mode `0600` under `/data`; it remains stable across updates and backups. Treat the complete URL as a secret. It can fetch a camera image but cannot call, hang up or use API v1, and requests from outside loopback, private or link-local networks are rejected. Camera/NVR credentials are never placed in the FRITZ!Box URL. The source request prefers local HTTPS, falls back to local HTTP for Reolink firmware without usable HTTPS snapshot support, and uses the configured RTSP stream only if both CGI attempts fail. Requests within 750 ms share one in-memory frame.
+
+AVM documents JPEG/JPG, PNG and GIF image URLs and recommends roughly 240×320 through 480×640 pixels for FRITZ!Fon displays. This gateway fits every JPEG inside a 480×640 box without changing its aspect ratio. See AVM's [live-image instructions](https://fritz.com/apps/knowledge-base/fritz-box-7590/1602_live-bild-einer-ip-kamera-am-fritz-fon-anzeigen) and [IP door-intercom setup](https://fritz.com/apps/knowledge-base/fritz-box-4050/3513_ip-tursprechanlage-in-fritz-box-einrichten).
+
 With `sip_registrar: auto`, the startup adapter reads the Home Assistant host's IPv4 routing table and uses its default-gateway address (commonly the FRITZ!Box). Set an IP address or DNS name instead to override auto-detection. Existing saved registrar values are not replaced during an update.
 
 For a FRITZ!Box 4050 telephone system, configure the original account as an **IP door intercom** and the mobile account as **Telephone → LAN/WLAN (IP telephone)**. Each route's `doorbell_number` is the number assigned by the FRITZ!Box door-intercom setup; for example, `11` commonly represents doorbell button 1. Both registrations use the 4050 registrar address and port 5060, but normally listen locally on 5070 and 5071. Assign the required outgoing landline number to the mobile IP telephone. Each route accepts at most three unique mobile numbers. Set `door_call_enabled: false` for mobile-only operation; dormant door credentials are then not required.
@@ -172,6 +186,8 @@ This design is intentional: hardware testing showed that the former Go live dela
 
 ## Configuration migration
 
+v1.3.0 adds the `live_image` group with `fritzfon_live_image_enabled: true`. The adapter supplies that default when an older configuration has no group; it does not rewrite or migrate existing Reolink, SIP, audio or route values. The independent image-path token is created automatically under `/data`.
+
 v1.2.2 performs one guarded conversion to the direct route model:
 
 - A v1.1 simple configuration becomes the editable `default` route while preserving its visitor sensor, doorbell number and up to three mobile numbers.
@@ -189,7 +205,7 @@ v0.5.10 finalizes the grouped configuration introduced in v0.5.8:
 
 ## Hardware status
 
-The NVR/Baichuan path has been developed and hardware-tested with a Reolink Video Doorbell PoE behind an RLN8-410 NVR. Other Reolink firmware/device combinations may differ; detailed debug logs are useful when reporting compatibility issues.
+The NVR/Baichuan audio path has been developed and hardware-tested with a Reolink Video Doorbell PoE behind an RLN8-410 NVR. The v1.3.0 live-image implementation is software-tested; its final FRITZ!Box 4050/FRITZ!Fon hardware verification is still pending. Other Reolink firmware/device combinations may differ; detailed debug logs are useful when reporting compatibility issues.
 
 ## Development
 
@@ -213,7 +229,7 @@ The Docker image additionally builds a small native C++ helper against Debian's 
 
 See [`reolink_sip_gateway/TESTING.md`](reolink_sip_gateway/TESTING.md) for the release regression checklist and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the media pipeline.
 
-The implemented v1.2 routing model and deliberately deferred multi-camera features are recorded in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+The implemented v1.2 routing and v1.3 live-image work, plus deliberately deferred multi-camera features, are recorded in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Reporting issues
 

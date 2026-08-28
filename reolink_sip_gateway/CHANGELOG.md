@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0
+
+- FRITZ!Fon-kompatiblen Livebildserver auf dem bestehenden lokalen Port 18099 ergänzt. Die Ingress-Seite zeigt die genaue Adresse für das FRITZ!Box-Feld **Live-Bild** und bietet einen direkten Browsertest; der Pfad endet fest auf `.jpg`.
+- Snapshotquelle versucht Reolinks CGI zuerst über HTTPS, danach über HTTP und verwendet bei ungültiger oder nicht erreichbarer CGI genau einen Frame aus dem vorhandenen RTSP-/FFmpeg-Pfad. JPEGs werden validiert, seitenverhältnistreu in AVMs ungefähren 480×640-Pixel-Rahmen eingepasst und für 750 ms im Speicher zusammengefasst.
+- Separates zufälliges 192-Bit-Pfadtoken unter `/data/fritzfon-live-image-token` mit Rechten `0600` und zusätzliche Beschränkung auf Loopback-, private und Link-Local-Quellnetze. Reolink-Zugangsdaten bleiben serverseitig; Fehlerantworten und Logs geben weder Zugangsdaten noch den geheimen Pfad aus. Das Bildtoken besitzt keine Integrations-API-Berechtigungen.
+- Neue standardmäßig aktive Option `live_image.fritzfon_live_image_enabled`; bei Deaktivierung wird der Bildpfad nicht registriert. Der gruppiert→flach-Adapter, Defaults, deutsche/englische Übersetzungen und Testfixtures wurden erweitert, ohne vorhandene Routen-, SIP- oder Audioeinstellungen zu migrieren.
+- Statusmodell additiv um `fritzfon_live_image_enabled` ergänzt. API v1 und dessen Authentifizierung, Klingelrouten, SIP-Forking, DTMF, Medienweg und AEC bleiben funktional unverändert.
+- Unit-, HTTP-, Adapter-, Konfigurations- und Versionsprüfungen decken Snapshotabfrage, RTSP-Fallback, Größenbegrenzung, Cache, Geheimnisschutz, GET/HEAD, No-Cache-Header und stabile Tokenpersistenz ab. App-, Gateway-, SIP-/RTSP-User-Agent- und CI-Buildversion sind 1.3.0.
+
 ## 1.2.2
 
 - **Anrufrouten / Klingeltaster** ist jetzt das einzige sichtbare Routingmodell und steht unmittelbar unter dem Block **Anruf**. Eine Neuinstallation enthält eine vollständig editierbare Standardroute mit Besucher-Sensor `auto`, Klingeltaster `11` und drei leeren Mobilnummern.

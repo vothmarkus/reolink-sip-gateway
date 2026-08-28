@@ -1,8 +1,16 @@
-# Reolink SIP Gateway 1.2.2
+# Reolink SIP Gateway 1.3.0
 
 Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann SIP-Anrufe auslösen; optional lassen sich die aktivierten Gateway-Nebenstellen anrufen und direkt mit der Doorbell verbinden.
 
 > Community-Projekt. Nicht offiziell von Reolink oder Home Assistant bereitgestellt oder unterstützt.
+
+## 1.3.0: Livebild auf dem FRITZ!Fon
+
+1.3.0 stellt ein aktuelles Kamerabild unter einer stabilen lokalen Adresse bereit, die auf `.jpg` endet und von der FRITZ!Box als Livebild der IP-Türsprechanlage abgerufen werden kann. Die Ingress-Seite zeigt die exakt einzutragende Adresse und einen direkten Browsertest. Nach Auswahl von `http://` im FRITZ!Box-Feld **Live-Bild** wird nur der angezeigte Wert ohne Protokollpräfix in das Nachbarfeld kopiert.
+
+Das Gateway versucht zuerst die Reolink-Snapshot-CGI über HTTPS, danach über HTTP und verwendet bei einem Fehler den vorhandenen RTSP-/FFmpeg-Pfad für genau einen Frame. Eingehende Daten werden als JPEG geprüft und bei Bedarf unter Beibehaltung des Seitenverhältnisses in den von AVM empfohlenen Rahmen von etwa 480×640 Pixeln eingepasst. Gleichzeitige Abrufe teilen für 750 ms dasselbe Bild.
+
+Reolink-Zugangsdaten werden nur für den Abruf vom konfigurierten Kamera-/NVR-Host verwendet und niemals in der FRITZ!Box-URL ausgegeben. Stattdessen enthält der Bildpfad ein eigenes zufälliges Token, das unabhängig vom mächtigeren Integrations-API-Token unter `/data` mit Dateirechten `0600` gespeichert bleibt. Zusätzlich werden Anfragen außerhalb lokaler, privater oder Link-Local-Netze abgewiesen. Die komplette Livebild-Adresse ist deshalb trotzdem wie ein Geheimnis zu behandeln. Die Funktion ist bei Neuinstallationen aktiv und kann im neuen Block **FRITZ!Fon-Livebild** abgeschaltet werden. Klingelrouten, SIP, Audio und API v1 bleiben unverändert.
 
 ## 1.2.2: Rufnummern direkt in der Anrufroute
 
@@ -168,6 +176,9 @@ reolink:
   reolink_rtsp_port: 554
   baichuan_port: 9000
 
+live_image:
+  fritzfon_live_image_enabled: true
+
 sip:
   sip_registrar: auto
   door_call_enabled: true
@@ -260,7 +271,10 @@ Die Ingress-Seite zeigt unter anderem:
 - kalibrierte und aktuelle AEC-Latenz,
 - den daraus berechneten Suchbereich,
 - SIP-/Home-Assistant-Verbindungsstatus und aktuelle Call-Medien.
+- die geheime FRITZ!Fon-Livebild-Adresse samt Browsertest, wenn die Funktion aktiviert ist.
+
+Zur Einrichtung unter **Telefonie → Telefoniegeräte** die IP-Türsprechanlage bearbeiten, beim Livebild `http://` auswählen und den auf der Ingress-Seite angezeigten Wert ohne `http://` einfügen. Die Kamera-Zugangsdaten werden nicht in der FRITZ!Box hinterlegt.
 
 ## Hardwarestatus
 
-0.4.3 wurde auf der Zielhardware mit NVR/Baichuan und nativer WebRTC-AEC erfolgreich über einen 53-s-Testanruf betrieben. Die Echoreduktion blieb subjektiv gleichmäßig; der Long-Delay-Tracker lag stabil bei etwa 1429–1430 ms. Double-Talk bleibt noch separat zu prüfen. 0.5.0 ändert den bewährten Call-AEC-Kern nicht, sondern automatisiert dessen Startwert und räumt Konfiguration/Diagnose auf.
+Der NVR-/Baichuan-Audiopfad wurde auf der Zielhardware mit nativer WebRTC-AEC erfolgreich getestet. Der neue 1.3.0-Livebildpfad ist vollständig softwaregetestet; die abschließende Prüfung mit FRITZ!Box 4050 und FRITZ!Fon steht noch aus.

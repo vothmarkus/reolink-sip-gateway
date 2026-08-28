@@ -1,8 +1,8 @@
-# Prüfprotokoll 1.2.2
+# Prüfprotokoll 1.3.0
 
 ## Ziel
 
-1.2.2 macht die direkt unter **Anruf** platzierte Routenliste zum einzigen öffentlichen Routingmodell. Jede Route besitzt einen Besucher-Sensor, eine optionale FRITZ!Box-Klingeltaster-Nummer und maximal drei direkte Mobilrufnummern. Zu prüfen sind die vorausgefüllte editierbare Standardroute, verlustfreie Migration der 1.1- und 1.2-Vorwerte, unveränderte Matrixauflösung, unabhängige Entprellung, routenspezifische API-Testanrufe, der globale Busy-Schutz, DTMF auf beiden Konten und weiterhin exakt eine Reolink-Mediensitzung.
+1.3.0 stellt der FRITZ!Box ein aktuelles Reolink-JPEG unter einer stabilen geheimen `.jpg`-Adresse bereit. Zu prüfen sind CGI- und RTSP-Fallback, JPEG-Validierung und -Skalierung, Tokenpersistenz, die lokale HTTP-Grenze, die Anzeige auf FRITZ!Fon sowie die vollständige Regression des unveränderten 1.2.2-Routing-, SIP- und Audiopfads.
 
 ## Softwareprüfungen vor Release
 
@@ -15,12 +15,33 @@
 - statischer amd64-Go-Releasebuild
 - UI-Adaptertest: gruppierte `testdata/options.valid.json` → flache `testdata/options.runtime.valid.json`; anschließend `-check-config` gegen die Runtime-Datei
 - YAML-/JSON-Prüfung von App-Konfiguration und Übersetzungen
-- identische fünf bestehende Gruppen sowie `call_routes` unmittelbar hinter `call` in `options`, `schema`, DE, EN und Testkonfiguration
+- identische sechs Gruppen sowie `call_routes` unmittelbar hinter `call` in `options`, `schema`, DE, EN und Testkonfiguration
 - identische SIP-Feldreihenfolge in `options`, `schema`, DE, EN und Fixture: beide Konto-Blöcke vor `sip_registrar_port`, `sip_local_port` und `parallel_local_port`
 - Bash-Syntaxprüfung des s6-Startskripts
-- Versionsprüfung 1.2.2 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
+- Versionsprüfung 1.3.0 in App, Gateway, SIP-/RTSP-User-Agent und CI-Buildargument
 - Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
 - expliziter Test der nativen Statistikbits 0…7
+
+## Ergänzungen 1.3.0
+
+- Der neue Optionsblock `live_image` wird bei fehlendem Wert sicher mit `fritzfon_live_image_enabled: true` materialisiert und als flacher boolescher Runtimewert übergeben. Abschalten verhindert die Registrierung des Endpunkts.
+- Ein Mock-Reolink-Server prüft `cmd=Snap`, den internen Kanal, Benutzer, Passwort, Zufallswert sowie Reolinks dokumentierte 640×480-Anforderung. Ein 1280×960-JPEG wird seitenverhältnistreu auf 480×360 in den AVM-Rahmen eingepasst; kleinere Bilder bleiben korrekt.
+- Eine erfolgreiche Aufnahme wird 750 ms zwischengespeichert und jedem Aufrufer als unabhängige Bytekopie geliefert. Eine ungültige JSON-CGI-Antwort führt zum injizierten RTSP-Fallback.
+- Verbindungs-, HTTP- und FFmpeg-Fehler dürfen das konfigurierte Reolink-Passwort nicht enthalten. CGI-Redirects zu einem anderen Host werden abgelehnt.
+- Der geheime HTTP-Pfad akzeptiert nur lokale/private/link-lokale `GET`- und `HEAD`-Anfragen, liefert `image/jpeg`, eine feste `.jpg`-Disposition und No-Cache-/Nosniff-Header. Öffentliche Quelladressen und falsche Pfade bleiben unerreichbar; Providerfehler ergeben eine generische `502`-Antwort.
+- API-Token und separates 192-Bit-Livebildtoken bleiben über erneutes Laden stabil und liegen jeweils mit Modus `0600` vor. Das Livebildtoken erfüllt bewusst nicht die Validierung des 256-Bit-API-Tokens.
+- Die Statusseite zeigt Protokollauswahl-Anweisung, kopierbare Adresse und Browsertest nur bei aktivierter Funktion. Der Snapshot meldet den Aktivierungszustand additiv; API v1 bleibt ansonsten unverändert.
+
+## FRITZ!Box-4050-/FRITZ!Fon-Hardwaretest 1.3.0
+
+1. App aktualisieren, starten und kontrollieren, dass im Ingress-Abschnitt **FRITZ!Fon-Livebild** eine lokale Adresse mit Port `18099` und Endung `.jpg` erscheint. Sie darf weder Reolink-Benutzer noch Passwort enthalten.
+2. **Aktuelles Kamerabild testen** öffnen. Der Browser muss ein aktuelles Bild des konfigurierten physischen NVR-Kanals anzeigen; wiederholte Aufrufe müssen neue Frames liefern.
+3. In der FRITZ!Box unter **Telefonie → Telefoniegeräte** die IP-Türsprechanlage bearbeiten, beim Livebild `http://` auswählen und den angezeigten Wert ohne Protokollpräfix einfügen.
+4. Einen realen Türruf auslösen. Das zugeordnete FRITZ!Fon muss das Kamerabild anzeigen; Wiederholen beziehungsweise Aktualisieren darf kein altes FRITZ!Box- oder HTTP-Cachebild festhalten.
+5. Falls praktikabel, Reolink-CGI vorübergehend sperren oder auf eine ungültige Antwort umleiten und verifizieren, dass der RTSP-/FFmpeg-Fallback weiterhin ein Bild liefert. Danach die normale Konfiguration wiederherstellen.
+6. Einen einzelnen Buchstaben im geheimen Pfad ändern. Dieser Pfad darf kein Bild liefern. Das korrekte Token muss nach App-Neustart unverändert sein.
+7. `fritzfon_live_image_enabled` abschalten und neu starten. Die Statusseite muss **deaktiviert** melden und der zuvor gültige Bildpfad darf nicht mehr registriert sein. Anschließend wieder aktivieren.
+8. Die bestehenden Tür-/Mobilrouten, eingehenden Anrufe, DTMF und Zwei-Wege-Audio stichprobenartig prüfen. Der Bildabruf darf keinen Call-Slot belegen und keine Audiokalibrierung auslösen.
 
 ## Ergänzungen 1.2.2
 
@@ -263,4 +284,4 @@ Im 0.4.3-Hardwarelog war `native_stats_mask=0x3b`, aber Go zeigte nur einen Teil
 
 ## Noch offen
 
-Double-Talk auf der Zielhardware wird später separat getestet. Der stabile 53-s-0.4.3-Einsprechtest bleibt bis dahin die Referenz für Single-Talk-Echoreduktion.
+Die 1.3.0-Livebildanzeige an FRITZ!Box 4050 und FRITZ!Fon muss noch mit der Zielhardware ausgeführt werden. Double-Talk auf der Zielhardware wird ebenfalls später separat getestet. Der stabile 53-s-0.4.3-Einsprechtest bleibt bis dahin die Referenz für Single-Talk-Echoreduktion.

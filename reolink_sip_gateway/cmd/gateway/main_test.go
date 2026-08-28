@@ -140,3 +140,15 @@ func TestRouteHelpersPreserveStableIDsAndDefaultRoute(t *testing.T) {
 		t.Fatal("unknown route unexpectedly resolved")
 	}
 }
+
+func TestLocalIPv4ForRemote(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got, err := localIPv4ForRemote(ctx, "127.0.0.1", 5060)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "127.0.0.1" {
+		t.Fatalf("local address=%q", got)
+	}
+}
