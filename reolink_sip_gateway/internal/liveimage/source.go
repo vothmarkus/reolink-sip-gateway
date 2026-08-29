@@ -46,14 +46,14 @@ type SourceDiagnostics struct {
 // gateway-to-Reolink hop and never reach HTTP clients. A short in-memory cache
 // coalesces simultaneous requests from multiple phones.
 type Source struct {
-	cfg      config.Config
-	channel  int
-	rtspURL  string
-	logger   *slog.Logger
-	client   *http.Client
-	cgiBases []string
-	fallback func(context.Context) ([]byte, error)
-	now      func() time.Time
+	cfg            config.Config
+	channel        int
+	rtspURL        string
+	logger         *slog.Logger
+	client         *http.Client
+	cgiBases       []string
+	fallback       func(context.Context) ([]byte, error)
+	now            func() time.Time
 	mu             sync.Mutex
 	cached         []byte
 	cachedAt       time.Time

@@ -10,10 +10,10 @@ import (
 )
 
 const (
-	liveImageCatalogStatePath    = "/data/fritzfon-live-image-catalog.json"
-	liveImageDiscoveryInterval  = 5 * time.Minute
-	liveImageDiscoveryTimeout   = 12 * time.Second
-	liveImagePrewarmTimeout     = 10 * time.Second
+	liveImageCatalogStatePath  = "/data/fritzfon-live-image-catalog.json"
+	liveImageDiscoveryInterval = 5 * time.Minute
+	liveImageDiscoveryTimeout  = 12 * time.Second
+	liveImagePrewarmTimeout    = 10 * time.Second
 )
 
 type liveImageCatalogProvider struct {
