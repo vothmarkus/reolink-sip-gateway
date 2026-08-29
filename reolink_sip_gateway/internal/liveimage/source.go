@@ -30,7 +30,16 @@ const (
 	maxSnapshotBytes     = 16 << 20
 	maxDecodedPixels     = 32_000_000
 	cacheLifetime        = 750 * time.Millisecond
+	prewarmLifetime      = 5 * time.Second
 )
+
+type SourceDiagnostics struct {
+	LastAttempt  time.Time
+	LastSuccess  time.Time
+	LastSource   string
+	LastDuration time.Duration
+	LastFailed   bool
+}
 
 // Source obtains one current Reolink frame and normalizes oversized JPEGs for
 // the small FRITZ!Fon display. Camera credentials are used only on the
@@ -45,9 +54,12 @@ type Source struct {
 	cgiBases []string
 	fallback func(context.Context) ([]byte, error)
 	now      func() time.Time
-	mu       sync.Mutex
-	cached   []byte
-	cachedAt time.Time
+	mu             sync.Mutex
+	cached         []byte
+	cachedAt       time.Time
+	prewarmedUntil time.Time
+	diagnosticsMu  sync.RWMutex
+	diagnostics    SourceDiagnostics
 }
 
 func New(cfg config.Config, logger *slog.Logger) *Source {
@@ -93,12 +105,56 @@ func (s *Source) FetchJPEG(ctx context.Context) ([]byte, error) {
 	defer s.mu.Unlock()
 
 	now := s.now()
-	if len(s.cached) > 0 && now.Sub(s.cachedAt) >= 0 && now.Sub(s.cachedAt) <= cacheLifetime {
+	age := now.Sub(s.cachedAt)
+	prewarmed := !s.prewarmedUntil.IsZero() && !now.After(s.prewarmedUntil)
+	if len(s.cached) > 0 && age >= 0 && (age <= cacheLifetime || prewarmed) {
+		if prewarmed {
+			// One HTTP request consumes the extended ring-event cache. A
+			// following HEAD/GET pair still shares the normal 750 ms cache,
+			// while later FRITZ!Fon refreshes obtain a new frame.
+			s.prewarmedUntil = time.Time{}
+			s.cachedAt = now
+		}
 		return append([]byte(nil), s.cached...), nil
 	}
+	return s.fetchAndCacheLocked(ctx)
+}
 
-	imageBytes, err := s.fetchFresh(ctx)
+// Prewarm captures the configured door frame without delaying call setup and
+// keeps it available until the first subsequent HTTP request, for at most five
+// seconds. It is deliberately independent of SIP and audio state.
+func (s *Source) Prewarm(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := s.now()
+	age := now.Sub(s.cachedAt)
+	if len(s.cached) == 0 || age < 0 || age > cacheLifetime {
+		if _, err := s.fetchAndCacheLocked(ctx); err != nil {
+			return err
+		}
+	}
+	s.prewarmedUntil = s.now().Add(prewarmLifetime)
+	return nil
+}
+
+func (s *Source) Diagnostics() SourceDiagnostics {
+	s.diagnosticsMu.RLock()
+	defer s.diagnosticsMu.RUnlock()
+	return s.diagnostics
+}
+
+func (s *Source) fetchAndCacheLocked(ctx context.Context) ([]byte, error) {
+	s.diagnosticsMu.Lock()
+	s.diagnostics.LastAttempt = s.now()
+	s.diagnosticsMu.Unlock()
+	started := time.Now()
+	imageBytes, source, err := s.fetchFresh(ctx)
+	s.diagnosticsMu.Lock()
+	defer s.diagnosticsMu.Unlock()
+	s.diagnostics.LastDuration = time.Since(started)
 	if err != nil {
+		s.diagnostics.LastFailed = true
 		if s.logger != nil {
 			s.logger.Warn("FRITZ!Fon live image capture failed", "error", err)
 		}
@@ -106,16 +162,20 @@ func (s *Source) FetchJPEG(ctx context.Context) ([]byte, error) {
 	}
 	s.cached = append(s.cached[:0], imageBytes...)
 	s.cachedAt = s.now()
+	s.diagnostics.LastSuccess = s.cachedAt
+	s.diagnostics.LastSource = source
+	s.diagnostics.LastFailed = false
 	return append([]byte(nil), s.cached...), nil
 }
 
-func (s *Source) fetchFresh(ctx context.Context) ([]byte, error) {
+func (s *Source) fetchFresh(ctx context.Context) ([]byte, string, error) {
 	var attempts []error
 	for _, base := range s.cgiBases {
 		imageBytes, err := s.fetchCGI(ctx, base)
 		if err == nil {
 			if normalized, normalizeErr := normalizeJPEG(imageBytes); normalizeErr == nil {
-				return normalized, nil
+				u, _ := url.Parse(base)
+				return normalized, strings.ToUpper(u.Scheme), nil
 			} else {
 				err = normalizeErr
 			}
@@ -125,14 +185,18 @@ func (s *Source) fetchFresh(ctx context.Context) ([]byte, error) {
 	if s.fallback != nil {
 		imageBytes, err := s.fallback(ctx)
 		if err == nil {
-			return normalizeJPEG(imageBytes)
+			normalized, normalizeErr := normalizeJPEG(imageBytes)
+			if normalizeErr == nil {
+				return normalized, "RTSP", nil
+			}
+			err = normalizeErr
 		}
 		attempts = append(attempts, err)
 	}
 	if len(attempts) == 0 {
-		return nil, errors.New("no live image source is configured")
+		return nil, "", errors.New("no live image source is configured")
 	}
-	return nil, errors.Join(attempts...)
+	return nil, "", errors.Join(attempts...)
 }
 
 func (s *Source) fetchCGI(ctx context.Context, base string) ([]byte, error) {
@@ -157,7 +221,7 @@ func (s *Source) fetchCGI(ctx context.Context, base string) ([]byte, error) {
 		return nil, fmt.Errorf("%s Reolink CGI request could not be created", u.Scheme)
 	}
 	req.Header.Set("Accept", "image/jpeg")
-	req.Header.Set("User-Agent", "ReolinkSIPGateway/1.4.0")
+	req.Header.Set("User-Agent", "ReolinkSIPGateway/1.5.0")
 	response, err := s.client.Do(req)
 	if err != nil {
 		// net/http errors can include the full URL, including its password.

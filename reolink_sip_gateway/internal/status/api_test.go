@@ -59,7 +59,7 @@ func TestAPIV1RequiresBearerToken(t *testing.T) {
 	if err := json.Unmarshal(res.Body.Bytes(), &info); err != nil {
 		t.Fatal(err)
 	}
-	if info.APIVersion != APIVersion || info.GatewayVersion != "1.4.0" || info.InstanceID != testInstanceID {
+	if info.APIVersion != APIVersion || info.GatewayVersion != "1.5.0" || info.InstanceID != testInstanceID {
 		t.Fatalf("unexpected info: %#v", info)
 	}
 	if !strings.Contains(strings.Join(info.Capabilities, ","), "dtmf_events") {
@@ -130,7 +130,7 @@ func TestAPIV1StatusMapping(t *testing.T) {
 
 func TestAPIV1RouteAvailabilityUsesEachRoutesAccounts(t *testing.T) {
 	snapshot := Snapshot{
-		Version: "1.4.0", State: "idle", DoorCallEnabled: true, SIPRegistered: true,
+		Version: "1.5.0", State: "idle", DoorCallEnabled: true, SIPRegistered: true,
 		ParallelCallEnabled: true, ParallelSIPRegistered: false,
 	}
 	routes := []RouteDefinition{
@@ -158,7 +158,7 @@ func TestAPIV1UnknownRouteCommandReturnsNotFound(t *testing.T) {
 
 func TestAPIV1MobileOnlyRegistrationIsAvailable(t *testing.T) {
 	status := newAPIStatus(Snapshot{
-		Version: "1.4.0", State: "idle", ParallelCallEnabled: true, ParallelSIPRegistered: true,
+		Version: "1.5.0", State: "idle", ParallelCallEnabled: true, ParallelSIPRegistered: true,
 	}, nil)
 	if !status.SIP.Registered || status.SIP.DoorCallEnabled || status.SIP.DoorRegistered || !status.SIP.ParallelRegistered {
 		t.Fatalf("unexpected mobile-only SIP status: %#v", status.SIP)
@@ -337,7 +337,7 @@ func TestWriteCommandErrorDoesNotExposeInternalDetails(t *testing.T) {
 
 func newTestAPI(t *testing.T, commands CommandHandler) (*Store, http.Handler) {
 	t.Helper()
-	store := New("1.4.0")
+	store := New("1.5.0")
 	store.SetRoutes([]RouteDefinition{{ID: "default", Name: "Standard", DoorCall: true}})
 	mux := http.NewServeMux()
 	store.registerAPIRoutes(mux, ServerOptions{Token: "test-token", InstanceID: testInstanceID, Commands: commands})

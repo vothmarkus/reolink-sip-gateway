@@ -24,7 +24,7 @@ import (
 	statuspkg "github.com/vothmarkus/reolink-sip-gateway/internal/status"
 )
 
-const version = "1.4.0"
+const version = "1.5.0"
 
 func main() {
 	configPath := flag.String("config", "/data/options.json", "path to Home Assistant app options JSON")
@@ -82,8 +82,13 @@ func main() {
 	var liveImageCatalog *liveimage.Catalog
 	liveImageHost := ""
 	if cfg.FritzFonLiveImageEnabled {
-		liveImageCatalog = liveimage.NewCatalog(cfg, logger.With("component", "fritzfon_live_image"))
-		liveImageProvider = liveImageCatalog
+		liveImageLogger := logger.With("component", "fritzfon_live_image")
+		if cfg.ReolinkMode == "standalone" {
+			liveImageCatalog = liveimage.NewCatalog(cfg, liveImageLogger)
+		} else {
+			liveImageCatalog = liveimage.NewPersistentCatalog(cfg, liveImageLogger, liveImageCatalogStatePath)
+		}
+		liveImageProvider = liveImageCatalogProvider{catalog: liveImageCatalog}
 		discoveryCtx, discoveryCancel := context.WithTimeout(ctx, 2*time.Second)
 		liveImageHost, err = localIPv4ForRemote(discoveryCtx, cfg.SIPRegistrar, cfg.SIPRegistrarPort)
 		discoveryCancel()
@@ -125,16 +130,10 @@ func main() {
 	if cfg.FritzFonLiveImageEnabled {
 		logger.Info("FRITZ!Fon live image server ready", "port", cfg.StatusPort, "format", "JPEG", "protected_path", true, "multi_channel", true)
 		if cfg.ReolinkMode != "standalone" {
-			go func() {
-				discoveryCtx, discoveryCancel := context.WithTimeout(ctx, 12*time.Second)
-				defer discoveryCancel()
-				channels, discoverErr := liveImageCatalog.Discover(discoveryCtx)
-				if discoverErr != nil {
-					logger.Warn("Reolink NVR channel auto-detection unavailable; configured live-image channel remains active", "error", discoverErr, "channels", len(channels))
-					return
-				}
-				logger.Info("Reolink NVR live-image channels detected", "channels", len(channels))
-			}()
+			go runLiveImageDiscovery(
+				ctx, liveImageCatalog, liveImageDiscoveryInterval, liveImageDiscoveryTimeout,
+				logger.With("component", "fritzfon_live_image"),
+			)
 		}
 	}
 
@@ -351,6 +350,7 @@ func main() {
 				logger.Warn("call-route trigger ignored because a call is active", "route", route.ID)
 				continue
 			}
+			startLiveImagePrewarm(ctx, liveImageCatalog, logger.With("component", "fritzfon_live_image"))
 		case incoming := <-incomingCalls:
 			if incoming == nil {
 				continue

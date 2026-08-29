@@ -96,6 +96,51 @@ func TestFetchJPEGFallsBackToRTSP(t *testing.T) {
 	if fallbackCalls != 1 || len(imageBytes) == 0 {
 		t.Fatalf("fallback calls=%d bytes=%d", fallbackCalls, len(imageBytes))
 	}
+	diagnostics := source.Diagnostics()
+	if diagnostics.LastFailed || diagnostics.LastSource != "RTSP" || diagnostics.LastAttempt.IsZero() || diagnostics.LastSuccess.IsZero() {
+		t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+	}
+}
+
+func TestPrewarmServesFirstDelayedRequestAndThenReturnsToShortCache(t *testing.T) {
+	snapshot := testJPEG(t, 320, 240)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		_, _ = w.Write(snapshot)
+	}))
+	defer server.Close()
+
+	source := New(config.Defaults(), nil)
+	source.client = server.Client()
+	source.cgiBases = []string{server.URL}
+	source.fallback = nil
+	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	source.now = func() time.Time { return now }
+
+	if err := source.Prewarm(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("prewarm requests=%d", requests.Load())
+	}
+	now = now.Add(3 * time.Second)
+	if _, err := source.FetchJPEG(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.FetchJPEG(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("prewarmed HEAD/GET pair made %d requests", requests.Load())
+	}
+	now = now.Add(cacheLifetime + time.Millisecond)
+	if _, err := source.FetchJPEG(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if requests.Load() != 2 {
+		t.Fatalf("normal refresh requests=%d", requests.Load())
+	}
 }
 
 func TestFetchJPEGDoesNotExposeCameraPassword(t *testing.T) {
@@ -118,6 +163,10 @@ func TestFetchJPEGDoesNotExposeCameraPassword(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), cfg.ReolinkPassword) {
 		t.Fatalf("password leaked in error: %v", err)
+	}
+	diagnostics := source.Diagnostics()
+	if !diagnostics.LastFailed || diagnostics.LastAttempt.IsZero() || !diagnostics.LastSuccess.IsZero() {
+		t.Fatalf("failure diagnostics=%#v", diagnostics)
 	}
 }
 

@@ -268,6 +268,7 @@ func (s *Store) Serve(ctx context.Context, options ServerOptions) error {
 			Snapshot: s.Get(), APIHostname: setupHostname(options.Hostname), APIToken: options.Token,
 			LiveImageAvailable: liveImageEnabled, LiveImageAddress: liveImageAddressValue,
 			LiveImageURL: fullLiveImageURL(liveImageAddressValue), LiveImageChannels: liveImagePageChannels(options),
+			LiveImageDiscovery: liveImagePageDiscovery(options),
 		})
 	})))
 
@@ -340,13 +341,29 @@ type pageData struct {
 	LiveImageAddress   string
 	LiveImageURL       string
 	LiveImageChannels  []liveImagePageChannel
+	LiveImageDiscovery liveImagePageDiscovery
 }
 
 type liveImagePageChannel struct {
-	Number  int
-	Name    string
-	Address string
-	URL     string
+	Number         int
+	Name           string
+	Primary        bool
+	StatusText     string
+	StatusClass    string
+	CaptureText    string
+	CaptureClass   string
+	Address        string
+	URL            string
+	ChannelAddress string
+	ChannelURL     string
+}
+
+type liveImagePageDiscovery struct {
+	Available   bool
+	StatusText  string
+	StatusClass string
+	LastAttempt time.Time
+	LastSuccess time.Time
 }
 
 func liveImagePageChannels(options ServerOptions) []liveImagePageChannel {
@@ -354,57 +371,115 @@ func liveImagePageChannels(options ServerOptions) []liveImagePageChannel {
 	if !ok {
 		return nil
 	}
-	numbers := append([]int(nil), provider.ChannelNumbers()...)
-	sort.Ints(numbers)
-	seen := make(map[int]bool, len(numbers))
-	channels := make([]liveImagePageChannel, 0, len(numbers))
-	for _, number := range numbers {
-		if number < 1 || number > 256 || seen[number] {
+	available := append([]LiveImageChannel(nil), provider.LiveImageChannels()...)
+	sort.SliceStable(available, func(i, j int) bool { return available[i].Number < available[j].Number })
+	seen := make(map[int]bool, len(available))
+	channels := make([]liveImagePageChannel, 0, len(available))
+	for _, channel := range available {
+		if channel.Number < 1 || channel.Number > 256 || seen[channel.Number] {
 			continue
 		}
-		seen[number] = true
-		address := liveImageChannelAddress(options.LiveImageHost, options.Port, options.LiveImageToken, number)
-		channels = append(channels, liveImagePageChannel{
-			Number: number, Name: strings.TrimSpace(provider.ChannelName(number)),
-			Address: address, URL: fullLiveImageURL(address),
-		})
+		seen[channel.Number] = true
+		channelAddress := liveImageChannelAddress(options.LiveImageHost, options.Port, options.LiveImageToken, channel.Number)
+		entry := liveImagePageChannel{
+			Number: channel.Number, Name: strings.TrimSpace(channel.Name), Primary: channel.Primary,
+			ChannelAddress: channelAddress, ChannelURL: fullLiveImageURL(channelAddress),
+			StatusText: liveImageChannelStatusText(channel), StatusClass: liveImageChannelStatusClass(channel),
+			CaptureText: liveImageCaptureText(channel), CaptureClass: liveImageCaptureClass(channel),
+		}
+		if validLiveImageCameraID(channel.CameraID) {
+			entry.Address = liveImageCameraAddress(options.LiveImageHost, options.Port, options.LiveImageToken, channel.CameraID)
+			entry.URL = fullLiveImageURL(entry.Address)
+		}
+		channels = append(channels, entry)
 	}
 	return channels
+}
+
+func liveImagePageDiscovery(options ServerOptions) liveImagePageDiscovery {
+	provider, ok := options.LiveImageProvider.(MultiChannelJPEGProvider)
+	if !ok {
+		return liveImagePageDiscovery{}
+	}
+	diagnostics := provider.LiveImageDiscovery()
+	result := liveImagePageDiscovery{
+		Available: true, LastAttempt: diagnostics.LastAttempt, LastSuccess: diagnostics.LastSuccess,
+		StatusText: "noch nicht ausgeführt", StatusClass: "muted",
+	}
+	if diagnostics.LastFailed {
+		result.StatusText = "vorübergehend nicht erreichbar – letzter Katalog bleibt aktiv"
+		result.StatusClass = "bad"
+	} else if !diagnostics.LastAttempt.IsZero() {
+		result.StatusText = "erfolgreich"
+		result.StatusClass = "ok"
+	} else if !diagnostics.LastSuccess.IsZero() {
+		result.StatusText = "gespeicherter Katalog geladen; neue Prüfung läuft"
+	}
+	return result
+}
+
+func liveImageChannelStatusText(channel LiveImageChannel) string {
+	if !channel.StatusKnown {
+		return "noch nicht neu geprüft"
+	}
+	if channel.Online {
+		return "online"
+	}
+	return "offline"
+}
+
+func liveImageChannelStatusClass(channel LiveImageChannel) string {
+	if !channel.StatusKnown {
+		return "muted"
+	}
+	if channel.Online {
+		return "ok"
+	}
+	return "bad"
+}
+
+func liveImageCaptureText(channel LiveImageChannel) string {
+	if channel.LastImageAttempt.IsZero() {
+		return "noch kein Bild abgerufen"
+	}
+	if channel.LastImageFailed {
+		text := "letzter Abruf fehlgeschlagen am " + formatTime(channel.LastImageAttempt)
+		if !channel.LastImageSuccess.IsZero() {
+			text += "; letzter Erfolg " + formatTime(channel.LastImageSuccess)
+			if channel.LastImageSource != "" {
+				text += " über " + channel.LastImageSource
+			}
+		}
+		if channel.LastImageDuration > 0 {
+			text += fmt.Sprintf(" (Fehlversuch %d ms)", channel.LastImageDuration.Round(time.Millisecond).Milliseconds())
+		}
+		return text
+	}
+	text := "erfolgreich am " + formatTime(channel.LastImageSuccess)
+	if channel.LastImageSource != "" {
+		text += " über " + channel.LastImageSource
+	}
+	if channel.LastImageDuration > 0 {
+		text += fmt.Sprintf(" (%d ms)", channel.LastImageDuration.Round(time.Millisecond).Milliseconds())
+	}
+	return text
+}
+
+func liveImageCaptureClass(channel LiveImageChannel) string {
+	if channel.LastImageAttempt.IsZero() {
+		return "muted"
+	}
+	if channel.LastImageFailed {
+		return "bad"
+	}
+	return "ok"
 }
 
 func setupHostname(value string) string {
 	return strings.ReplaceAll(strings.TrimSpace(value), "_", "-")
 }
 
-var page = template.Must(template.New("status").Funcs(template.FuncMap{"time": formatTime}).Parse(`<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reolink SIP Gateway</title><style>body{font:16px system-ui;margin:2rem;max-width:820px}.brand{display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem}.brand img{width:72px;height:72px;border-radius:16px}.brand h1{margin:0}.brand p{margin:.25rem 0 0;color:#666}.integration{background:#f4f6f8;border-radius:10px;padding:1rem;margin:0 0 1.25rem}.integration h2{font-size:1.1rem;margin:0 0 .65rem}.integration h3{font-size:1rem;margin:1.1rem 0 .5rem}.integration p{margin:.4rem 0}.channel{border-top:1px solid #d8dde2;margin-top:.8rem;padding-top:.7rem}.credential{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}.credential code{overflow-wrap:anywhere}.credential button{padding:.35rem .65rem}table{border-collapse:collapse;width:100%}td{padding:.55rem;border-bottom:1px solid #ddd;vertical-align:top}td:first-child{font-weight:600;width:40%}.ok{color:#087f23}.bad{color:#b00020}.muted{color:#666}code{background:#eee;padding:.15rem .3rem;border-radius:4px}@media(max-width:520px){body{margin:1rem}.brand img{width:60px;height:60px}.brand h1{font-size:1.55rem}}</style></head><body><div class="brand"><img src="./logo.png" alt="Reolink SIP Gateway"><div><h1>Reolink SIP Gateway</h1><p>Reolink ↔ SIP Zwei-Wege-Audio + FRITZ!Fon-Livebilder</p></div></div><section class="integration"><h2>Home-Assistant-Integration</h2><div class="credential"><span>Add-on-Hostname:</span><code id="api-hostname">{{.APIHostname}}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('api-hostname').textContent)">kopieren</button></div><div class="credential"><span>API-Token:</span><code id="api-token">{{.APIToken}}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('api-token').textContent)">kopieren</button></div><p class="muted">Die Integration erzeugt die API-Adresse automatisch. Token vertraulich behandeln; es berechtigt zu Testanruf und Auflegen.</p></section><section class="integration"><h2>FRITZ!Fon-Livebilder</h2>{{if .LiveImageAvailable}}<p><strong>Tür-Livebild (bestehender Link)</strong></p><p>In der FRITZ!Box bei <strong>Live-Bild</strong> <code>http://</code> auswählen und diesen Wert eintragen:</p><div class="credential"><code id="live-image-address">{{.LiveImageAddress}}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('live-image-address').textContent)">kopieren</button></div><p><a href="{{.LiveImageURL}}" target="_blank" rel="noreferrer">Tür-Kamerabild testen</a></p>{{if .LiveImageChannels}}<h3>Automatisch erkannte Kamerakanäle</h3><p class="muted">Jeder Online-NVR-Kanal erhält zusätzlich eine eigene stabile JPG-Adresse. Nach Änderungen am NVR die App neu starten.</p>{{range .LiveImageChannels}}<div class="channel"><p><strong>Kanal {{.Number}}{{if .Name}} – {{.Name}}{{end}}</strong></p><div class="credential"><code id="live-image-channel-{{.Number}}">{{.Address}}</code><button type="button" onclick="navigator.clipboard.writeText(document.getElementById('live-image-channel-{{.Number}}').textContent)">kopieren</button></div><p><a href="{{.URL}}" target="_blank" rel="noreferrer">Kamerabild von Kanal {{.Number}} testen</a></p></div>{{end}}{{end}}<p class="muted">Alle geheimen, dauerhaft stabilen Adressen enden FRITZ!Box-kompatibel auf <code>.jpg</code>. Reolink-Zugangsdaten werden nicht an die FRITZ!Box übergeben.</p>{{else}}<p class="muted">In den App-Optionen unter „FRITZ!Fon-Livebild“ deaktiviert.</p>{{end}}</section><table>
-<tr><td>Status</td><td><code>{{.State}}</code></td></tr>
-{{if .DoorCallEnabled}}<tr><td>Tür-SIP registriert</td><td>{{if .SIPRegistered}}<span class="ok">ja</span>{{else}}<span class="bad">nein</span>{{end}}</td></tr>{{end}}
-{{if .ParallelCallEnabled}}<tr><td>Mobilruf-SIP registriert</td><td>{{if .ParallelSIPRegistered}}<span class="ok">ja</span>{{else}}<span class="bad">nein</span>{{end}}</td></tr>{{end}}
-<tr><td>Home Assistant</td><td>{{if .HAConnected}}<span class="ok">verbunden</span>{{else}}<span class="bad">nicht verbunden</span>{{end}}</td></tr>
-<tr><td>Konfigurierter Reolink-Modus</td><td>{{.ConfiguredReolinkMode}}</td></tr>
-<tr><td>Aktiver Reolink-Modus</td><td>{{if .ActiveReolinkMode}}{{.ActiveReolinkMode}}{{else}}<span class="muted">noch nicht ermittelt</span>{{end}}</td></tr>
-<tr><td>Medienweg</td><td>{{if .MediaProfile}}{{.MediaProfile}}{{else}}<span class="muted">noch nicht ermittelt</span>{{end}}</td></tr>
-<tr><td>WebRTC AEC</td><td>{{if .EchoCancellationEnabled}}an, Go-Tracking aus (AEC3 intern), Hochpass {{if .WebRTCHighPassFilterEnabled}}an{{else}}aus{{end}}, Rauschfilter {{if .WebRTCNoiseSuppressionEnabled}}moderate{{else}}aus{{end}}{{else}}aus{{end}}</td></tr>
-<tr><td>FRITZ!Fon-Livebilder</td><td>{{if .FritzFonLiveImageEnabled}}aktiv{{else}}aus{{end}}</td></tr>
-<tr><td>Automatische Kalibrierung</td><td>{{.CalibrationStatus}}{{if .CalibrationDetails}} – {{.CalibrationDetails}}{{end}}</td></tr>
-<tr><td>Kalibrierte Latenz</td><td>{{if .EchoCancellationEnabled}}{{.CalibratedDelayMS}} ms{{else}}–{{end}}</td></tr>
-<tr><td>Aktuelle Latenz</td><td>{{if .EchoCancellationEnabled}}{{.CurrentDelayMS}} ms{{else}}–{{end}}</td></tr>
-<tr><td>Live-Delay-Tracking</td><td>{{if .EchoCancellationEnabled}}aus; kalibrierter Go-Coarse-Delay bleibt während des Calls fest{{else}}–{{end}}</td></tr>
-<tr><td>Letzte Kalibrierung</td><td>{{time .LastCalibration}}</td></tr>
-<tr><td>Aktiver AEC-Pfad</td><td>{{.ActiveEchoCancellation}}</td></tr>
-<tr><td>Aktiver Codec</td><td>{{.ActiveCodec}}</td></tr>
-<tr><td>Aktiver Empfang</td><td>{{.ActiveReceive}}{{if .ReceiveDetails}} – {{.ReceiveDetails}}{{end}}</td></tr>
-<tr><td>Aktiver Rückkanal</td><td>{{.ActiveTalkback}}{{if .TalkbackDetails}} – {{.TalkbackDetails}}{{end}}</td></tr>
-<tr><td>Aktuelle Route</td><td>{{if .CurrentRouteName}}{{.CurrentRouteName}} (<code>{{.CurrentRouteID}}</code>){{else}}–{{end}}</td></tr>
-<tr><td>Letzte Route</td><td>{{if .LastRouteName}}{{.LastRouteName}} (<code>{{.LastRouteID}}</code>){{else}}–{{end}}</td></tr>
-<tr><td>Aktuelle Anrufrichtung</td><td>{{if .CurrentCallDirection}}{{.CurrentCallDirection}}{{else}}–{{end}}</td></tr>
-<tr><td>Aktuell anrufende Nummer</td><td>{{if .CurrentCallerNumber}}{{.CurrentCallerNumber}}{{else}}–{{end}}</td></tr>
-<tr><td>Letzte anrufende Nummer</td><td>{{if .LastCallerNumber}}{{.LastCallerNumber}}{{else}}–{{end}}</td></tr>
-<tr><td>Letzte Anrufrichtung</td><td>{{if .LastCallDirection}}{{.LastCallDirection}}{{else}}–{{end}}</td></tr>
-<tr><td>Letztes Klingeln</td><td>{{time .LastVisitorEvent}}</td></tr>
-{{if .DoorCallEnabled}}<tr><td>Letzter Tür-SIP-Registrierungsfehler</td><td>{{.LastRegistrationErr}}</td></tr>{{end}}
-{{if .ParallelCallEnabled}}<tr><td>Letzter Mobilruf-SIP-Registrierungsfehler</td><td>{{.LastParallelRegistrationErr}}</td></tr>{{end}}
-<tr><td>Letzter Fehler</td><td>{{.LastError}}</td></tr>
-<tr><td>Start</td><td>{{time .StartedAt}}</td></tr>
-<tr><td>Version</td><td>{{.Version}}</td></tr>
-</table><p>Die Seite aktualisiert sich automatisch.</p><script>setTimeout(()=>location.reload(),5000)</script></body></html>`))
+//go:embed page.html
+var statusPageHTML string
+
+var page = template.Must(template.New("status").Funcs(template.FuncMap{"time": formatTime}).Parse(statusPageHTML))

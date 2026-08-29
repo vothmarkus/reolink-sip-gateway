@@ -6,7 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 type staticJPEGProvider struct {
@@ -17,21 +19,27 @@ type staticJPEGProvider struct {
 
 type staticMultiJPEGProvider struct {
 	staticJPEGProvider
-	channels     []int
-	names        map[int]string
+	channels     []LiveImageChannel
+	discovery    LiveImageDiscovery
 	channelCalls []int
+	cameraCalls  []string
 }
 
-func (p *staticMultiJPEGProvider) ChannelNumbers() []int {
-	return append([]int(nil), p.channels...)
+func (p *staticMultiJPEGProvider) LiveImageChannels() []LiveImageChannel {
+	return append([]LiveImageChannel(nil), p.channels...)
 }
 
-func (p *staticMultiJPEGProvider) ChannelName(channel int) string {
-	return p.names[channel]
+func (p *staticMultiJPEGProvider) LiveImageDiscovery() LiveImageDiscovery {
+	return p.discovery
 }
 
 func (p *staticMultiJPEGProvider) FetchChannelJPEG(_ context.Context, channel int) ([]byte, error) {
 	p.channelCalls = append(p.channelCalls, channel)
+	return p.image, p.err
+}
+
+func (p *staticMultiJPEGProvider) FetchCameraJPEG(_ context.Context, cameraID string) ([]byte, error) {
+	p.cameraCalls = append(p.cameraCalls, cameraID)
 	return p.image, p.err
 }
 
@@ -137,7 +145,7 @@ func TestLiveImageAddressHasExplicitHostPlaceholder(t *testing.T) {
 func TestMultiChannelLiveImageRouteServesOnlyPublishedExactPaths(t *testing.T) {
 	provider := &staticMultiJPEGProvider{
 		staticJPEGProvider: staticJPEGProvider{image: []byte{0xff, 0xd8, 0xff, 0xd9}},
-		channels:           []int{1, 2},
+		channels:           []LiveImageChannel{{Number: 1}, {Number: 2}},
 	}
 	handler := liveImageChannelHandler(provider, "secret-token")
 
@@ -166,11 +174,43 @@ func TestMultiChannelLiveImageRouteServesOnlyPublishedExactPaths(t *testing.T) {
 	}
 }
 
-func TestMultiChannelAddressesAndPageEntriesAreStableAndSorted(t *testing.T) {
+func TestStableCameraRouteServesOnlyPublishedExactIDs(t *testing.T) {
+	cameraID := "0123456789abcdef0123456789abcdef"
 	provider := &staticMultiJPEGProvider{
 		staticJPEGProvider: staticJPEGProvider{image: []byte{0xff, 0xd8, 0xff, 0xd9}},
-		channels:           []int{2, 1, 2, 0, 300},
-		names:              map[int]string{1: "Einfahrt", 2: "Türklingel"},
+		channels:           []LiveImageChannel{{Number: 2, CameraID: cameraID}},
+	}
+	handler := liveImageChannelHandler(provider, "secret-token")
+	valid := httptest.NewRecorder()
+	handler.ServeHTTP(valid, httptest.NewRequest(http.MethodGet, "/fritzfon/secret-token/camera-"+cameraID+".jpg", nil))
+	if valid.Code != http.StatusOK || len(provider.cameraCalls) != 1 || provider.cameraCalls[0] != cameraID {
+		t.Fatalf("stable route status=%d calls=%v", valid.Code, provider.cameraCalls)
+	}
+	for _, invalidID := range []string{
+		"0123456789abcdef", "0123456789abcdef0123456789abcdeg", "0123456789ABCDEF0123456789ABCDEF",
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/fritzfon/secret-token/camera-"+invalidID+".jpg", nil))
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("invalid camera ID %q status=%d", invalidID, response.Code)
+		}
+	}
+	if len(provider.cameraCalls) != 1 {
+		t.Fatalf("invalid IDs reached provider: %v", provider.cameraCalls)
+	}
+}
+
+func TestMultiChannelAddressesAndPageEntriesAreStableAndSorted(t *testing.T) {
+	cameraID := "0123456789abcdef0123456789abcdef"
+	now := time.Date(2026, 8, 29, 15, 0, 0, 0, time.UTC)
+	provider := &staticMultiJPEGProvider{
+		staticJPEGProvider: staticJPEGProvider{image: []byte{0xff, 0xd8, 0xff, 0xd9}},
+		channels: []LiveImageChannel{
+			{Number: 2, Name: "Türklingel", CameraID: cameraID, Online: true, StatusKnown: true, LastImageAttempt: now, LastImageSuccess: now, LastImageSource: "HTTPS", LastImageDuration: 42 * time.Millisecond},
+			{Number: 1, Name: "Einfahrt", StatusKnown: true},
+			{Number: 2}, {Number: 0}, {Number: 300},
+		},
+		discovery: LiveImageDiscovery{LastAttempt: now, LastSuccess: now},
 	}
 	options := ServerOptions{
 		Port: 18099, LiveImageHost: "192.168.177.5", LiveImageToken: "secret-token", LiveImageProvider: provider,
@@ -179,13 +219,18 @@ func TestMultiChannelAddressesAndPageEntriesAreStableAndSorted(t *testing.T) {
 	if len(entries) != 2 || entries[0].Number != 1 || entries[1].Number != 2 || entries[1].Name != "Türklingel" {
 		t.Fatalf("page entries=%#v", entries)
 	}
-	if entries[0].Address != "192.168.177.5:18099/fritzfon/secret-token/channel-1.jpg" ||
-		entries[0].URL != "http://"+entries[0].Address {
-		t.Fatalf("channel address=%#v", entries[0])
+	if entries[0].Address != "" || entries[0].ChannelAddress != "192.168.177.5:18099/fritzfon/secret-token/channel-1.jpg" ||
+		entries[1].Address != "192.168.177.5:18099/fritzfon/secret-token/camera-"+cameraID+".jpg" ||
+		entries[1].URL != "http://"+entries[1].Address || entries[1].StatusText != "online" || !strings.Contains(entries[1].CaptureText, "HTTPS (42 ms)") {
+		t.Fatalf("channel addresses=%#v", entries)
 	}
 	placeholder := liveImageChannelAddress("", 18099, "secret-token", 2)
 	if placeholder != "HOME-ASSISTANT-IP:18099/fritzfon/secret-token/channel-2.jpg" {
 		t.Fatalf("placeholder address=%q", placeholder)
+	}
+	discovery := liveImagePageDiscovery(options)
+	if discovery.StatusText != "erfolgreich" || discovery.StatusClass != "ok" || discovery.LastSuccess != now {
+		t.Fatalf("discovery page data=%#v", discovery)
 	}
 }
 

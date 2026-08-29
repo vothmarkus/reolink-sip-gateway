@@ -6,7 +6,7 @@ Community Home Assistant app that bridges bidirectional audio between a Reolink 
 
 ## Current release
 
-**v1.4.0** automatically detects online channels of a configured Reolink NVR and publishes a separate, stable FRITZ!Fon-compatible `.jpg` address for each one. The Ingress page lists the detected channel numbers and names with copy and browser-test controls. The existing door-live-image address from v1.3 remains byte-for-byte unchanged and continues to use the configured primary channel if discovery is unavailable.
+**v1.5.0** makes the multi-camera FRITZ!Fon feature resilient and faster. NVR channels are refreshed every five minutes and the last successful catalog survives restarts and temporary NVR outages. Every camera with a Reolink UID receives a one-way, UID-derived URL that follows it across NVR channel moves; the v1.3 door URL and all v1.4 numbered URLs remain unchanged. Accepted visitor events asynchronously prefetch the door frame, while the Ingress page reports discovery, online/offline and image-source diagnostics.
 
 The direct v1.2.2 call-route model remains unchanged: a fresh installation contains one editable `Standardroute` with visitor sensor `auto`, FRITZ!Box doorbell number `11` and three optional mobile-number fields. All routes continue to share one Reolink camera/media path and the same two optional SIP accounts.
 
@@ -30,7 +30,7 @@ Highlights:
 - Configurable SIP RTP inactivity watchdog for deterministic cleanup of broken calls.
 - Home Assistant Reolink visitor binary sensor as call trigger, with entity-registry auto-discovery or manual override.
 - Reolink standalone and NVR media profiles.
-- Optional local FRITZ!Fon live-image endpoints with automatic online-NVR-channel discovery, one stable copyable URL per channel, a persistent independent path token, JPEG validation and output fitted inside AVM's approximately 480×640-pixel frame.
+- Optional local FRITZ!Fon live-image endpoints with periodically refreshed NVR discovery, persistent last-known channels, UID-derived camera URLs, ring-event prefetch, a persistent independent path token, JPEG validation and output fitted inside AVM's approximately 480×640-pixel frame.
 - Bidirectional audio via RTSP/ONVIF or Reolink Baichuan, depending on profile.
 - Native WebRTC AudioProcessing echo cancellation.
 - Automatic acoustic startup-delay calibration.
@@ -188,6 +188,8 @@ This design is intentional: hardware testing showed that the former Go live dela
 
 ## Configuration migration
 
+v1.5.0 adds no option or data migration. In NVR/auto mode it creates `/data/fritzfon-live-image-catalog.json` automatically with mode `0600`; the file contains the last successful camera/channel mapping for the configured NVR and can be deleted safely to force a fresh catalog. Existing door and numbered image URLs remain valid.
+
 v1.4.0 adds no option or data migration. When live images are enabled, NVR/auto mode performs read-only channel discovery at startup and derives the additional channel URLs from the existing persistent path token. The previous door URL and configured `nvr_channel_number` behavior are unchanged.
 
 v1.3.1 only reorders the existing `live_image` group in the visible Home Assistant configuration. It introduces no option, default or data migration.
@@ -211,7 +213,7 @@ v0.5.10 finalizes the grouped configuration introduced in v0.5.8:
 
 ## Hardware status
 
-The NVR/Baichuan audio path has been developed and hardware-tested with a Reolink Video Doorbell PoE behind an RLN8-410 NVR. The unchanged primary FRITZ!Fon live-image path has also been confirmed successfully on the target FRITZ!Box 4050/FRITZ!Fon installation. The new v1.4 multi-channel discovery and URLs are covered by automated tests but still require confirmation on that target hardware. Other Reolink firmware/device combinations may differ; detailed debug logs are useful when reporting compatibility issues.
+The NVR/Baichuan audio path has been developed and hardware-tested with a Reolink Video Doorbell PoE behind an RLN8-410 NVR. The primary FRITZ!Fon path and v1.4 multi-channel images have also been confirmed on the target FRITZ!Box 4050/FRITZ!Fon installation. v1.5's periodic refresh, camera-move URL and ring-prefetch extensions are covered by automated tests and await longer hardware observation. Other Reolink firmware/device combinations may differ; detailed diagnostics are useful when reporting compatibility issues.
 
 ## Development
 

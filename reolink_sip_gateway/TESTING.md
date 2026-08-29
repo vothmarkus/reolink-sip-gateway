@@ -1,8 +1,8 @@
-# Prüfprotokoll 1.4.0
+# Prüfprotokoll 1.5.0
 
 ## Ziel
 
-1.4.0 erkennt Online-Kanäle eines Reolink NVR automatisch und stellt für jeden eine stabile geheime `.jpg`-Adresse bereit. Zu prüfen sind Reolinks 0-basierte zu öffentlich 1-basierte Kanalabbildung, Online-Filter und Namen, unveränderter Türlink, kanalgetrennter CGI-/RTSP-Abruf und Cache, sichere Fehlerfälle, die Anzeige mehrerer Bilder auf FRITZ!Fon sowie die vollständige Regression des Routing-, SIP- und Audiopfads.
+1.5.0 aktualisiert und persistiert den NVR-Kamerakatalog, stellt UID-abgeleitete kanalunabhängige `.jpg`-Adressen bereit, lädt das Türbild bei einem angenommenen Besucherereignis vor und zeigt Erkennungs-/Abrufdiagnosen. Zu prüfen sind Fehlerbeibehaltung, Neustart, NVR-Abgrenzung, Kanalumzug, exakte Pfade, Vorladecache, unveränderte Tür-/Kanal-Links sowie die vollständige Regression des Routing-, SIP- und Audiopfads.
 
 ## Softwareprüfungen vor Release
 
@@ -18,9 +18,19 @@
 - identische sechs Gruppen sowie `call_routes` unmittelbar hinter `call` in `options`, `schema`, DE, EN und Testkonfiguration; `live_image` steht jeweils als vorletzte Gruppe direkt vor `diagnostics`
 - identische SIP-Feldreihenfolge in `options`, `schema`, DE, EN und Fixture: beide Konto-Blöcke vor `sip_registrar_port`, `sip_local_port` und `parallel_local_port`
 - Bash-Syntaxprüfung des s6-Startskripts
-- Versionsprüfung 1.4.0 in App, Gateway, SIP-/RTSP-/Snapshot-/Kanalerkennungs-User-Agent und CI-Buildargument
+- Versionsprüfung 1.5.0 in App, Gateway, SIP-/RTSP-/Snapshot-/Kanalerkennungs-User-Agent und CI-Buildargument
 - Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
 - expliziter Test der nativen Statistikbits 0…7
+
+## Ergänzungen 1.5.0
+
+- Ein Scheduler-Test beweist die sofortige und periodische Erkennung sowie sauberes Stoppen mit dem Prozesskontext. Produktiv beträgt das Intervall fünf Minuten und jeder Versuch hat ein eigenes 12-Sekunden-Limit.
+- Erfolgreiche Antworten ersetzen den Katalog atomar; Verbindungs-, HTTP- und Parsefehler behalten alle letzten Kanäle und setzen sichtbare Fehlerdiagnosen. Online- und sinnvolle Offline-Slots, Versuch/Erfolg sowie Kameranamen werden geprüft.
+- Der letzte Katalog wird mit Modus `0600` geschrieben und nach Neustart mit zunächst unbekanntem Onlinezustand wiederhergestellt. Ein anderer konfigurierter NVR-Host darf fremden Zustand nicht übernehmen; Kamera-/SIP-Passwörter dürfen nicht in der Datei stehen.
+- Eine normalisierte UID ergibt deterministisch eine 32-stellige SHA-256-Ableitung. Ein Mock-NVR verschiebt dieselbe UID zwischen Kanälen und der unveränderte `/camera-<id>.jpg`-Abruf muss anschließend den neuen physischen Kanal verwenden.
+- Kamera- und Kanalhandler akzeptieren nur katalogisierte exakte Pfade. Falsche Länge, Großbuchstaben, Nicht-Hexzeichen, führende Null, unbekannte IDs, falsche Endung und zusätzliche Segmente ergeben kein Bild.
+- Vorladen erzeugt einen Frame unabhängig vom Callpfad, hält ihn bis zu fünf Sekunden für den ersten Abruf, koalesziert das unmittelbare HEAD/GET-Paar weiter im 750-ms-Cache und kehrt danach zum normalen Aktualisieren zurück. Der Starthelfer arbeitet asynchron mit Deadline.
+- Die Statusseite zeigt stabilen und nummerierten Link, Onlinezustand, letzten Abruf, Quelle/Dauer sowie Erkennungsversuch/-erfolg. Fehlende UID erhält ausschließlich den kompatiblen nummerierten Link.
 
 ## Ergänzungen 1.4.0
 
@@ -46,6 +56,17 @@
 - Der geheime HTTP-Pfad akzeptiert nur lokale/private/link-lokale `GET`- und `HEAD`-Anfragen, liefert `image/jpeg`, eine feste `.jpg`-Disposition und No-Cache-/Nosniff-Header. Öffentliche Quelladressen und falsche Pfade bleiben unerreichbar; Providerfehler ergeben eine generische `502`-Antwort.
 - API-Token und separates 192-Bit-Livebildtoken bleiben über erneutes Laden stabil und liegen jeweils mit Modus `0600` vor. Das Livebildtoken erfüllt bewusst nicht die Validierung des 256-Bit-API-Tokens.
 - Die Statusseite zeigt Protokollauswahl-Anweisung, kopierbare Adresse und Browsertest nur bei aktivierter Funktion. Der Snapshot meldet den Aktivierungszustand additiv; API v1 bleibt ansonsten unverändert.
+
+## FRITZ!Box-4050-/FRITZ!Fon-Hardwaretest 1.5.0
+
+1. Update starten und prüfen, dass bisheriger Türpfad sowie alle bereits eingetragenen `/channel-N.jpg`-Pfade unverändert funktionieren.
+2. Für jede Kamera den empfohlenen `/camera-<id>.jpg`-Link kopieren, im Browser und anschließend als zusätzliches FRITZ!Fon-Livebild testen. Roh-UID, Benutzer und Passwort dürfen nirgends erscheinen.
+3. Eine Kamera auf einen anderen NVR-Kanal verschieben. Ohne App-Neustart höchstens fünf Minuten warten; derselbe stabile Kamera-Link muss nun das Bild am neuen Kanal liefern, während der nummerierte Link weiterhin seiner Nummer folgt.
+4. NVR-Zugriff länger als einen Erkennungszyklus blockieren. Die Oberfläche muss „vorübergehend nicht erreichbar“ und die Zeitpunkte zeigen; der letzte Katalog und alle Links müssen erhalten bleiben. Nach Freigabe muss sich der Status selbst erholen.
+5. App bei blockiertem NVR neu starten. Der gespeicherte Katalog muss sofort erscheinen, zunächst mit unbekanntem Onlinezustand; Tür- und bekannte Links bleiben nutzbar, sofern Snapshotzugriff möglich ist.
+6. Ein echtes Besucherereignis auslösen und kontrollieren, dass der Türruf unverändert startet und das erste Telefonbild schnell erscheint. Testanruf und eingehender Anruf dürfen kein Vorladen auslösen; Bildfehler dürfen den Ruf nicht verhindern.
+7. In der Diagnose je einen erfolgreichen CGI- und, falls praktikabel, RTSP-Fallback-Abruf prüfen. Quelle, Erfolg/Fehler und Dauer müssen plausibel aktualisiert werden, ohne Zugangsdaten auszugeben.
+8. Tür-/Mobilruf, eingehenden Anruf, DTMF und Zwei-Wege-Audio erneut stichprobenartig prüfen. Periodische Erkennung und Bildabrufe dürfen keinen Call-Slot oder Reolink-Audioweg belegen.
 
 ## FRITZ!Box-4050-/FRITZ!Fon-Hardwaretest 1.4.0
 
@@ -309,4 +330,4 @@ Im 0.4.3-Hardwarelog war `native_stats_mask=0x3b`, aber Go zeigte nur einen Teil
 
 ## Hardwarestand
 
-Die unveränderte primäre Livebildanzeige wurde auf der Zielinstallation mit FRITZ!Box 4050 und FRITZ!Fon erfolgreich bestätigt. Die Mehrkanal-Erweiterung aus 1.4.0 ist automatisiert getestet, aber noch nicht auf dieser Zielinstallation bestätigt. Double-Talk auf der Zielhardware wird weiterhin später separat getestet. Der stabile 53-s-0.4.3-Einsprechtest bleibt bis dahin die Referenz für Single-Talk-Echoreduktion.
+Die primäre Livebildanzeige und die Mehrkanal-Erweiterung aus 1.4.0 wurden auf der Zielinstallation mit FRITZ!Box 4050 und FRITZ!Fon erfolgreich bestätigt. Die Resilienz-, UID- und Vorladefunktionen aus 1.5.0 sind automatisiert geprüft; ihre längere Hardwarebeobachtung folgt mit diesem Protokoll. Double-Talk auf der Zielhardware wird weiterhin später separat getestet. Der stabile 53-s-0.4.3-Einsprechtest bleibt bis dahin die Referenz für Single-Talk-Echoreduktion.

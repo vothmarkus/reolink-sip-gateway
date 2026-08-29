@@ -18,14 +18,35 @@ type JPEGProvider interface {
 	FetchJPEG(context.Context) ([]byte, error)
 }
 
+type LiveImageChannel struct {
+	Number            int
+	Name              string
+	CameraID          string
+	Online            bool
+	StatusKnown       bool
+	Primary           bool
+	LastImageAttempt  time.Time
+	LastImageSuccess  time.Time
+	LastImageSource   string
+	LastImageDuration time.Duration
+	LastImageFailed   bool
+}
+
+type LiveImageDiscovery struct {
+	LastAttempt time.Time
+	LastSuccess time.Time
+	LastFailed  bool
+}
+
 // MultiChannelJPEGProvider is optional. Providers implementing it keep the
-// legacy primary image while additionally exposing automatically discovered,
-// public 1-based NVR channels below the same secret path token.
+// legacy primary and numbered images while additionally exposing UID-derived
+// stable camera paths and read-only discovery/capture diagnostics.
 type MultiChannelJPEGProvider interface {
 	JPEGProvider
-	ChannelNumbers() []int
-	ChannelName(int) string
+	LiveImageChannels() []LiveImageChannel
+	LiveImageDiscovery() LiveImageDiscovery
 	FetchChannelJPEG(context.Context, int) ([]byte, error)
+	FetchCameraJPEG(context.Context, string) ([]byte, error)
 }
 
 func liveImagePath(token string) string {
@@ -49,11 +70,23 @@ func liveImageChannelPath(token string, channel int) string {
 }
 
 func liveImageChannelAddress(host string, port int, token string, channel int) string {
+	return liveImageAddressForPath(host, port, liveImageChannelPath(token, channel))
+}
+
+func liveImageCameraPath(token, cameraID string) string {
+	return liveImageChannelPrefix(token) + "camera-" + cameraID + ".jpg"
+}
+
+func liveImageCameraAddress(host string, port int, token, cameraID string) string {
+	return liveImageAddressForPath(host, port, liveImageCameraPath(token, cameraID))
+}
+
+func liveImageAddressForPath(host string, port int, path string) string {
 	host = strings.TrimSpace(host)
 	if host == "" {
-		return "HOME-ASSISTANT-IP:" + strconv.Itoa(port) + liveImageChannelPath(token, channel)
+		return "HOME-ASSISTANT-IP:" + strconv.Itoa(port) + path
 	}
-	return net.JoinHostPort(host, strconv.Itoa(port)) + liveImageChannelPath(token, channel)
+	return net.JoinHostPort(host, strconv.Itoa(port)) + path
 }
 
 func liveImageHandler(provider JPEGProvider) http.Handler {
@@ -84,13 +117,17 @@ func liveImageHandler(provider JPEGProvider) http.Handler {
 func liveImageChannelHandler(provider MultiChannelJPEGProvider, token string) http.Handler {
 	prefix := liveImageChannelPrefix(token)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		channel, ok := requestedLiveImageChannel(r.URL.Path, prefix)
-		if !ok || !availableLiveImageChannel(provider.ChannelNumbers(), channel) {
-			setLiveImageResponseHeaders(w)
-			http.NotFound(w, r)
+		channels := provider.LiveImageChannels()
+		if channel, ok := requestedLiveImageChannel(r.URL.Path, prefix); ok && availableLiveImageChannel(channels, channel) {
+			liveImageHandler(channelJPEGProvider{provider: provider, channel: channel}).ServeHTTP(w, r)
 			return
 		}
-		liveImageHandler(channelJPEGProvider{provider: provider, channel: channel}).ServeHTTP(w, r)
+		if cameraID, ok := requestedLiveImageCamera(r.URL.Path, prefix); ok && availableLiveImageCamera(channels, cameraID) {
+			liveImageHandler(cameraJPEGProvider{provider: provider, cameraID: cameraID}).ServeHTTP(w, r)
+			return
+		}
+		setLiveImageResponseHeaders(w)
+		http.NotFound(w, r)
 	})
 }
 
@@ -101,6 +138,15 @@ type channelJPEGProvider struct {
 
 func (p channelJPEGProvider) FetchJPEG(ctx context.Context) ([]byte, error) {
 	return p.provider.FetchChannelJPEG(ctx, p.channel)
+}
+
+type cameraJPEGProvider struct {
+	provider MultiChannelJPEGProvider
+	cameraID string
+}
+
+func (p cameraJPEGProvider) FetchJPEG(ctx context.Context) ([]byte, error) {
+	return p.provider.FetchCameraJPEG(ctx, p.cameraID)
 }
 
 func requestedLiveImageChannel(path, prefix string) (int, bool) {
@@ -119,9 +165,42 @@ func requestedLiveImageChannel(path, prefix string) (int, bool) {
 	return channel, err == nil && channel >= 1 && channel <= 256 && value == strconv.Itoa(channel)
 }
 
-func availableLiveImageChannel(channels []int, requested int) bool {
+func requestedLiveImageCamera(path, prefix string) (string, bool) {
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	filename := strings.TrimPrefix(path, prefix)
+	if !strings.HasPrefix(filename, "camera-") || !strings.HasSuffix(filename, ".jpg") {
+		return "", false
+	}
+	cameraID := strings.TrimSuffix(strings.TrimPrefix(filename, "camera-"), ".jpg")
+	return cameraID, validLiveImageCameraID(cameraID)
+}
+
+func validLiveImageCameraID(cameraID string) bool {
+	if len(cameraID) != 32 || strings.Contains(cameraID, "/") {
+		return false
+	}
+	for _, character := range cameraID {
+		if !strings.ContainsRune("0123456789abcdef", character) {
+			return false
+		}
+	}
+	return true
+}
+
+func availableLiveImageChannel(channels []LiveImageChannel, requested int) bool {
 	for _, channel := range channels {
-		if channel == requested {
+		if channel.Number == requested {
+			return true
+		}
+	}
+	return false
+}
+
+func availableLiveImageCamera(channels []LiveImageChannel, requested string) bool {
+	for _, channel := range channels {
+		if channel.CameraID == requested && requested != "" {
 			return true
 		}
 	}

@@ -133,7 +133,7 @@ configuration:
     fields:
       fritzfon_live_image_enabled:
         name: Provide live images for FRITZ!Fon
-        description: Provides secret, stable .jpg addresses on port 18099. The app status page shows the existing door link and every automatically detected active NVR channel with a copy button. The gateway adapts oversized images for the FRITZ!Fon and never gives the camera credentials to the FRITZ!Box.
+        description: Provides secret, stable .jpg addresses on port 18099. The app status page shows the existing door link and automatically refreshed NVR cameras with a channel-independent link, diagnostics, and copy button. The gateway adapts oversized images for the FRITZ!Fon and never gives camera credentials or UIDs to the FRITZ!Box.
   diagnostics:
     name: Operation & diagnostics
     description: Operating mode and logging.

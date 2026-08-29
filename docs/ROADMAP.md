@@ -1,5 +1,22 @@
 # Roadmap
 
+## v1.5: resilient camera identities and fast ring images — implemented
+
+NVR discovery now repeats every five minutes and persists the last successful
+catalog. Reolink UIDs are converted to one-way camera IDs, so a camera URL
+survives a move between NVR channels without exposing the raw UID. Accepted
+visitor events prefetch the primary image alongside call setup, and the Ingress
+page exposes discovery, online/offline and capture-source diagnostics.
+
+Implemented invariants:
+
+- the v1.3 primary URL and every v1.4 numbered URL remain unchanged;
+- discovery updates are atomic and failures retain the last known catalog;
+- persisted state is tied to the configured NVR and stored with mode `0600`;
+- only exact, catalogued `camera-<32 lowercase hex>.jpg` paths are routable;
+- image prefetch never delays call acceptance or owns SIP/audio resources;
+- standalone mode, configuration schema and API v1 remain unchanged.
+
 ## v1.4: FRITZ!Fon images for every NVR channel — implemented
 
 At startup the gateway uses Reolink's read-only channel-status API to detect
@@ -87,6 +104,6 @@ Implemented invariants:
 Multiple simultaneous camera/audio sessions, route-specific camera selection,
 route-specific door openers and queued calls remain intentionally outside the
 current architecture. They require a different resource and permission model
-rather than another field in the routing matrix. v1.4's additional read-only
-snapshots do not allocate media sessions and therefore do not change that
-boundary.
+rather than another field in the routing matrix. v1.4/v1.5's additional
+read-only snapshots and ring prefetch do not allocate media sessions and
+therefore do not change that boundary.

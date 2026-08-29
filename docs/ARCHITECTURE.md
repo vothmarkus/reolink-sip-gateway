@@ -94,6 +94,15 @@ uses Reolink's read-only `GetChannelstatus` request during startup to derive
 additional public image channels. It never alters the configured primary
 channel or the exclusive audio/media resource.
 
+v1.5.0 also adds no option or migration. Discovery runs immediately and every
+five minutes, replacing the in-memory catalog only after a valid response. The
+last successful mapping is atomically persisted under `/data`, scoped to the
+configured NVR host. A normalized Reolink UID is retained only in that
+mode-`0600` local state and converted through SHA-256 to the 128-bit public
+camera ID; the raw UID is never part of an HTTP path or page. A visitor event
+that successfully reserves the global call slot starts primary-image prefetch
+in an independent bounded goroutine.
+
 ## Home Assistant integration boundary
 
 The companion integration talks only to the versioned local HTTP API. It cannot construct SIP messages, reserve RTP ports, open Reolink sessions or mutate the media pipeline.
@@ -110,20 +119,21 @@ One Store remains the source of truth. The integration can use SSE for low-laten
 
 The status server preserves the v1.3 primary path `/fritzfon/<token>.jpg` and
 optionally registers exact channel resources below
-`/fritzfon/<token>/channel-N.jpg`. It accepts only `GET` and `HEAD` from
+`/fritzfon/<token>/channel-N.jpg` plus UID-derived resources below
+`/fritzfon/<token>/camera-<id>.jpg`. It accepts only `GET` and `HEAD` from
 loopback, private or link-local source addresses, returns validated JPEG bytes
 with no-cache headers, and exposes neither directory listing nor a query-based
-credential. Only catalogued 1-based channel numbers are routable. The
-FRITZ!Box therefore receives a read-only image capability, not the more
-powerful API v1 bearer token.
+credential. Only catalogued 1-based channel numbers and exact 32-character
+lowercase camera IDs are routable. The FRITZ!Box therefore receives a
+read-only image capability, not the more powerful API v1 bearer token.
 
 The catalog and per-channel sources are deliberately independent of call
-control and the exclusive audio session. Startup discovery tries Reolink's
-channel-status CGI over local HTTPS and then HTTP, filters for `online=1`,
-normalizes the optional display names and converts protocol channel 0 to public
-channel 1. Discovery failure is non-fatal and retains the configured primary
-source. Each source then tries snapshot CGI over local HTTPS first and local
-HTTP second. Cross-host redirects are refused. If neither result is a valid
+control and the exclusive audio session. Periodic discovery tries Reolink's
+channel-status CGI over local HTTPS and then HTTP, records meaningful online
+and offline slots, normalizes optional display names and converts protocol
+channel 0 to public channel 1. Discovery failure is non-fatal and retains the
+complete last successful catalog. Each source then tries snapshot CGI over
+local HTTPS first and local HTTP second. Cross-host redirects are refused. If neither result is a valid
 JPEG, a bounded FFmpeg process captures one frame from the configured primary
 RTSP URL or the corresponding NVR `/Preview_NN_sub` URL. Transport errors are
 classified before logging so URLs containing camera credentials cannot leak.
@@ -131,10 +141,13 @@ classified before logging so URLs containing camera credentials cannot leak.
 Decoded dimensions and total pixel count are bounded before allocation.
 Images outside a 480×640 bounding box are resized with their aspect ratio preserved;
 an independent 750 ms in-memory cache per channel coalesces nearly simultaneous
-phone requests. The server-facing base provider still contains only
+phone requests. Primary prefetch extends one prepared frame for up to five
+seconds and is consumed by the first HTTP request; the normal short cache then
+coalesces the FRITZ!Box's immediate HEAD/GET pair. The server-facing base provider still contains only
 `FetchJPEG(context)` for v1.3 compatibility. An optional multi-channel
-interface adds immutable channel metadata and indexed fetches, keeping HTTP
-authorization and response behavior separate from camera transport.
+interface adds immutable channel/discovery diagnostics plus indexed channel and
+camera fetches, keeping HTTP authorization and response behavior separate from
+camera transport.
 
 ## SIP call control
 

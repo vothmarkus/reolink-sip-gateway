@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.0
+
+- NVR-Kanäle werden beim Start und anschließend alle fünf Minuten read-only neu erkannt. Fehler ersetzen keinen erfolgreichen Katalog; der letzte Stand wird NVR-gebunden und atomar mit Modus `0600` unter `/data/fritzfon-live-image-catalog.json` gespeichert.
+- Kameras mit Reolink-UID erhalten zusätzlich einen nicht rückrechenbaren, UID-abgeleiteten Pfad `/fritzfon/<token>/camera-<id>.jpg`, der einem Kanalwechsel folgt. Roh-UID, Reolink-Zugangsdaten und API-Token erscheinen nicht in der Adresse. Türpfad und nummerierte v1.4-Pfade bleiben unverändert.
+- Nach einem angenommenen Besucherereignis wird das Bild des konfigurierten Türkanals asynchron für höchstens fünf Sekunden vorgeladen. Rufaufbau, SIP-/Audiozustand und Test- beziehungsweise eingehende Anrufe bleiben davon unabhängig.
+- Die Ingress-Seite zeigt Erkennungszustand und -zeitpunkte sowie je Kamera online/offline, letzten Bildabruf, HTTPS-/HTTP-/RTSP-Quelle und Dauer. Stabile und kompatible Kanaladresse besitzen jeweils Kopierknopf und Browsertest.
+- Neue Tests decken periodische Aktualisierung, Fehlerbeibehaltung, persistente Wiederherstellung, NVR-Wechsel-Abgrenzung, UID-Kanalumzug, exakte Kamerapfade, Vorladecache und Diagnoseanzeige ab. Bestehende SIP-, Routing-, Audio-, API-, Adapter-, Race- und Containerprüfungen bleiben vollständig aktiv.
+- Keine neue Benutzeroption oder Konfigurationsmigration; API v1 bleibt kompatibel. Versionskennungen und Containerbuild wurden auf 1.5.0 aktualisiert.
+
 ## 1.4.0
 
 - Automatische read-only Erkennung aller online gemeldeten Reolink-NVR-Kanäle über `GetChannelstatus`; interne 0-basierte Kanäle werden konsistent als öffentliche 1-basierte Nummern dargestellt und Kameranamen sicher normalisiert.

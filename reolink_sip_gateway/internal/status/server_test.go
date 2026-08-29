@@ -37,8 +37,8 @@ func TestStatusPageContainsLogo(t *testing.T) {
 		Snapshot: Snapshot{FritzFonLiveImageEnabled: true}, APIHostname: "1c33278a-reolink-sip-gateway", APIToken: "secret-token",
 		LiveImageAvailable: true, LiveImageAddress: "192.168.177.5:18099/fritzfon/image-token.jpg", LiveImageURL: "http://192.168.177.5:18099/fritzfon/image-token.jpg",
 		LiveImageChannels: []liveImagePageChannel{
-			{Number: 1, Name: "Einfahrt", Address: "192.168.177.5:18099/fritzfon/image-token/channel-1.jpg", URL: "http://192.168.177.5:18099/fritzfon/image-token/channel-1.jpg"},
-			{Number: 2, Name: "Video Doorbell", Address: "192.168.177.5:18099/fritzfon/image-token/channel-2.jpg", URL: "http://192.168.177.5:18099/fritzfon/image-token/channel-2.jpg"},
+			{Number: 1, Name: "Einfahrt", ChannelAddress: "192.168.177.5:18099/fritzfon/image-token/channel-1.jpg", ChannelURL: "http://192.168.177.5:18099/fritzfon/image-token/channel-1.jpg"},
+			{Number: 2, Name: "Video Doorbell", Address: "192.168.177.5:18099/fritzfon/image-token/camera-0123456789abcdef0123456789abcdef.jpg", URL: "http://192.168.177.5:18099/fritzfon/image-token/camera-0123456789abcdef0123456789abcdef.jpg", ChannelAddress: "192.168.177.5:18099/fritzfon/image-token/channel-2.jpg", ChannelURL: "http://192.168.177.5:18099/fritzfon/image-token/channel-2.jpg"},
 		},
 	}); err != nil {
 		t.Fatalf("render status page: %v", err)
@@ -57,6 +57,9 @@ func TestStatusPageContainsLogo(t *testing.T) {
 	}
 	if !bytes.Contains(out.Bytes(), []byte(`Video Doorbell`)) || !bytes.Contains(out.Bytes(), []byte(`/fritzfon/image-token/channel-2.jpg`)) {
 		t.Fatal("status page does not contain the detected FRITZ!Fon channel links")
+	}
+	if !bytes.Contains(out.Bytes(), []byte(`/fritzfon/image-token/camera-0123456789abcdef0123456789abcdef.jpg`)) {
+		t.Fatal("status page does not contain the stable FRITZ!Fon camera link")
 	}
 }
 

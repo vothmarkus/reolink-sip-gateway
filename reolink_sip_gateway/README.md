@@ -1,8 +1,16 @@
-# Reolink SIP Gateway 1.4.0
+# Reolink SIP Gateway 1.5.0
 
 Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann SIP-Anrufe auslösen; optional lassen sich die aktivierten Gateway-Nebenstellen anrufen und direkt mit der Doorbell verbinden.
 
 > Community-Projekt. Nicht offiziell von Reolink oder Home Assistant bereitgestellt oder unterstützt.
+
+## 1.5.0: robuste, kanalunabhängige FRITZ!Fon-Kameralinks
+
+Die NVR-Kanalerkennung läuft nun beim Start und danach automatisch alle fünf Minuten. Eine erfolgreiche Zuordnung wird mit Dateirechten `0600` unter `/data/fritzfon-live-image-catalog.json` gespeichert. Ist der NVR vorübergehend nicht erreichbar, bleiben der letzte Katalog und sämtliche Bildlinks aktiv; die Ingress-Seite zeigt Erkennungsstatus, letzten Versuch und letzten Erfolg.
+
+Meldet Reolink eine Kamera-UID, erhält die Kamera zusätzlich einen nicht rückrechenbaren, UID-abgeleiteten Pfad `/fritzfon/<token>/camera-<id>.jpg`. Dieser empfohlene Link bleibt gleich, wenn die Kamera später auf einen anderen NVR-Kanal verschoben wird. Die UID selbst wird weder in der URL noch in der Oberfläche ausgegeben. Der bisherige Türpfad und alle nummerierten v1.4-Pfade `/channel-N.jpg` bleiben unverändert verfügbar.
+
+Nach einem angenommenen echten Besucherereignis lädt das Gateway das Türbild parallel zum Rufaufbau vor. Der erste FRITZ!Fon-Abruf kann dadurch den bereits vorbereiteten Frame verwenden, ohne SIP oder Audio zu blockieren. Für jeden Kanal zeigt die Ingress-Seite außerdem online/offline, letzten Bildabruf, Snapshotquelle und Dauer. Es gibt keine neue Option oder Konfigurationsmigration; Routing, SIP, Zwei-Wege-Audio und API v1 bleiben unverändert.
 
 ## 1.4.0: alle aktiven NVR-Kameras auf dem FRITZ!Fon
 
@@ -281,10 +289,10 @@ Die Ingress-Seite zeigt unter anderem:
 - kalibrierte und aktuelle AEC-Latenz,
 - den daraus berechneten Suchbereich,
 - SIP-/Home-Assistant-Verbindungsstatus und aktuelle Call-Medien.
-- den unveränderten geheimen Tür-Livebild-Link sowie automatisch erkannte NVR-Kanäle mit jeweils kopierbarer Adresse und Browsertest.
+- den unveränderten geheimen Tür-Livebild-Link sowie automatisch erkannte NVR-Kameras mit stabilem Kamera-Link, kompatiblem Kanal-Link, Statusdiagnose, Kopierknöpfen und Browsertests.
 
-Zur Einrichtung unter **Telefonie → Telefoniegeräte** die IP-Türsprechanlage bearbeiten, beim Livebild `http://` auswählen und den gewünschten auf der Ingress-Seite angezeigten Wert ohne `http://` einfügen. Nach einer Änderung der NVR-Kanalbelegung die App neu starten. Die Kamera-Zugangsdaten werden nicht in der FRITZ!Box hinterlegt.
+Zur Einrichtung unter **Telefonie → Telefoniegeräte** die IP-Türsprechanlage bearbeiten, beim Livebild `http://` auswählen und den gewünschten auf der Ingress-Seite angezeigten Wert ohne `http://` einfügen. Änderungen der NVR-Kanalbelegung werden spätestens nach fünf Minuten automatisch erkannt. Die Kamera-Zugangsdaten und Reolink-UID werden nicht in der FRITZ!Box hinterlegt.
 
 ## Hardwarestatus
 
-Der NVR-/Baichuan-Audiopfad wurde auf der Zielhardware mit nativer WebRTC-AEC erfolgreich getestet. Auch der unveränderte primäre FRITZ!Fon-Livebildpfad wurde auf der Zielinstallation mit FRITZ!Box 4050 und FRITZ!Fon erfolgreich bestätigt. Die neuen Mehrkanalpfade sind automatisiert getestet; die Bestätigung mit mehreren echten Kamerakanälen steht noch aus.
+Der NVR-/Baichuan-Audiopfad wurde auf der Zielhardware mit nativer WebRTC-AEC erfolgreich getestet. Auch der primäre FRITZ!Fon-Livebildpfad und die Mehrkanalbilder aus 1.4 wurden auf der Zielinstallation mit FRITZ!Box 4050 und FRITZ!Fon erfolgreich bestätigt. Periodische Erkennung, UID-Link und Vorladen aus 1.5 sind automatisiert getestet; ihre längere Beobachtung auf der Zielinstallation steht noch aus.

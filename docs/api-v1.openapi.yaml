@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Reolink SIP Gateway Integration API
-  version: 1.4.0
+  version: 1.5.0
   description: >-
     Local API exposed by Reolink SIP Gateway 1.0.0 and newer. The API is
     versioned independently from the gateway release and is intended for the
@@ -170,7 +170,7 @@ components:
           const: 1
         gateway_version:
           type: string
-          examples: [1.4.0]
+          examples: [1.5.0]
         instance_id:
           type: string
           format: uuid
