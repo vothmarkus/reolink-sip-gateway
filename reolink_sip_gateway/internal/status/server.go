@@ -268,7 +268,7 @@ func (s *Store) Serve(ctx context.Context, options ServerOptions) error {
 			Snapshot: s.Get(), APIHostname: setupHostname(options.Hostname), APIToken: options.Token,
 			LiveImageAvailable: liveImageEnabled, LiveImageAddress: liveImageAddressValue,
 			LiveImageURL: fullLiveImageURL(liveImageAddressValue), LiveImageChannels: liveImagePageChannels(options),
-			LiveImageDiscovery: liveImagePageDiscovery(options),
+			LiveImageDiscovery: liveImagePageDiscoveryData(options),
 		})
 	})))
 
@@ -396,7 +396,7 @@ func liveImagePageChannels(options ServerOptions) []liveImagePageChannel {
 	return channels
 }
 
-func liveImagePageDiscovery(options ServerOptions) liveImagePageDiscovery {
+func liveImagePageDiscoveryData(options ServerOptions) liveImagePageDiscovery {
 	provider, ok := options.LiveImageProvider.(MultiChannelJPEGProvider)
 	if !ok {
 		return liveImagePageDiscovery{}

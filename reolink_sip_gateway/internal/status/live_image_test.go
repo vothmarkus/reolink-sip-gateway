@@ -228,7 +228,7 @@ func TestMultiChannelAddressesAndPageEntriesAreStableAndSorted(t *testing.T) {
 	if placeholder != "HOME-ASSISTANT-IP:18099/fritzfon/secret-token/channel-2.jpg" {
 		t.Fatalf("placeholder address=%q", placeholder)
 	}
-	discovery := liveImagePageDiscovery(options)
+	discovery := liveImagePageDiscoveryData(options)
 	if discovery.StatusText != "erfolgreich" || discovery.StatusClass != "ok" || discovery.LastSuccess != now {
 		t.Fatalf("discovery page data=%#v", discovery)
 	}
