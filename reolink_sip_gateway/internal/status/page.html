@@ -81,7 +81,7 @@
     <tr><td>Status</td><td><code>{{.State}}</code></td></tr>
     {{if .DoorCallEnabled}}<tr><td>Tür-SIP registriert</td><td>{{if .SIPRegistered}}<span class="ok">ja</span>{{else}}<span class="bad">nein</span>{{end}}</td></tr>{{end}}
     {{if .ParallelCallEnabled}}<tr><td>Mobilruf-SIP registriert</td><td>{{if .ParallelSIPRegistered}}<span class="ok">ja</span>{{else}}<span class="bad">nein</span>{{end}}</td></tr>{{end}}
-    <tr><td>Home Assistant</td><td>{{if .HAConnected}}<span class="ok">verbunden</span>{{else}}<span class="bad">nicht verbunden</span>{{end}}</td></tr>
+    <tr><td>Klingeltrigger ({{.TriggerSource}})</td><td>{{if .TriggerConnected}}<span class="ok">bereit</span>{{else}}<span class="bad">nicht verbunden</span>{{end}}</td></tr>
     <tr><td>Konfigurierter Reolink-Modus</td><td>{{.ConfiguredReolinkMode}}</td></tr>
     <tr><td>Aktiver Reolink-Modus</td><td>{{if .ActiveReolinkMode}}{{.ActiveReolinkMode}}{{else}}<span class="muted">noch nicht ermittelt</span>{{end}}</td></tr>
     <tr><td>Medienweg</td><td>{{if .MediaProfile}}{{.MediaProfile}}{{else}}<span class="muted">noch nicht ermittelt</span>{{end}}</td></tr>

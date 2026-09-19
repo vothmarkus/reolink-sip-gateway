@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+if [ "${1:-}" = configure ]; then
+    if ! getent passwd reolink-sip-gateway >/dev/null; then
+        adduser --system --group --home /var/lib/reolink-sip-gateway --no-create-home --gecos "Reolink SIP Gateway" reolink-sip-gateway
+    fi
+    install -d -o reolink-sip-gateway -g reolink-sip-gateway -m 0700 /var/lib/reolink-sip-gateway
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+        systemctl try-restart reolink-sip-gateway.service || true
+    fi
+fi

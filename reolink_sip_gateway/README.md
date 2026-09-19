@@ -1,8 +1,14 @@
-# Reolink SIP Gateway 1.5.0
+# Reolink SIP Gateway 2.0.0-beta.1
 
 Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann SIP-Anrufe auslösen; optional lassen sich die aktivierten Gateway-Nebenstellen anrufen und direkt mit der Doorbell verbinden.
 
 > Community-Projekt. Nicht offiziell von Reolink oder Home Assistant bereitgestellt oder unterstützt.
+
+## Version 2: Home Assistant, Docker und natives Linux
+
+Die Beta verwendet denselben Gateway-Kern für alle drei Installationsarten. Neu sind ARM64-Builds für den Raspberry Pi Zero 2 W, direkte Reolink-Klingelereignisse über Baichuan und eine eigenständige Konfigurationsseite. Die HA-App verwendet weiterhin ihre bisherigen Optionen, den HA-Besuchersensor und Ingress.
+
+Die [Installations- und Testanleitung](../docs/V2-STANDALONE.md) beschreibt die native Installation auf einem 64-Bit-Trixie-System, Docker, Erstanmeldung und Sicherungen. Standalone-DTMF-Aktionen sind zunächst ausgenommen. Hardwaretests auf dem Zero 2 W stehen noch aus; diese Version wird im Entwicklungsbranch vorbereitet.
 
 ## 1.5.0: robuste, kanalunabhängige FRITZ!Fon-Kameralinks
 

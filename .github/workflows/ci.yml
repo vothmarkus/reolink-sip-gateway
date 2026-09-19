@@ -39,10 +39,12 @@ jobs:
         run: go test -race -p 1 ./...
       - name: Static amd64 build
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/reolink-sip-gateway ./cmd/gateway
+      - name: Static ARM64 build
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o /tmp/reolink-sip-gateway-arm64 ./cmd/gateway
       - name: Configuration adapter regression
         run: bash ../scripts/test-config-adapter.sh
       - name: Runtime configuration validation
-        run: go run ./cmd/gateway -check-config -config testdata/options.runtime.valid.json
+        run: go run ./cmd/gateway -mode homeassistant -check-config -config testdata/options.runtime.valid.json
       - name: Integration API contract syntax
         run: >-
           ruby -e 'require "yaml";
@@ -60,13 +62,50 @@ jobs:
           abort "missing optional door-account status" unless sip_required.include?("door_call_enabled") && sip_required.include?("door_registered")'
 
   container:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            ha_arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            ha_arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build standalone image
+        run: >-
+          docker buildx build --load --platform linux/${{ matrix.arch }}
+          --target standalone -t reolink-sip-gateway:standalone
+          reolink_sip_gateway
+      - name: Exercise native WebRTC AEC
+        run: >-
+          python3 scripts/smoke-aec.py docker run --rm -i
+          --entrypoint /usr/bin/reolink-aec-helper reolink-sip-gateway:standalone
+      - name: Check standalone executable
+        run: docker run --rm reolink-sip-gateway:standalone -version
       - name: Build Home Assistant image
         run: >-
-          docker build
-          --build-arg BUILD_VERSION=1.5.0
-          --build-arg BUILD_ARCH=amd64
-          -t reolink-sip-gateway:ci
-          reolink_sip_gateway
+          docker buildx build --load --platform linux/${{ matrix.arch }}
+          --target homeassistant --build-arg BUILD_VERSION=2.0.0-beta.1
+          --build-arg BUILD_ARCH=${{ matrix.ha_arch }}
+          -t reolink-sip-gateway:ha reolink_sip_gateway
+      - name: Build native Debian package
+        run: >-
+          docker buildx build --platform linux/${{ matrix.arch }}
+          --target native-export --build-arg BUILD_VERSION=2.0.0-beta.1
+          --output type=local,dest=dist reolink_sip_gateway
+      - name: Check package metadata and architecture
+        run: |
+          test "$(dpkg-deb -f dist/reolink-sip-gateway.deb Architecture)" = "${{ matrix.arch }}"
+          dpkg-deb -I dist/reolink-sip-gateway.deb
+          dpkg-deb -x dist/reolink-sip-gateway.deb /tmp/gateway-package
+          /tmp/gateway-package/usr/bin/reolink-sip-gateway -version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reolink-sip-gateway-linux-${{ matrix.arch }}
+          path: dist/reolink-sip-gateway.deb
+          retention-days: 14

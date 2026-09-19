@@ -4,13 +4,25 @@
 
 Reolink SIP Gateway connects three domains:
 
-1. Home Assistant supplies one or more doorbell/visitor triggers and, through the companion integration, consumes status and sends route-specific call-control commands.
+1. A trigger provider supplies visitor events: Home Assistant in app mode, or a separate Baichuan subscription in standalone mode. The companion integration can consume API v1 status and send route-specific call-control commands in either mode.
 2. SIP provides outbound and optional incoming call setup plus telephone audio.
 3. Reolink CGI/RTSP provides camera images, while RTSP/ONVIF or Baichuan provides doorbell receive/talkback audio.
 
 The gateway intentionally keeps profile selection, long-delay alignment, and real-time media transport separate.
 
-## Startup
+## Version 2 runtime boundary
+
+`cmd/gateway/entry.go` selects Home Assistant or standalone mode. Both use the same `runGateway` function, SIP implementation and media/AEC path. The HA shell adapter retains its migration and entity-discovery responsibilities. Standalone schema 2 settings are validated and converted in `internal/standalone`; both adapters preserve public 1-based NVR channels and produce the same flat `config.Config`.
+
+The standalone HTTP server owns authentication and configuration independently of the media runtime. Missing/invalid settings leave the setup page available. Each accepted save cancels the current runtime and waits for calls, SIP/media cleanup and background workers before starting a new generation. Old SSE requests are canceled with that generation. Validation failures keep the running configuration; connection failures expose a recoverable status and retry after 15 seconds. The UI remains available throughout.
+
+A dedicated Baichuan connection subscribes with command 31/channel 251 and receives command 33 alarm messages. It filters the configured zero-based channel and explicit visitor state, ignores the initial state after every connection, and emits only rising edges into the shared route/debounce/call controller. Subscriptions renew every 30 seconds; a failed bounded renewal reconnects with exponential backoff. The media connection remains independent. This protocol is tested against a simulated camera; firmware behavior still requires hardware acceptance.
+
+The API and live-image identities are unchanged in format. An independent 256-bit admin token authenticates the local UI; signed HttpOnly/SameSite cookies and per-session CSRF tokens guard configuration and call-control writes. File mode 0600, atomic replacement, a previous-version file, revision checks and an external-file digest protect saved settings. These are local-LAN services; the full configuration export includes credentials.
+
+Docker and native Debian packages share the same Go executable and native WebRTC helper. Packaging targets amd64 and arm64; the native package targets Debian 13/Trixie rather than older libc/WebRTC ABIs. The AEC algorithm is unchanged. See [V2-STANDALONE.md](V2-STANDALONE.md) for installation, operating limits and hardware acceptance.
+
+## Home Assistant startup
 
 ```text
 Home Assistant grouped options

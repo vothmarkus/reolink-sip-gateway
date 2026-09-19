@@ -20,6 +20,8 @@ type Controller struct {
 	active     bool
 	generation uint64
 	cancel     context.CancelFunc
+	done       chan struct{}
+	stopped    bool
 }
 
 // Start reserves the one available call slot and runs fn asynchronously. The
@@ -33,6 +35,10 @@ func (c *Controller) Start(parent context.Context, fn func(context.Context)) err
 	}
 
 	c.mu.Lock()
+	if c.stopped || parent.Err() != nil {
+		c.mu.Unlock()
+		return context.Canceled
+	}
 	if c.active {
 		c.mu.Unlock()
 		return ErrBusy
@@ -42,6 +48,8 @@ func (c *Controller) Start(parent context.Context, fn func(context.Context)) err
 	c.generation++
 	generation := c.generation
 	c.cancel = cancel
+	done := make(chan struct{})
+	c.done = done
 	c.mu.Unlock()
 
 	go func() {
@@ -53,6 +61,7 @@ func (c *Controller) Start(parent context.Context, fn func(context.Context)) err
 				c.cancel = nil
 			}
 			c.mu.Unlock()
+			close(done)
 		}()
 		fn(callCtx)
 	}()
@@ -79,4 +88,19 @@ func (c *Controller) Active() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.active
+}
+
+// Stop waits for SIP/media cleanup before a new configuration may start.
+// The caller must first cancel the parent context and disable command sources.
+func (c *Controller) Stop() {
+	c.mu.Lock()
+	c.stopped = true
+	done := c.done
+	if c.cancel != nil {
+		c.cancel()
+	}
+	c.mu.Unlock()
+	if done != nil {
+		<-done
+	}
 }

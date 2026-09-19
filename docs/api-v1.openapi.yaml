@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Reolink SIP Gateway Integration API
-  version: 1.5.0
+  version: 2.0.0-beta.1
   description: >-
     Local API exposed by Reolink SIP Gateway 1.0.0 and newer. The API is
     versioned independently from the gateway release and is intended for the
@@ -170,7 +170,7 @@ components:
           const: 1
         gateway_version:
           type: string
-          examples: [1.5.0]
+          examples: [2.0.0-beta.1]
         instance_id:
           type: string
           format: uuid
@@ -269,6 +269,14 @@ components:
           format: date-time
         home_assistant_connected:
           type: boolean
+          description: True only when the Home Assistant trigger is connected
+        trigger_source:
+          type: string
+          enum: [homeassistant, baichuan, manual]
+          description: Active trigger provider; added in gateway 2.0
+        trigger_connected:
+          type: boolean
+          description: Active trigger provider is ready; manual mode is always ready
         dry_run:
           type: boolean
         last_visitor_event:

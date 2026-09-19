@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.0-beta.1 (Entwicklung)
+
+- Gemeinsamer Gateway-Kern mit explizitem Home-Assistant- und Standalone-Betrieb; persistente Identitäten, Kalibrierung und Kamerakatalog verwenden das gewählte Datenverzeichnis.
+- Direkter Baichuan-Besuchertrigger mit Kanalfilter, Flankenerkennung, regelmäßig erneuertem Abonnement und Wiederverbindung. Der erste Zustand nach Verbindungsaufbau gilt als Ausgangszustand; eine ausgewählte Route nutzt weiterhin denselben Busy-/Debounce-Schutz wie HA.
+- Lokale deutsche Konfigurationsoberfläche mit eigenem Zugangsschlüssel, Sitzungen, CSRF-Schutz, Status, Routentest und Auflegen. Einstellungen sind versioniert, werden atomar gespeichert und erhalten eine vorherige Sicherung. Leere Passwortfelder bewahren gespeicherte Geheimnisse; konkurrierende Änderungen werden abgewiesen.
+- Laufzeitwechsel wartet auf das Ende aktiver Anrufe und den Abbau der alten Verbindungen. Die Einrichtung bleibt auch ohne gültige Konfiguration oder bei Verbindungsfehlern erreichbar.
+- Docker-Standalone-Image und natives Debian-13-Paket mit systemd-Dienst für amd64/arm64; Home-Assistant-App zusätzlich für aarch64. Der native WebRTC-AEC-Helfer wird auf beiden Architekturen gebaut und im CI mit PCM-Frames geprüft.
+- API v1 ergänzt den aktiven Trigger und dessen Verbindungsstatus. Bestehende HA-Optionen, Integrationsidentität, Routen und DTMF-Ereignisse bleiben kompatibel. Standalone-DTMF-Aktionen sind nicht Teil dieser Beta.
+- Zielplattform ist unter anderem der Zero 2 W mit 64-Bit-System. Reale Klingelereignisse, Audio/AEC, Last und Langzeitstabilität auf dieser Hardware müssen noch geprüft werden.
+
 ## 1.5.0
 
 - NVR-Kanäle werden beim Start und anschließend alle fünf Minuten read-only neu erkannt. Fehler ersetzen keinen erfolgreichen Katalog; der letzte Stand wird NVR-gebunden und atomar mit Modus `0600` unter `/data/fritzfon-live-image-catalog.json` gespeichert.

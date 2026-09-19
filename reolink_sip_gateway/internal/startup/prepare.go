@@ -35,7 +35,9 @@ var defaultDependencies = dependencies{
 }
 
 func Prepare(ctx context.Context, cfg config.Config, logger *slog.Logger) (Result, error) {
-	return prepareWith(ctx, cfg, logger, defaultDependencies)
+	deps := defaultDependencies
+	deps.calibrationPath = cfg.StatePath("aec-calibration.json")
+	return prepareWith(ctx, cfg, logger, deps)
 }
 
 func prepareWith(ctx context.Context, cfg config.Config, logger *slog.Logger, deps dependencies) (Result, error) {

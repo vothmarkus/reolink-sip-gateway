@@ -3,17 +3,16 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
-	"os/signal"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
+	"github.com/vothmarkus/reolink-sip-gateway/internal/baichuan"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/callcontrol"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/config"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/ha"
@@ -22,54 +21,30 @@ import (
 	"github.com/vothmarkus/reolink-sip-gateway/internal/sip"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/startup"
 	statuspkg "github.com/vothmarkus/reolink-sip-gateway/internal/status"
+	"github.com/vothmarkus/reolink-sip-gateway/internal/trigger"
 )
 
-const version = "1.5.0"
+const version = "2.0.0-beta.1"
 
-func main() {
-	configPath := flag.String("config", "/data/options.json", "path to Home Assistant app options JSON")
-	checkOnly := flag.Bool("check-config", false, "validate configuration and exit")
-	resolveVisitor := flag.Bool("resolve-visitor-entity", false, "resolve the enabled Reolink visitor binary sensor from the Home Assistant entity registry and exit")
-	flag.Parse()
+type gatewayRuntimeOptions struct {
+	Publish func(http.Handler)
+	UIAuth  func(http.Handler) http.Handler
+}
 
-	if *resolveVisitor {
-		token := os.Getenv("SUPERVISOR_TOKEN")
-		if token == "" {
-			fmt.Fprintln(os.Stderr, "visitor entity resolution error: SUPERVISOR_TOKEN is missing; homeassistant_api must be enabled")
-			os.Exit(2)
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		entityID, err := ha.ResolveReolinkVisitorEntity(ctx, "", token)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "visitor entity resolution error:", err)
-			os.Exit(2)
-		}
-		fmt.Println(entityID)
-		return
-	}
-
-	cfg, err := config.Load(*configPath)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "configuration error:", err)
-		os.Exit(2)
-	}
-	if *checkOnly {
-		fmt.Println("configuration valid")
-		return
-	}
+func runGateway(parent context.Context, cfg config.Config, options gatewayRuntimeOptions) error {
+	ctx, cancel := context.WithCancel(parent)
+	var workers sync.WaitGroup
+	background := func(fn func()) { workers.Add(1); go func() { defer workers.Done(); fn() }() }
+	defer func() { cancel(); workers.Wait() }()
 	routes := cfg.ResolvedCallRoutes()
 
 	logger := newLogger(cfg.LogLevel)
 	logger.Info("starting Reolink SIP Gateway", "version", version, "dry_run", cfg.DryRun)
 
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
-	identity, err := statuspkg.LoadOrCreateIdentity("/data")
+	identity, err := statuspkg.LoadOrCreateIdentity(cfg.StatePath(""))
 	if err != nil {
 		logger.Error("cannot initialize persistent gateway identity", "error", err)
-		os.Exit(1)
+		return err
 	}
 	commands := &gatewayCommands{}
 	addonHostname, hostnameErr := os.Hostname()
@@ -86,7 +61,7 @@ func main() {
 		if cfg.ReolinkMode == "standalone" {
 			liveImageCatalog = liveimage.NewCatalog(cfg, liveImageLogger)
 		} else {
-			liveImageCatalog = liveimage.NewPersistentCatalog(cfg, liveImageLogger, liveImageCatalogStatePath)
+			liveImageCatalog = liveimage.NewPersistentCatalog(cfg, liveImageLogger, cfg.StatePath("fritzfon-live-image-catalog.json"))
 		}
 		liveImageProvider = liveImageCatalogProvider{catalog: liveImageCatalog}
 		discoveryCtx, discoveryCancel := context.WithTimeout(ctx, 2*time.Second)
@@ -97,6 +72,7 @@ func main() {
 		}
 	}
 	store.Update(func(s *statuspkg.Snapshot) {
+		s.TriggerSource = cfg.TriggerSource
 		s.DryRun = cfg.DryRun
 		s.DoorCallEnabled = cfg.DoorCallEnabled
 		s.ParallelCallEnabled = cfg.ParallelCallEnabled
@@ -116,35 +92,46 @@ func main() {
 			s.CalibrationStatus = "AEC disabled"
 		}
 	})
-	go func() {
-		serverOptions := statuspkg.ServerOptions{
-			Port: cfg.StatusPort, Token: identity.Token, InstanceID: identity.InstanceID, Hostname: addonHostname, Commands: commands,
-			LiveImageProvider: liveImageProvider, LiveImageToken: identity.LiveImageToken, LiveImageHost: liveImageHost,
+	serverOptions := statuspkg.ServerOptions{
+		Port: cfg.StatusPort, Token: identity.Token, InstanceID: identity.InstanceID, Hostname: addonHostname, Commands: commands,
+		LiveImageProvider: liveImageProvider, LiveImageToken: identity.LiveImageToken, LiveImageHost: liveImageHost,
+		UIAuth: options.UIAuth,
+	}
+	if options.Publish != nil {
+		handler, err := store.Handler(serverOptions)
+		if err != nil {
+			return err
 		}
-		if err := store.Serve(ctx, serverOptions); err != nil && !errors.Is(err, context.Canceled) {
-			logger.Error("status server stopped", "error", err)
-			cancel()
-		}
-	}()
+		options.Publish(handler)
+	} else {
+		background(func() {
+			if err := store.Serve(ctx, serverOptions); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error("status server stopped", "error", err)
+				cancel()
+			}
+		})
+	}
 	logger.Info("Home Assistant integration API ready", "api_version", statuspkg.APIVersion, "port", cfg.StatusPort, "instance_id", identity.InstanceID)
 	if cfg.FritzFonLiveImageEnabled {
 		logger.Info("FRITZ!Fon live image server ready", "port", cfg.StatusPort, "format", "JPEG", "protected_path", true, "multi_channel", true)
 		if cfg.ReolinkMode != "standalone" {
-			go runLiveImageDiscovery(
-				ctx, liveImageCatalog, liveImageDiscoveryInterval, liveImageDiscoveryTimeout,
-				logger.With("component", "fritzfon_live_image"),
-			)
+			background(func() {
+				runLiveImageDiscovery(
+					ctx, liveImageCatalog, liveImageDiscoveryInterval, liveImageDiscoveryTimeout,
+					logger.With("component", "fritzfon_live_image"),
+				)
+			})
 		}
 	}
 
 	token := os.Getenv("SUPERVISOR_TOKEN")
-	if token == "" {
+	if cfg.TriggerSource == "homeassistant" && token == "" {
 		store.Update(func(s *statuspkg.Snapshot) {
 			s.State = "error"
 			s.LastError = "SUPERVISOR_TOKEN is missing; homeassistant_api must be enabled"
 		})
 		logger.Error("SUPERVISOR_TOKEN is missing; homeassistant_api must be enabled")
-		os.Exit(1)
+		return errors.New("SUPERVISOR_TOKEN is missing; homeassistant_api must be enabled")
 	}
 
 	store.Update(func(s *statuspkg.Snapshot) {
@@ -162,7 +149,7 @@ func main() {
 			s.CalibrationStatus = "failed"
 		})
 		logger.Error("Reolink startup preparation failed", "error", err)
-		os.Exit(1)
+		return err
 	}
 	cfg = prepared.Config
 	store.Update(func(s *statuspkg.Snapshot) {
@@ -193,7 +180,7 @@ func main() {
 			doorSIPClient, err = sip.New(doorSIPConfig(cfg), logger.With("sip_account", "door"))
 			if err != nil {
 				logger.Error("cannot initialize door SIP account", "error", err)
-				os.Exit(1)
+				return err
 			}
 			defer doorSIPClient.Close()
 		}
@@ -205,7 +192,7 @@ func main() {
 					doorSIPClient.Close()
 				}
 				logger.Error("cannot initialize mobile SIP account", "error", err)
-				os.Exit(1)
+				return err
 			}
 			defer parallelSIPClient.Close()
 		}
@@ -228,7 +215,7 @@ func main() {
 				"rtp_inactivity_timeout", cfg.RTPInactivityTimeout())
 		}
 
-		go func() {
+		background(func() {
 			t := time.NewTicker(time.Second)
 			defer t.Stop()
 			for {
@@ -241,7 +228,7 @@ func main() {
 						s.ParallelSIPRegistered = parallelSIPClient.Registered()
 						s.LastParallelRegistrationErr = parallelSIPClient.LastRegisterError()
 					}
-					if s.State == "starting" && anySIPRegistered(doorSIPClient, parallelSIPClient) && s.HAConnected {
+					if s.State == "starting" && anySIPRegistered(doorSIPClient, parallelSIPClient) && s.TriggerConnected {
 						s.State = "idle"
 					}
 				})
@@ -251,32 +238,48 @@ func main() {
 				case <-t.C:
 				}
 			}
-		}()
+		})
 	}
 
-	triggers := make(chan ha.Trigger, max(1, len(routes)))
-	listener := &ha.Listener{
-		Token:        token,
-		Routes:       routeSubscriptions(routes),
-		PollInterval: cfg.HAPollInterval(), // fixed one-second REST fallback; WebSocket remains primary.
-		Logger:       logger,
-		OnConnection: func(ok bool) {
-			store.Update(func(s *statuspkg.Snapshot) {
-				s.HAConnected = ok
-				if ok && s.State == "starting" && (cfg.DryRun || anySIPRegistered(doorSIPClient, parallelSIPClient)) {
-					s.State = "idle"
-				}
-			})
-		},
+	triggers := make(chan trigger.Event, max(1, len(routes)))
+	onConnection := func(ok bool) {
+		store.Update(func(s *statuspkg.Snapshot) {
+			s.TriggerConnected = ok
+			s.HAConnected = ok && cfg.TriggerSource == "homeassistant"
+			if ok && s.State == "starting" && (cfg.DryRun || anySIPRegistered(doorSIPClient, parallelSIPClient)) {
+				s.State = "idle"
+			}
+		})
 	}
-	go func() {
-		if err := listener.Run(ctx, triggers); err != nil && !errors.Is(err, context.Canceled) {
-			logger.Error("Home Assistant listener stopped", "error", err)
-			cancel()
+	var listen func(context.Context, chan<- trigger.Event) error
+	switch cfg.TriggerSource {
+	case "homeassistant":
+		listener := &ha.Listener{Token: token, Routes: routeSubscriptions(routes), PollInterval: cfg.HAPollInterval(), Logger: logger, OnConnection: onConnection}
+		listen = listener.Run
+	case "baichuan":
+		channel := cfg.NVRChannel
+		if cfg.EffectiveReolinkMode() == "standalone" {
+			channel = 0
 		}
-	}()
+		listener := &trigger.Baichuan{
+			Config:  baichuan.Config{Host: cfg.ReolinkHost, Port: cfg.BaichuanPort, Username: cfg.ReolinkUsername, Password: cfg.ReolinkPassword},
+			Channel: channel, RouteID: cfg.TriggerRouteID, Logger: logger, OnConnection: onConnection,
+		}
+		listen = listener.Run
+	case "manual":
+		onConnection(true)
+	}
+	if listen != nil {
+		background(func() {
+			if err := listen(ctx, triggers); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error("visitor listener stopped", "source", cfg.TriggerSource, "error", err)
+				cancel()
+			}
+		})
+	}
 
 	var calls callcontrol.Controller
+	defer func() { cancel(); calls.Stop() }()
 	commands.Configure(
 		func(_ context.Context, routeID string) error {
 			route, ok := requestedCallRoute(routes, routeID)
@@ -330,11 +333,11 @@ func main() {
 		case <-ctx.Done():
 			store.Update(func(s *statuspkg.Snapshot) { s.State = "stopping" })
 			logger.Info("stopping")
-			return
+			return nil
 		case trigger := <-triggers:
 			route, ok := requestedCallRoute(routes, trigger.RouteID)
 			if !ok {
-				logger.Warn("Home Assistant trigger ignored for unknown route", "route", trigger.RouteID, "entity", trigger.EntityID)
+				logger.Warn("visitor trigger ignored for unknown route", "route", trigger.RouteID, "entity", trigger.EntityID)
 				continue
 			}
 			now := time.Now()
