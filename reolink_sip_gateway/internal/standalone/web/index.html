@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Reolink SIP Gateway</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <header><a class="brand" href="/"><span class="mark">R</span><span>Reolink SIP Gateway<small>Türsprechanlage · eigenständig verbunden</small></span></a><span id="version" class="tag">Version 2</span></header>
+    <section id="login" class="login card" hidden>
+      <span class="eyebrow">WILLKOMMEN</span><h1>Deine Tür. Deine Verbindung.</h1>
+      <p>Melde dich an, um Kamera, Telefonie und Klingelrufe einzurichten.</p>
+      <form id="login-form"><label for="access-token">Zugangsschlüssel</label><input id="access-token" type="password" autocomplete="current-password" required><p class="hint">Verwende den bei der Erstinstallation erzeugten Schlüssel.</p><button type="submit">Anmelden</button></form>
+    </section>
+    <main id="app" hidden>
+      <div class="heading"><div><span class="eyebrow">VERBINDUNGSZENTRALE</span><h1>Deine Türsprechanlage</h1><p>Einrichten, prüfen und zuverlässig verbunden bleiben.</p></div><button id="logout" class="quiet">Abmelden</button></div>
+      <section class="overview" aria-label="Verbindungsstatus">
+        <article class="card"><span class="label">Gateway</span><strong id="gateway-state">Wird geladen …</strong><small id="gateway-detail">Verbindung wird geprüft</small></article>
+        <article class="card"><span class="label">Klingeltrigger</span><strong id="trigger-state">—</strong><small id="trigger-detail">Direkt von Reolink</small></article>
+        <article class="card"><span class="label">Telefonie</span><strong id="sip-state">—</strong><small id="sip-detail">FRITZ!Box / SIP</small></article>
+      </section>
+      <section class="call-tools card"><div><strong>Verbindung ausprobieren</strong><small>Ein Testanruf verwendet die ausgewählte Anrufroute.</small></div><div class="actions"><select id="test-route" aria-label="Route für Testanruf"></select><button id="test-call" disabled>Testanruf</button><button id="hangup" class="quiet" disabled>Auflegen</button><a class="text-link" href="/status" target="_blank" rel="noopener">Details & Livebilder ↗</a></div></section>
+      <div id="notice" class="notice" role="status" hidden></div>
+      <div class="workspace"><nav aria-label="Einstellungen"><button data-tab="reolink" class="selected">01 <span>Reolink & Klingel</span></button><button data-tab="sip">02 <span>Telefonie</span></button><button data-tab="routes">03 <span>Anrufrouten</span></button><button data-tab="audio">04 <span>Audio & Betrieb</span></button><div class="nav-foot">Einstellungen werden erst mit<br>„Speichern & übernehmen“ aktiv.</div></nav>
+        <form id="settings-form" class="card editor">
+          <section data-panel="reolink"><span class="eyebrow">01 / REOLINK</span><h2>Wo klingelt es?</h2><p>Verbinde die Kamera direkt oder über deinen Reolink-NVR.</p><div id="reolink-fields" class="fields"></div><hr><h3>Klingelereignisse</h3><div id="trigger-fields" class="fields"></div><p class="hint">Der direkte Trigger nutzt den ausgewählten Kamerakanal. Nach einer Wiederverbindung wird der erste Zustand als Ausgangszustand übernommen.</p></section>
+          <section data-panel="sip" hidden><span class="eyebrow">02 / TELEFONIE</span><h2>Wer soll erreichbar sein?</h2><p>„auto“ verwendet den Router als SIP-Telefonanlage. Eine eigene Adresse ist jederzeit möglich.</p><div id="sip-fields" class="fields"></div><hr><h3>Zusätzliches Konto für Mobilrufe</h3><div id="parallel-fields" class="fields"></div></section>
+          <section data-panel="routes" hidden><span class="eyebrow">03 / ANRUFROUTEN</span><h2>Wen ruft die Klingel an?</h2><p>Jede Route kann eine FRITZ!Box-Klingeltaste und bis zu drei Mobilrufnummern verwenden. Der direkte Reolink-Trigger startet eine ausgewählte Route.</p><div id="routes"></div><button id="add-route" type="button" class="quiet">+ Anrufroute</button></section>
+          <section data-panel="audio" hidden><span class="eyebrow">04 / AUDIO & BETRIEB</span><h2>Gut hören. Klar sprechen.</h2><div id="audio-fields" class="fields"></div><hr><h3>Anrufe und Zeitgrenzen</h3><div id="call-fields" class="fields"></div><hr><h3>Betrieb</h3><div id="operation-fields" class="fields"></div><p class="hint">Im Passivmodus werden Klingelereignisse empfangen. SIP-Anrufe und der hörbare Kalibrierton bleiben ausgeschaltet.</p><hr><div class="backup"><div><strong>Konfiguration sichern</strong><small>Der Export enthält auch die gespeicherten Passwörter.</small></div><a class="text-link" href="/admin/export">JSON herunterladen ↓</a><label class="import-button">JSON importieren<input id="import-file" type="file" accept=".json,application/json" hidden></label></div></section>
+          <footer class="save-bar"><span id="save-state">Alle Einstellungen geladen</span><div class="actions"><button id="reload" type="button" class="quiet">Neu laden</button><button id="save" type="submit">Speichern & übernehmen</button></div></footer>
+        </form>
+      </div>
+    </main>
+    <div id="login-notice" class="notice" role="alert" hidden></div>
+    <footer class="page-footer">Reolink SIP Gateway <span>Community-Projekt · Lokal im Netzwerk</span></footer>
+  </div>
+</body></html>

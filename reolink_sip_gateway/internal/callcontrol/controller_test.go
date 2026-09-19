@@ -62,3 +62,41 @@ func TestControllerRejectsCanceledParent(t *testing.T) {
 		t.Fatal("canceled parent must not reserve the call slot")
 	}
 }
+
+func TestStopWaitsForCleanupAndRejectsNewCalls(t *testing.T) {
+	var controller Controller
+	canceled, cleanup, stopped := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	if err := controller.Start(context.Background(), func(ctx context.Context) {
+		<-ctx.Done()
+		close(canceled)
+		<-cleanup
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer close(cleanup)
+	go func() { controller.Stop(); close(stopped) }()
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not cancel the active call")
+	}
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned before media cleanup completed")
+	default:
+	}
+	if err := controller.Start(context.Background(), func(context.Context) {}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("new call during shutdown: %v", err)
+	}
+	// Release cleanup without closing the channel twice in the failure path.
+	cleanup <- struct{}{}
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not finish after cleanup")
+	}
+	if controller.Active() {
+		t.Fatal("call still active after Stop")
+	}
+	controller.Stop()
+}

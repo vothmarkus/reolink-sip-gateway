@@ -1,9 +1,10 @@
-FROM golang:1.23-bookworm AS builder
+FROM --platform=$BUILDPLATFORM golang:1.23-bookworm AS builder
+ARG TARGETARCH
 WORKDIR /src
 COPY go.mod ./
 COPY cmd ./cmd
 COPY internal ./internal
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} \
     go build -trimpath -ldflags="-s -w" -o /out/reolink-sip-gateway ./cmd/gateway
 
 # Build a deliberately tiny bridge to Debian's WebRTC AudioProcessing library.
@@ -34,7 +35,39 @@ RUN set -eu; \
        $(pkg-config --libs webrtc-audio-processing-1); \
     strip /out/reolink-aec-helper
 
-FROM ghcr.io/home-assistant/base-debian:trixie
+# Standalone container: no Supervisor, Bashio or Home Assistant base image.
+FROM debian:trixie-slim AS standalone
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg libwebrtc-audio-processing-1-3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /data && chown 10001:10001 /data
+COPY --from=builder /out/reolink-sip-gateway /usr/bin/reolink-sip-gateway
+COPY --from=aec-builder /out/reolink-aec-helper /usr/bin/reolink-aec-helper
+COPY LICENSE THIRD-PARTY-NOTICES.md /usr/share/doc/reolink-sip-gateway/
+USER 10001:10001
+VOLUME ["/data"]
+EXPOSE 18099
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD ["/usr/bin/reolink-sip-gateway", "-healthcheck"]
+ENTRYPOINT ["/usr/bin/reolink-sip-gateway", "-mode", "standalone", "-data-dir", "/data"]
+
+# Native package built against the same Debian 13 / WebRTC ABI as the images.
+FROM aec-builder AS native-package
+ARG TARGETARCH
+ARG BUILD_VERSION=2.0.0-beta.1
+COPY packaging/native/ /package/
+COPY --from=builder /out/reolink-sip-gateway /package/usr/bin/reolink-sip-gateway
+COPY --from=aec-builder /out/reolink-aec-helper /package/usr/bin/reolink-aec-helper
+COPY LICENSE THIRD-PARTY-NOTICES.md /package/usr/share/doc/reolink-sip-gateway/
+RUN set -eu; \
+    DEB_ARCH="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    DEB_VERSION="$(printf '%s' "$BUILD_VERSION" | sed 's/-beta\./~beta/')"; \
+    sed -i "s/@ARCH@/$DEB_ARCH/; s/@VERSION@/$DEB_VERSION/" /package/DEBIAN/control; \
+    chmod 0755 /package/DEBIAN/postinst /package/DEBIAN/prerm /package/DEBIAN/postrm /package/usr/bin/*; \
+    dpkg-deb --build --root-owner-group /package /out/reolink-sip-gateway.deb
+FROM scratch AS native-export
+COPY --from=native-package /out/reolink-sip-gateway.deb /
+
+FROM ghcr.io/home-assistant/base-debian:trixie AS homeassistant
 ARG BUILD_VERSION
 ARG BUILD_ARCH
 LABEL \

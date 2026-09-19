@@ -1,11 +1,12 @@
 name: Reolink SIP Gateway
-version: "1.5.0"
+version: "2.0.0-beta.1"
 slug: reolink_sip_gateway
 description: Verbindet Reolink-Türklingel und NVR-Kameras mit SIP, Zwei-Wege-Audio, FRITZ!Fon-Livebildern und Home Assistant.
 url: https://github.com/vothmarkus/reolink-sip-gateway
 arch:
   - amd64
-stage: stable
+  - aarch64
+stage: experimental
 startup: application
 boot: auto
 init: false

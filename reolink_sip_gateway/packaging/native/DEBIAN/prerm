@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+if [ "${1:-}" = remove ] && [ -d /run/systemd/system ]; then
+    systemctl stop reolink-sip-gateway.service || true
+fi

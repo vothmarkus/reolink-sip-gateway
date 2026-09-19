@@ -73,6 +73,9 @@ type ResolvedCallRoute struct {
 }
 
 type Config struct {
+	// TriggerSource defaults to Home Assistant for existing installations.
+	TriggerSource  string `json:"trigger_source,omitempty"`
+	TriggerRouteID string `json:"trigger_route_id,omitempty"`
 	// Legacy v1.1/v1.2 routing inputs. They are accepted only for lossless
 	// upgrades and are immediately converted to CallRoutes during Load.
 	VisitorEntity        string         `json:"visitor_entity,omitempty"`
@@ -125,10 +128,13 @@ type Config struct {
 	AECMinDelayMS       int    `json:"-"`
 	AECMaxDelayMS       int    `json:"-"`
 	FFmpegBinaryPath    string `json:"-"` // test/runtime override; never a Home Assistant option
+	DataDir             string `json:"-"`
 }
 
 func Defaults() Config {
 	cfg := Config{
+		TriggerSource:                  "homeassistant",
+		TriggerRouteID:                 DefaultRouteID,
 		ReolinkHost:                    "192.168.177.50",
 		ReolinkUsername:                "admin",
 		ReolinkRTSPPort:                554,
@@ -180,11 +186,16 @@ type legacyOptions struct {
 }
 
 func Load(path string) (Config, error) {
-	cfg := Defaults()
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return cfg, fmt.Errorf("read config: %w", err)
+		return Defaults(), fmt.Errorf("read config: %w", err)
 	}
+	return Decode(b)
+}
+
+// Decode applies the same defaults, migrations and validation to every adapter.
+func Decode(b []byte) (Config, error) {
+	cfg := Defaults()
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return cfg, fmt.Errorf("decode config: %w", err)
@@ -229,6 +240,19 @@ func Load(path string) (Config, error) {
 
 func (c Config) Validate() error {
 	var errs []error
+	switch c.TriggerSource {
+	case "homeassistant", "manual":
+	case "baichuan":
+		found := false
+		for _, route := range c.CallRoutes {
+			found = found || route.ID == c.TriggerRouteID
+		}
+		if !found {
+			errs = append(errs, errors.New("trigger_route_id must reference a configured call route"))
+		}
+	default:
+		errs = append(errs, errors.New("trigger_source must be homeassistant, baichuan or manual"))
+	}
 	if err := validateHost("reolink_host", c.ReolinkHost); err != nil {
 		errs = append(errs, err)
 	}
@@ -469,7 +493,9 @@ func (c Config) validateRouting() []error {
 		if err := validateRoutingName(label+".name", route.Name); err != nil {
 			errs = append(errs, err)
 		}
-		if !validBinarySensorEntityID(route.VisitorEntity) {
+		if c.TriggerSource != "homeassistant" {
+			// Direct Reolink and manual triggers do not require HA entity IDs.
+		} else if !validBinarySensorEntityID(route.VisitorEntity) {
 			errs = append(errs, fmt.Errorf("%s.visitor_entity must be a binary_sensor entity ID", label))
 		} else if previousID, exists := entities[route.VisitorEntity]; exists {
 			errs = append(errs, fmt.Errorf("call_routes %q and %q use the same visitor_entity", previousID, route.ID))

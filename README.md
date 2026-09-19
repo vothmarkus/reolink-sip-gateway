@@ -1,10 +1,18 @@
-# Reolink SIP Gateway for Home Assistant
+# Reolink SIP Gateway
 
 Community Home Assistant app that bridges bidirectional audio between a Reolink Video Doorbell and SIP. A Home Assistant visitor event can place a call, and the registered gateway extension can optionally be called directly.
 
 > **Community project:** This repository is not affiliated with, endorsed by, or supported by Reolink or the Home Assistant project.
 
-## Current release
+## Version 2 beta
+
+The `feature/v2-standalone` branch develops **2.0.0-beta.1**. One shared gateway now supports the Home Assistant app, a standalone Docker container and a native Linux service. ARM64 builds target the Raspberry Pi Zero 2 W with a 64-bit OS; amd64 remains supported.
+
+Standalone installations receive visitor events directly from Reolink over Baichuan and have a local configuration page for camera, SIP, routes, audio and operation. `auto` still uses the IPv4 default gateway as the presumed FRITZ!Box; manual registrar settings are available. Standalone DTMF actions are deferred; the existing API v1/HA DTMF event contract is preserved.
+
+See [the Version 2 installation and test guide](docs/V2-STANDALONE.md) for native Debian packages, Docker, initial login, backups and hardware acceptance. This is a development beta: Zero 2 W performance, physical doorbell events and two-way audio still require hardware testing. The stable `main` installation is separate from this branch.
+
+## Stable 1.x release
 
 **v1.5.0** makes the multi-camera FRITZ!Fon feature resilient and faster. NVR channels are refreshed every five minutes and the last successful catalog survives restarts and temporary NVR outages. Every camera with a Reolink UID receives a one-way, UID-derived URL that follows it across NVR channel moves; the v1.3 door URL and all v1.4 numbered URLs remain unchanged. Accepted visitor events asynchronously prefetch the door frame, while the Ingress page reports discovery, online/offline and image-source diagnostics.
 
@@ -43,7 +51,7 @@ Highlights:
 - `visitor_entity: auto` uses Home Assistant's compact enabled-entity registry view; ambiguous multi-doorbell setups require manual selection.
 - The UI calls `dry_run` **Passive mode / Passivmodus**; the internal key remains unchanged for configuration compatibility.
 
-The current build targets **amd64** Home Assistant hosts.
+Stable 1.x targets **amd64** Home Assistant hosts. The Version 2 beta adds **aarch64** for Home Assistant and **arm64** for standalone Docker/native Linux.
 
 ## Installation
 

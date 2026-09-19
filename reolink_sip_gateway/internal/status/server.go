@@ -26,6 +26,8 @@ type Snapshot struct {
 	State                         string    `json:"state"`
 	DryRun                        bool      `json:"dry_run"`
 	HAConnected                   bool      `json:"ha_connected"`
+	TriggerConnected              bool      `json:"trigger_connected"`
+	TriggerSource                 string    `json:"trigger_source"`
 	DoorCallEnabled               bool      `json:"door_call_enabled"`
 	SIPRegistered                 bool      `json:"sip_registered"`
 	LastRegistrationErr           string    `json:"last_registration_error,omitempty"`
@@ -221,15 +223,19 @@ func (s *Store) PublishDTMF(
 	}
 }
 
-func (s *Store) Serve(ctx context.Context, options ServerOptions) error {
+func (s *Store) Handler(options ServerOptions) (http.Handler, error) {
 	if options.Port < 1 || options.Port > 65535 {
-		return fmt.Errorf("invalid status/API port %d", options.Port)
+		return nil, fmt.Errorf("invalid status/API port %d", options.Port)
 	}
 	if !validAPIToken(options.Token) || !validInstanceID(options.InstanceID) {
-		return errors.New("integration API identity is invalid")
+		return nil, errors.New("integration API identity is invalid")
 	}
 	if options.LiveImageProvider != nil && !validLiveImageToken(options.LiveImageToken) {
-		return errors.New("FRITZ!Fon live image identity is invalid")
+		return nil, errors.New("FRITZ!Fon live image identity is invalid")
+	}
+	uiAuth := options.UIAuth
+	if uiAuth == nil {
+		uiAuth = ingressOnly
 	}
 	mux := http.NewServeMux()
 	s.registerAPIRoutes(mux, options)
@@ -248,18 +254,18 @@ func (s *Store) Serve(ctx context.Context, options ServerOptions) error {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
 	})
-	mux.Handle("/logo.png", ingressOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/logo.png", uiAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		_, _ = w.Write(statusLogoPNG)
 	})))
-	mux.Handle("/api/status", ingressOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api/status", uiAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(s.Get())
 	})))
-	mux.Handle("/", ingressOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/", uiAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -272,9 +278,17 @@ func (s *Store) Serve(ctx context.Context, options ServerOptions) error {
 		})
 	})))
 
+	return mux, nil
+}
+
+func (s *Store) Serve(ctx context.Context, options ServerOptions) error {
+	handler, err := s.Handler(options)
+	if err != nil {
+		return err
+	}
 	srv := &http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", options.Port),
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		// SSE responses remain open. All non-streaming handlers return small,
@@ -290,7 +304,7 @@ func (s *Store) Serve(ctx context.Context, options ServerOptions) error {
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
 	}()
-	err := srv.ListenAndServe()
+	err = srv.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
 		<-stopped
 		return nil

@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/vothmarkus/reolink-sip-gateway/internal/trigger"
 )
 
 type Listener struct {
@@ -32,10 +34,7 @@ type RouteSubscription struct {
 	EntityID string
 }
 
-type Trigger struct {
-	RouteID  string
-	EntityID string
-}
+type Trigger = trigger.Event
 
 type routeStateResult struct {
 	route RouteSubscription

@@ -1,0 +1,12 @@
+Package: reolink-sip-gateway
+Version: @VERSION@
+Architecture: @ARCH@
+Section: net
+Priority: optional
+Maintainer: Reolink SIP Gateway contributors
+Depends: libc6 (>= 2.41), libstdc++6 (>= 14), libgcc-s1, libwebrtc-audio-processing-1-3, ffmpeg, ca-certificates, adduser
+Homepage: https://github.com/vothmarkus/reolink-sip-gateway
+Description: Standalone Reolink doorbell to SIP gateway
+ Direct Reolink visitor events, full-duplex SIP audio with WebRTC AEC,
+ local configuration interface and FRITZ!Fon live images.
+ Built for Debian 13 / Raspberry Pi OS based on Trixie (64-bit).

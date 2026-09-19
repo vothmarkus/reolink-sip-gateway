@@ -39,6 +39,7 @@ type CommandHandler interface {
 }
 
 type ServerOptions struct {
+	UIAuth            func(http.Handler) http.Handler
 	Port              int
 	Token             string
 	InstanceID        string
@@ -74,6 +75,8 @@ type APIGatewayStatus struct {
 	State                  string     `json:"state"`
 	StartedAt              time.Time  `json:"started_at"`
 	HomeAssistantConnected bool       `json:"home_assistant_connected"`
+	TriggerConnected       bool       `json:"trigger_connected"`
+	TriggerSource          string     `json:"trigger_source"`
 	DryRun                 bool       `json:"dry_run"`
 	LastVisitorEvent       *time.Time `json:"last_visitor_event,omitempty"`
 	LastError              string     `json:"last_error,omitempty"`
@@ -270,6 +273,7 @@ func newAPIStatus(snapshot Snapshot, routes []RouteDefinition) APIStatus {
 		Gateway: APIGatewayStatus{
 			Version: snapshot.Version, State: snapshot.State, StartedAt: snapshot.StartedAt,
 			HomeAssistantConnected: snapshot.HAConnected, DryRun: snapshot.DryRun,
+			TriggerConnected: snapshot.TriggerConnected, TriggerSource: snapshot.TriggerSource,
 			LastVisitorEvent: timePointer(snapshot.LastVisitorEvent), LastError: snapshot.LastError,
 		},
 		SIP: APISIPStatus{

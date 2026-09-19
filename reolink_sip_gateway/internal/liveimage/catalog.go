@@ -331,7 +331,7 @@ func (c *Catalog) fetchChannelStatusCGI(ctx context.Context, base string) ([]cat
 		return nil, fmt.Errorf("%s Reolink channel-status request could not be created", u.Scheme)
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "ReolinkSIPGateway/1.5.0")
+	req.Header.Set("User-Agent", "ReolinkSIPGateway/2.0.0-beta.1")
 	response, err := c.client.Do(req)
 	if err != nil {
 		// net/http errors can include the complete credential-bearing URL.
