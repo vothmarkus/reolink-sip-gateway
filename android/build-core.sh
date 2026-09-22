@@ -7,6 +7,10 @@ MOBILE_VERSION="v0.0.0-20260908204917-8b95e45f8d3e"
 cd "$ROOT/reolink_sip_gateway"
 go install "golang.org/x/mobile/cmd/gomobile@$MOBILE_VERSION"
 go install "golang.org/x/mobile/cmd/gobind@$MOBILE_VERSION"
+# Current gomobile also requires x/mobile in the module dependency graph.
+# Keep that tool-only mutation local to this Android build; it is not committed
+# to the shared Linux/HA go.mod.
+go get -tool "golang.org/x/mobile/cmd/gobind@$MOBILE_VERSION"
 gomobile init
 mkdir -p "$ROOT/android/app/libs"
 gomobile bind -androidapi 26 \
