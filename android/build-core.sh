@@ -5,7 +5,6 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MOBILE_VERSION="v0.0.0-20260908204917-8b95e45f8d3e"
 
 cd "$ROOT/reolink_sip_gateway"
-go get "golang.org/x/mobile@$MOBILE_VERSION"
 go install "golang.org/x/mobile/cmd/gomobile@$MOBILE_VERSION"
 go install "golang.org/x/mobile/cmd/gobind@$MOBILE_VERSION"
 gomobile init
