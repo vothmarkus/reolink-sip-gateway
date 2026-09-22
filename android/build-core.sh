@@ -14,6 +14,7 @@ go get -tool "golang.org/x/mobile/cmd/gobind@$MOBILE_VERSION"
 gomobile init
 mkdir -p "$ROOT/android/app/libs"
 gomobile bind -androidapi 26 \
+  -ldflags='-extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384' \
   -target=android/arm64,android/arm \
   -javapkg de.vothmarkus.reolinksip.core \
   -o "$ROOT/android/app/libs/reolink-core.aar" \

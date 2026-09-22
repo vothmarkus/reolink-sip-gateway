@@ -143,6 +143,10 @@ public final class GatewayService extends Service {
     }
     private static String message(Exception e) { return e.getMessage() == null ? e.toString() : e.getMessage(); }
 
+    // Continuous remote-doorbell monitoring is the user-requested operation.
+    // Releasing after a timer would silently break screen-off calls. Locks are
+    // released on stop, failed startup, runtime exit and service destruction.
+    @android.annotation.SuppressLint("WakelockTimeout")
     private void acquireLocks() {
         if (wakeLock == null) {
             wakeLock = getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "reolinksip:gateway");

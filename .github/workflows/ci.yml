@@ -149,6 +149,10 @@ jobs:
           key: android-debug-keystore-v1-${{ github.ref_name }}
       - name: Test, lint and build Android debug APK
         run: gradle -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+      - name: Verify native and APK page alignment
+        run: |
+          python3 android/check-apk.py android/app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 -v 4 android/app/build/outputs/apk/debug/app-debug.apk
       - name: Upload Android test and lint reports
         if: always()
         uses: actions/upload-artifact@v4

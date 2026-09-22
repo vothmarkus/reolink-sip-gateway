@@ -73,8 +73,11 @@ JDK 17, then run:
 ```sh
 bash android/build-core.sh
 gradle -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+python3 android/check-apk.py android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
+Native Go libraries are linked with 16 KiB ELF page alignment; CI checks all
+ARM native LOAD segments and verifies the APK with `zipalign -P 16`.
 The generated AAR and APK are CI artifacts. CI also runs the shared Go tests,
 shuffle tests, race detector and Linux/HA builds. The debug keystore is cached
 per Android branch to support subsequent updates while that cache survives.
