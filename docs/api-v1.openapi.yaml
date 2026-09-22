@@ -359,10 +359,10 @@ components:
       properties:
         configured_reolink_mode:
           type: string
-          enum: [auto, standalone, nvr]
+          enum: [auto, standalone, nvr, direct]
         active_reolink_mode:
           type: string
-          enum: [standalone, nvr]
+          enum: [standalone, nvr, direct]
         profile:
           type: string
         receive_mode:
