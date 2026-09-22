@@ -1,0 +1,237 @@
+// Package mobilebridge is the gomobile boundary used by the Android host.
+package mobilebridge
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/vothmarkus/reolink-sip-gateway/internal/gatewayruntime"
+	"github.com/vothmarkus/reolink-sip-gateway/internal/platformaudio"
+	"github.com/vothmarkus/reolink-sip-gateway/internal/standalone"
+	statuspkg "github.com/vothmarkus/reolink-sip-gateway/internal/status"
+)
+
+type PlatformAudio interface {
+	StartAACDecoder(sampleRate int32, channels int32) (int64, error)
+	DecodeAAC(handle int64, adts []byte) ([]byte, error)
+	StopAACDecoder(handle int64)
+}
+
+type Listener interface {
+	OnState(state string)
+	OnError(message string)
+}
+
+type Gateway struct {
+	mu       sync.Mutex
+	cancel   context.CancelFunc
+	done     chan struct{}
+	server   *http.Server
+	listener net.Listener
+	baseURL  string
+	token    string
+	lastErr  string
+	running  bool
+}
+
+func Version() string { return gatewayruntime.Version }
+
+func ValidateConfig(raw string) error {
+	settings, err := standalone.DecodeSettings([]byte(raw))
+	if err != nil {
+		return err
+	}
+	return validateAndroidSettings(settings)
+}
+
+func Start(raw, dataDir string, audio PlatformAudio, listener Listener) (*Gateway, error) {
+	settings, err := standalone.DecodeSettings([]byte(raw))
+	if err != nil {
+		return nil, err
+	}
+	if err := validateAndroidSettings(settings); err != nil {
+		return nil, err
+	}
+	cfg, err := settings.Runtime(false)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(dataDir) == "" {
+		return nil, errors.New("Android data directory is empty")
+	}
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		return nil, fmt.Errorf("create Android data directory: %w", err)
+	}
+	cfg.DataDir = dataDir
+	identity, err := statuspkg.LoadOrCreateIdentity(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		return nil, fmt.Errorf("open Android loopback API: %w", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	g := &Gateway{
+		cancel: cancel, done: make(chan struct{}), listener: ln,
+		baseURL: "http://" + ln.Addr().String(), token: identity.Token, running: true,
+	}
+	restoreAudio := platformaudio.Set(audio)
+	notifyState(listener, "starting")
+	go func() {
+		defer close(g.done)
+		defer restoreAudio()
+		defer ln.Close()
+		err := gatewayruntime.Run(ctx, cfg, gatewayruntime.Options{
+			Publish: func(handler http.Handler) {
+				srv := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+				g.mu.Lock()
+				g.server = srv
+				g.mu.Unlock()
+				go func() {
+					if serveErr := srv.Serve(ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+						g.setError(serveErr.Error())
+						notifyError(listener, serveErr.Error())
+						cancel()
+					}
+				}()
+			},
+		})
+		g.mu.Lock()
+		g.running = false
+		if err != nil && !errors.Is(err, context.Canceled) {
+			g.lastErr = err.Error()
+		}
+		g.mu.Unlock()
+		if err != nil && !errors.Is(err, context.Canceled) {
+			notifyError(listener, err.Error())
+		}
+		notifyState(listener, "stopped")
+	}()
+	return g, nil
+}
+
+func validateAndroidSettings(settings standalone.Settings) error {
+	if !strings.EqualFold(strings.TrimSpace(settings.Reolink.Mode), "nvr") {
+		return errors.New("Android alpha currently requires Reolink mode nvr (Baichuan media)")
+	}
+	if strings.EqualFold(strings.TrimSpace(settings.SIP.Registrar), "auto") {
+		return errors.New("Android alpha requires an explicit SIP registrar/FRITZ!Box address")
+	}
+	if settings.Audio.AEC {
+		return errors.New("Android alpha does not yet provide WebRTC AEC; disable echo cancellation")
+	}
+	if settings.LiveImage.Enabled {
+		return errors.New("Android alpha does not yet provide FRITZ!Fon live images; disable live images")
+	}
+	return nil
+}
+
+func (g *Gateway) IsRunning() bool {
+	if g == nil {
+		return false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.running
+}
+
+func (g *Gateway) LastError() string {
+	if g == nil {
+		return ""
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.lastErr
+}
+
+func (g *Gateway) Stop() error {
+	if g == nil {
+		return nil
+	}
+	g.cancel()
+	g.mu.Lock()
+	srv := g.server
+	g.mu.Unlock()
+	if srv != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = srv.Shutdown(ctx)
+		cancel()
+	}
+	select {
+	case <-g.done:
+		return nil
+	case <-time.After(10 * time.Second):
+		return errors.New("gateway did not stop within 10 seconds")
+	}
+}
+
+func (g *Gateway) StatusJSON() (string, error) {
+	body, err := g.api(http.MethodGet, "/api/v1/status")
+	return string(body), err
+}
+
+func (g *Gateway) TestCall(routeID string) error {
+	if strings.TrimSpace(routeID) == "" {
+		routeID = "default"
+	}
+	_, err := g.api(http.MethodPost, "/api/v1/routes/"+url.PathEscape(routeID)+"/test")
+	return err
+}
+
+func (g *Gateway) Hangup() error {
+	_, err := g.api(http.MethodPost, "/api/v1/calls/hangup")
+	return err
+}
+
+func (g *Gateway) api(method, path string) ([]byte, error) {
+	if g == nil {
+		return nil, errors.New("gateway is nil")
+	}
+	req, err := http.NewRequest(method, g.baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+g.token)
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("gateway API %s %s returned %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return body, nil
+}
+
+func (g *Gateway) setError(message string) {
+	g.mu.Lock()
+	g.lastErr = message
+	g.mu.Unlock()
+}
+
+func notifyState(listener Listener, state string) {
+	if listener != nil {
+		listener.OnState(state)
+	}
+}
+
+func notifyError(listener Listener, message string) {
+	if listener != nil {
+		listener.OnError(message)
+	}
+}

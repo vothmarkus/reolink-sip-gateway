@@ -111,8 +111,13 @@ func (s *Session) Run(ctx context.Context) error {
 	if s.cfg.ReceiveMode() == "rtsp" && s.ffConn == nil {
 		return errors.New("ffmpeg RTP socket is not prepared")
 	}
-	if _, err := exec.LookPath(s.cfg.FFmpegPath()); err != nil {
-		return fmt.Errorf("ffmpeg not found at %q: %w", s.cfg.FFmpegPath(), err)
+	// RTSP receive still requires FFmpeg. Baichuan AAC may instead be decoded
+	// by a platform adapter (Android MediaCodec), so do not require a process
+	// executable before the actual receive mode is known.
+	if s.cfg.ReceiveMode() == "rtsp" {
+		if _, err := exec.LookPath(s.cfg.FFmpegPath()); err != nil {
+			return fmt.Errorf("ffmpeg not found at %q: %w", s.cfg.FFmpegPath(), err)
+		}
 	}
 	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()

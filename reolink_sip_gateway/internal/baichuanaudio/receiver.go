@@ -19,6 +19,7 @@ import (
 
 	"github.com/vothmarkus/reolink-sip-gateway/internal/baichuan"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/codec"
+	"github.com/vothmarkus/reolink-sip-gateway/internal/platformaudio"
 )
 
 const (
@@ -145,7 +146,7 @@ func (r *Receiver) run(ctx context.Context, cfg Config, adpcmRate int) {
 
 	var activeCodec string
 	var decoder codec.ADPCMDecoder
-	var aac *aacDecoder
+	var aac aacStreamDecoder
 	var aacPCM <-chan []int16
 	var aacDone <-chan error
 	defer func() {
@@ -232,13 +233,22 @@ func (r *Receiver) run(ctx context.Context, cfg Config, adpcmRate int) {
 					return
 				}
 				if aac == nil {
-					if strings.TrimSpace(cfg.FFmpegPath) == "" {
-						terminalErr = errors.New("FFmpeg binary path is required to decode Baichuan AAC audio")
-						return
-					}
 					inputRate := adtsSampleRate(packet.Data)
 					var err error
-					aac, err = startAACDecoder(ctx, cfg.FFmpegPath, cfg.OutputRate, cfg.Logger)
+					if adapter := platformaudio.Current(); adapter != nil {
+						channels := adtsChannelCount(packet.Data)
+						if inputRate == 0 || channels == 0 {
+							terminalErr = errors.New("Android AAC decoder requires a valid ADTS header")
+							return
+						}
+						aac, err = startPlatformAACDecoder(ctx, adapter, inputRate, channels, cfg.OutputRate)
+					} else {
+						if strings.TrimSpace(cfg.FFmpegPath) == "" {
+							terminalErr = errors.New("FFmpeg binary path is required to decode Baichuan AAC audio")
+							return
+						}
+						aac, err = startAACDecoder(ctx, cfg.FFmpegPath, cfg.OutputRate, cfg.Logger)
+					}
 					if err != nil {
 						terminalErr = err
 						return
@@ -320,6 +330,92 @@ func resampleLinear(in []int16, inRate, outRate int) []int16 {
 		out[i] = int16(v)
 	}
 	return out
+}
+
+type aacStreamDecoder interface {
+	Write([]byte) error
+	PCM() <-chan []int16
+	Done() <-chan error
+	Close()
+}
+
+type platformAACDecoder struct {
+	ctx        context.Context
+	adapter    platformaudio.Adapter
+	handle     int64
+	inputRate  int
+	outputRate int
+	pcm        chan []int16
+	done       chan error
+	once       sync.Once
+}
+
+func startPlatformAACDecoder(parent context.Context, adapter platformaudio.Adapter, inputRate, channels, outputRate int) (*platformAACDecoder, error) {
+	if adapter == nil {
+		return nil, errors.New("platform AAC decoder is unavailable")
+	}
+	if channels != 1 {
+		return nil, fmt.Errorf("platform AAC decoder currently supports mono only, got %d channels", channels)
+	}
+	handle, err := adapter.StartAACDecoder(int32(inputRate), int32(channels))
+	if err != nil {
+		return nil, fmt.Errorf("start platform AAC decoder: %w", err)
+	}
+	return &platformAACDecoder{
+		ctx: parent, adapter: adapter, handle: handle, inputRate: inputRate, outputRate: outputRate,
+		pcm: make(chan []int16, 8), done: make(chan error, 1),
+	}, nil
+}
+
+func (d *platformAACDecoder) Write(frame []byte) error {
+	if d == nil || d.adapter == nil {
+		return errors.New("platform AAC decoder is not running")
+	}
+	raw, err := d.adapter.DecodeAAC(d.handle, frame)
+	if err != nil {
+		return err
+	}
+	if len(raw) == 0 {
+		return nil
+	}
+	if len(raw)%2 != 0 {
+		return fmt.Errorf("platform AAC decoder returned odd PCM byte count %d", len(raw))
+	}
+	pcm := make([]int16, len(raw)/2)
+	for i := range pcm {
+		pcm[i] = int16(binary.LittleEndian.Uint16(raw[i*2 : i*2+2]))
+	}
+	if d.inputRate != d.outputRate {
+		pcm = resampleLinear(pcm, d.inputRate, d.outputRate)
+	}
+	select {
+	case d.pcm <- pcm:
+		return nil
+	case <-d.ctx.Done():
+		return d.ctx.Err()
+	}
+}
+
+func (d *platformAACDecoder) PCM() <-chan []int16 { return d.pcm }
+func (d *platformAACDecoder) Done() <-chan error  { return d.done }
+
+func (d *platformAACDecoder) Close() {
+	if d == nil {
+		return
+	}
+	d.once.Do(func() {
+		d.adapter.StopAACDecoder(d.handle)
+		close(d.pcm)
+		d.done <- nil
+		close(d.done)
+	})
+}
+
+func adtsChannelCount(frame []byte) int {
+	if len(frame) < 4 || frame[0] != 0xff || frame[1]&0xf6 != 0xf0 {
+		return 0
+	}
+	return int((frame[2]&0x01)<<2 | (frame[3]>>6)&0x03)
 }
 
 type aacDecoder struct {
