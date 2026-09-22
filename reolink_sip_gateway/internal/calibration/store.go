@@ -47,7 +47,7 @@ func Save(path string, cfg config.Config, delayMS int, measuredAt time.Time) err
 		return fmt.Errorf("calibration delay must be 0..%d ms", config.MaxSupportedAECDelayMS)
 	}
 	mode := cfg.EffectiveReolinkMode()
-	if mode != "standalone" && mode != "nvr" {
+	if mode != "standalone" && mode != "nvr" && mode != "direct" {
 		return fmt.Errorf("calibration requires a resolved Reolink mode, got %q", mode)
 	}
 	rec := Record{Version: 1, Fingerprint: Fingerprint(cfg), Mode: mode, DelayMS: delayMS, MeasuredAt: measuredAt}

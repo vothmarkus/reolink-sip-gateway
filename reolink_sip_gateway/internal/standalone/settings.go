@@ -143,7 +143,7 @@ func (s Settings) Runtime(resolveGateway bool) (config.Config, error) {
 	}
 	delete(flat, "nvr_channel_number")
 	channel := s.Reolink.Channel
-	if s.Reolink.Mode == "standalone" {
+	if strings.EqualFold(strings.TrimSpace(s.Reolink.Mode), "standalone") || strings.EqualFold(strings.TrimSpace(s.Reolink.Mode), "direct") {
 		channel = 1
 	}
 	flat["nvr_channel"] = channel - 1

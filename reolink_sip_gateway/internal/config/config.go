@@ -227,6 +227,10 @@ func Decode(b []byte) (Config, error) {
 		cfg.ReolinkStreamPath = "/" + cfg.ReolinkStreamPath
 	}
 	cfg.ReolinkMode = strings.ToLower(strings.TrimSpace(cfg.ReolinkMode))
+	if cfg.ReolinkMode == "direct" {
+		// A camera has one endpoint; never reuse a previously selected NVR channel.
+		cfg.NVRChannel = 0
+	}
 	cfg.SIPCodecPreference = strings.ToLower(strings.TrimSpace(cfg.SIPCodecPreference))
 	cfg.ParallelDestinations = normalizeListEntries(cfg.ParallelDestinations)
 	cfg.migrateLegacyRouting(raw)
@@ -266,9 +270,9 @@ func (c Config) Validate() error {
 		errs = append(errs, errors.New("nvr_channel must be 0..255"))
 	}
 	switch c.ReolinkMode {
-	case "auto", "nvr", "standalone":
+	case "auto", "nvr", "standalone", "direct":
 	default:
-		errs = append(errs, errors.New("reolink_mode must be auto, nvr or standalone"))
+		errs = append(errs, errors.New("reolink_mode must be auto, nvr, standalone or direct"))
 	}
 	if c.EchoCancellationSearchWindowMS < minimumAECSearchWindowMS || c.EchoCancellationSearchWindowMS > maximumAECSearchWindowMS {
 		errs = append(errs, fmt.Errorf("echo_cancellation_search_window_ms must be %d..%d", minimumAECSearchWindowMS, maximumAECSearchWindowMS))
@@ -721,7 +725,7 @@ func (c Config) FFmpegPath() string {
 }
 func (c Config) DebugEnabled() bool { return c.LogLevel == "debug" }
 func (c Config) ReceiveMode() string {
-	if c.EffectiveReolinkMode() == "nvr" {
+	if c.EffectiveReolinkMode() == "nvr" || c.EffectiveReolinkMode() == "direct" {
 		return "baichuan"
 	}
 	return "rtsp"
@@ -734,6 +738,9 @@ func (c Config) EffectiveReolinkMode() string {
 }
 func (c Config) WithResolvedReolinkMode(mode string) Config {
 	c.ResolvedReolinkMode = strings.ToLower(strings.TrimSpace(mode))
+	if c.ResolvedReolinkMode == "direct" {
+		c.NVRChannel = 0
+	}
 	return c
 }
 func (c *Config) SetAECDelay(delayMS int) {

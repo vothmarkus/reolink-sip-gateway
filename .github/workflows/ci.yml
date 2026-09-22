@@ -21,7 +21,7 @@ jobs:
           cache-dependency-path: reolink_sip_gateway/go.mod
       - name: Format check
         run: |
-          unformatted="$(gofmt -l cmd internal)"
+          unformatted="$(gofmt -l cmd internal mobilebridge)"
           if [ -n "${unformatted}" ]; then
             printf 'Files requiring gofmt:\n%s\n' "${unformatted}"
             gofmt -d ${unformatted}
@@ -142,8 +142,20 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Build Android debug APK
-        run: gradle -p android :app:assembleDebug
+      - name: Preserve debug signing identity for Android branch updates
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore-v1-${{ github.ref_name }}
+      - name: Test, lint and build Android debug APK
+        run: gradle -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+      - name: Upload Android test and lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-verification-reports
+          path: android/app/build/reports
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         with:
           name: reolink-sip-gateway-android-alpha

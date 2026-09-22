@@ -16,7 +16,7 @@ func validSettings() Settings {
 }
 
 func TestPublicChannelsAndDefaultsConvertToSharedRuntime(t *testing.T) {
-	for _, mode := range []string{"auto", "nvr", "standalone"} {
+	for _, mode := range []string{"auto", "nvr", "standalone", "direct"} {
 		s := validSettings()
 		s.Reolink.Mode = mode
 		s.Reolink.Channel = 7
@@ -25,7 +25,7 @@ func TestPublicChannelsAndDefaultsConvertToSharedRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 		channel, path := 6, "/Preview_07_sub"
-		if mode == "standalone" {
+		if mode == "standalone" || mode == "direct" {
 			channel, path = 0, "/Preview_01_sub"
 		}
 		if cfg.NVRChannel != channel || cfg.ReolinkStreamPath != path || cfg.TriggerSource != "baichuan" || cfg.TriggerRouteID != "default" || cfg.CallRoutes[0].VisitorEntity != "" {

@@ -39,6 +39,8 @@ func TestConfiguredTalkbackUsesStartupResolvedProfile(t *testing.T) {
 		wantErr       string
 	}{
 		{name: "explicit standalone", configured: "standalone", wantMode: "standalone", wantRTSPCalls: 1},
+		{name: "direct camera uses Baichuan without RTSP", configured: "direct", wantMode: "nvr", wantNVRCalls: 1},
+		{name: "direct camera failure has no RTSP fallback", configured: "direct", nvrErr: errNVR, wantNVRCalls: 1, wantErr: "direct camera Baichuan talkback"},
 		{name: "explicit nvr", configured: "nvr", wantMode: "nvr", wantNVRCalls: 1},
 		{name: "auto resolved standalone", configured: "auto", resolved: "standalone", wantMode: "standalone", wantRTSPCalls: 1},
 		{name: "auto resolved nvr", configured: "auto", resolved: "nvr", wantMode: "nvr", wantNVRCalls: 1},

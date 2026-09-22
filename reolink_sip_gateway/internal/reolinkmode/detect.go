@@ -22,7 +22,7 @@ type standaloneProbe func(context.Context, config.Config, *slog.Logger) error
 type nvrProbe func(context.Context, config.Config) error
 
 func resolveWith(parent context.Context, cfg config.Config, logger *slog.Logger, standalone standaloneProbe, nvr nvrProbe) (string, error) {
-	if cfg.ReolinkMode == "standalone" || cfg.ReolinkMode == "nvr" {
+	if cfg.ReolinkMode == "standalone" || cfg.ReolinkMode == "nvr" || cfg.ReolinkMode == "direct" {
 		return cfg.ReolinkMode, nil
 	}
 	if cfg.ReolinkMode != "auto" {

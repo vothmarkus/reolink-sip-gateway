@@ -1,3 +1,5 @@
+> **Android 0.2.0-alpha2:** Direkte Kameraanbindung ohne NVR, Android-Einstellungen und Testablauf: [docs/ANDROID.md](docs/ANDROID.md).
+
 # Reolink SIP Gateway
 
 Community Home Assistant app that bridges bidirectional audio between a Reolink Video Doorbell and SIP. A Home Assistant visitor event can place a call, and the registered gateway extension can optionally be called directly.

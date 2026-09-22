@@ -12,7 +12,7 @@ import (
 )
 
 func TestExplicitModeDoesNotProbe(t *testing.T) {
-	for _, mode := range []string{"standalone", "nvr"} {
+	for _, mode := range []string{"standalone", "nvr", "direct"} {
 		t.Run(mode, func(t *testing.T) {
 			cfg := config.Defaults()
 			cfg.ReolinkMode = mode

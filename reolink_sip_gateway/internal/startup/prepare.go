@@ -49,7 +49,7 @@ func prepareWith(ctx context.Context, cfg config.Config, logger *slog.Logger, de
 	if cfg.DryRun {
 		// Dry-run is intentionally side-effect free: no capability negotiation and,
 		// most importantly, no audible calibration marker.
-		if cfg.ReolinkMode == "standalone" || cfg.ReolinkMode == "nvr" {
+		if cfg.ReolinkMode == "standalone" || cfg.ReolinkMode == "nvr" || cfg.ReolinkMode == "direct" {
 			cfg = cfg.WithResolvedReolinkMode(cfg.ReolinkMode)
 			result.ActiveMode = cfg.EffectiveReolinkMode()
 			result.MediaProfile = mediaProfile(result.ActiveMode)
@@ -155,6 +155,8 @@ func mediaProfile(mode string) string {
 		return "RTSP ↔ RTSP"
 	case "nvr":
 		return "Baichuan ↔ Baichuan (sub)"
+	case "direct":
+		return "Kamera direkt · Baichuan ↔ Baichuan (sub)"
 	default:
 		return ""
 	}

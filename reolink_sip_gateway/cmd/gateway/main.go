@@ -58,7 +58,7 @@ func runGateway(parent context.Context, cfg config.Config, options gatewayRuntim
 	liveImageHost := ""
 	if cfg.FritzFonLiveImageEnabled {
 		liveImageLogger := logger.With("component", "fritzfon_live_image")
-		if cfg.ReolinkMode == "standalone" {
+		if cfg.ReolinkMode == "standalone" || cfg.ReolinkMode == "direct" {
 			liveImageCatalog = liveimage.NewCatalog(cfg, liveImageLogger)
 		} else {
 			liveImageCatalog = liveimage.NewPersistentCatalog(cfg, liveImageLogger, cfg.StatePath("fritzfon-live-image-catalog.json"))
@@ -114,7 +114,7 @@ func runGateway(parent context.Context, cfg config.Config, options gatewayRuntim
 	logger.Info("Home Assistant integration API ready", "api_version", statuspkg.APIVersion, "port", cfg.StatusPort, "instance_id", identity.InstanceID)
 	if cfg.FritzFonLiveImageEnabled {
 		logger.Info("FRITZ!Fon live image server ready", "port", cfg.StatusPort, "format", "JPEG", "protected_path", true, "multi_channel", true)
-		if cfg.ReolinkMode != "standalone" {
+		if cfg.ReolinkMode != "standalone" && cfg.ReolinkMode != "direct" {
 			background(func() {
 				runLiveImageDiscovery(
 					ctx, liveImageCatalog, liveImageDiscoveryInterval, liveImageDiscoveryTimeout,
@@ -258,7 +258,7 @@ func runGateway(parent context.Context, cfg config.Config, options gatewayRuntim
 		listen = listener.Run
 	case "baichuan":
 		channel := cfg.NVRChannel
-		if cfg.EffectiveReolinkMode() == "standalone" {
+		if cfg.EffectiveReolinkMode() == "standalone" || cfg.EffectiveReolinkMode() == "direct" {
 			channel = 0
 		}
 		listener := &trigger.Baichuan{

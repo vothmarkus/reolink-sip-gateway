@@ -43,6 +43,13 @@ type Gateway struct {
 	running  bool
 }
 
+// The audio adapter belongs to one runtime. A failed/slow stop must not let a
+// second runtime replace it while the first one still owns decoder handles.
+var activeRuntime struct {
+	sync.Mutex
+	active bool
+}
+
 func Version() string { return gatewayruntime.Version }
 
 func ValidateConfig(raw string) error {
@@ -65,6 +72,19 @@ func Start(raw, dataDir string, audio PlatformAudio, listener Listener) (*Gatewa
 	if err != nil {
 		return nil, err
 	}
+	activeRuntime.Lock()
+	if activeRuntime.active {
+		activeRuntime.Unlock()
+		return nil, errors.New("an Android gateway is already running or stopping")
+	}
+	activeRuntime.active = true
+	activeRuntime.Unlock()
+	started := false
+	defer func() {
+		if !started {
+			releaseRuntime()
+		}
+	}()
 	if strings.TrimSpace(dataDir) == "" {
 		return nil, errors.New("Android data directory is empty")
 	}
@@ -86,11 +106,21 @@ func Start(raw, dataDir string, audio PlatformAudio, listener Listener) (*Gatewa
 		baseURL: "http://" + ln.Addr().String(), token: identity.Token, running: true,
 	}
 	restoreAudio := platformaudio.Set(audio)
+	started = true
 	notifyState(listener, "starting")
 	go func() {
 		defer close(g.done)
+		defer releaseRuntime()
 		defer restoreAudio()
 		defer ln.Close()
+		defer func() {
+			g.mu.Lock()
+			srv := g.server
+			g.mu.Unlock()
+			if srv != nil {
+				_ = srv.Close()
+			}
+		}()
 		err := gatewayruntime.Run(ctx, cfg, gatewayruntime.Options{
 			Publish: func(handler http.Handler) {
 				srv := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
@@ -121,19 +151,27 @@ func Start(raw, dataDir string, audio PlatformAudio, listener Listener) (*Gatewa
 }
 
 func validateAndroidSettings(settings standalone.Settings) error {
-	if !strings.EqualFold(strings.TrimSpace(settings.Reolink.Mode), "nvr") {
-		return errors.New("Android alpha currently requires Reolink mode nvr (Baichuan media)")
+	mode := strings.ToLower(strings.TrimSpace(settings.Reolink.Mode))
+	if mode != "nvr" && mode != "direct" {
+		return errors.New("Android requires direct (camera without NVR) or nvr mode; RTSP/auto need the Linux host")
 	}
 	if strings.EqualFold(strings.TrimSpace(settings.SIP.Registrar), "auto") {
 		return errors.New("Android alpha requires an explicit SIP registrar/FRITZ!Box address")
 	}
-	if settings.Audio.AEC {
-		return errors.New("Android alpha does not yet provide WebRTC AEC; disable echo cancellation")
+	if settings.Audio.AEC || settings.Audio.HighPass || settings.Audio.NoiseSuppression {
+		return errors.New("Android does not yet provide WebRTC AEC or its audio filters; disable them")
 	}
 	if settings.LiveImage.Enabled {
 		return errors.New("Android alpha does not yet provide FRITZ!Fon live images; disable live images")
 	}
-	return nil
+	_, err := settings.Runtime(false)
+	return err
+}
+
+func releaseRuntime() {
+	activeRuntime.Lock()
+	activeRuntime.active = false
+	activeRuntime.Unlock()
 }
 
 func (g *Gateway) IsRunning() bool {

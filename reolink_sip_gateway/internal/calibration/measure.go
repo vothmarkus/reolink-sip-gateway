@@ -246,7 +246,7 @@ func MeasureAcousticLatency(parent context.Context, cfg config.Config, logger *s
 		markerPath string
 	)
 	switch cfg.EffectiveReolinkMode() {
-	case "nvr":
+	case "nvr", "direct":
 		client, err := baichuan.Dial(ctx, baichuan.Config{
 			Host: cfg.ReolinkHost, Port: cfg.BaichuanPort,
 			Username: cfg.ReolinkUsername, Password: cfg.ReolinkPassword,

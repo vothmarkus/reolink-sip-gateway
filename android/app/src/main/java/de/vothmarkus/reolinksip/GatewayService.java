@@ -1,198 +1,224 @@
 package de.vothmarkus.reolinksip;
 
-import android.app.Notification;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.app.PendingIntent;
-import android.app.Service;
+import android.app.*;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.net.ConnectivityManager;
+import android.net.LinkProperties;
+import android.net.Network;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.IBinder;
-
+import android.os.PowerManager;
 import java.io.File;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-
+import java.util.concurrent.*;
 import de.vothmarkus.reolinksip.core.mobilebridge.Gateway;
 import de.vothmarkus.reolinksip.core.mobilebridge.Listener;
 import de.vothmarkus.reolinksip.core.mobilebridge.Mobilebridge;
 
 public final class GatewayService extends Service {
-    static final String ACTION_STOP = "de.vothmarkus.reolinksip.STOP";
+    private static final String ACTION_RESTART = "de.vothmarkus.reolinksip.RESTART";
     private static final String CHANNEL = "gateway";
     private static final int NOTIFICATION_ID = 4102;
-
-    private static volatile String lastState = "gestoppt";
-    private static volatile String lastStatus = "";
-    private static volatile String lastError = "";
-
+    private static volatile String lastState = "Gestoppt", lastStatus = "", lastError = "";
+    private static volatile Gateway activeGateway;
+    private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
     private Gateway gateway;
     private MediaCodecAudioAdapter audioAdapter;
-    private ScheduledExecutorService poller;
+    private ScheduledFuture<?> networkRestart;
+    private PowerManager.WakeLock wakeLock;
+    private WifiManager.WifiLock wifiLock;
+    private ConnectivityManager connectivity;
+    private ConnectivityManager.NetworkCallback networkCallback;
+    private String networkSignature = "";
+    private volatile boolean destroyed;
 
-    static void start(Context context) {
-        Intent intent = new Intent(context, GatewayService.class);
-        context.startForegroundService(intent);
-    }
-
-    static void stop(Context context) {
-        Intent intent = new Intent(context, GatewayService.class);
-        intent.setAction(ACTION_STOP);
-        context.startForegroundService(intent);
-    }
-
-    static String summary() {
-        if (!lastError.isEmpty()) {
-            return lastState + "\nFehler: " + lastError + (lastStatus.isEmpty() ? "" : "\n\n" + lastStatus);
-        }
-        return lastState + (lastStatus.isEmpty() ? "" : "\n\n" + lastStatus);
-    }
-
+    static void start(Context c) { c.startForegroundService(new Intent(c, GatewayService.class)); }
+    static void restart(Context c) { c.startForegroundService(new Intent(c, GatewayService.class).setAction(ACTION_RESTART)); }
+    static void stop(Context c) { c.stopService(new Intent(c, GatewayService.class)); }
+    static String summary() { return GatewayStatus.summary(lastState, lastStatus, lastError); }
+    static String rawStatus() { return lastStatus; }
+    static boolean testAvailable() { return activeGateway != null && GatewayStatus.available(lastStatus, "test_call_available"); }
+    static boolean hangupAvailable() { return activeGateway != null && GatewayStatus.available(lastStatus, "hangup_available"); }
     static void testCall() throws Exception {
-        Gateway g = Holder.gateway;
+        Gateway g = activeGateway;
         if (g == null) throw new IllegalStateException("Gateway läuft nicht");
         g.testCall("default");
     }
-
     static void hangup() throws Exception {
-        Gateway g = Holder.gateway;
+        Gateway g = activeGateway;
         if (g == null) throw new IllegalStateException("Gateway läuft nicht");
         g.hangup();
     }
 
-    private static final class Holder {
-        static volatile Gateway gateway;
-    }
-
-    @Override
-    public void onCreate() {
+    @Override public void onCreate() {
         super.onCreate();
-        createNotificationChannel();
-        startAsForeground("Gateway wird gestartet");
+        getSystemService(NotificationManager.class).createNotificationChannel(
+                new NotificationChannel(CHANNEL, "Reolink SIP Gateway", NotificationManager.IMPORTANCE_LOW));
+        Notification n = notification("Gateway wird gestartet");
+        if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+        else startForeground(NOTIFICATION_ID, n);
+        // Blocking Go startup/stop and API calls never run on Android's main thread.
+        worker.scheduleWithFixedDelay(this::poll, 1, 2, TimeUnit.SECONDS);
+        watchNetwork();
     }
 
-    @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
-            stopGateway();
-            stopSelf();
-            return START_NOT_STICKY;
-        }
-        if (gateway == null) {
+    @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        boolean restart = intent != null && ACTION_RESTART.equals(intent.getAction());
+        worker.execute(() -> {
+            if (destroyed) return;
             try {
-                String json = ConfigStore.buildJson(this);
-                File dataDir = new File(getFilesDir(), "gateway");
-                audioAdapter = new MediaCodecAudioAdapter();
-                gateway = Mobilebridge.start(json, dataDir.getAbsolutePath(), audioAdapter, new Listener() {
-                    @Override
-                    public void onState(String state) {
-                        lastState = state;
-                        updateNotification("Status: " + state);
-                    }
-
-                    @Override
-                    public void onError(String message) {
-                        lastError = message;
-                        updateNotification("Fehler im Gateway");
-                    }
-                });
-                Holder.gateway = gateway;
-                lastError = "";
-                lastState = "gestartet";
-                startPolling();
-            } catch (Exception e) {
-                lastError = e.getMessage() == null ? e.toString() : e.getMessage();
-                lastState = "Start fehlgeschlagen";
-                updateNotification("Start fehlgeschlagen");
-            }
-        }
+                if (restart) stopGateway();
+                if (gateway == null) startGateway();
+            } catch (Exception e) { failure(e); }
+        });
         return START_STICKY;
     }
 
-    private void startPolling() {
-        poller = Executors.newSingleThreadScheduledExecutor();
-        poller.scheduleWithFixedDelay(() -> {
-            Gateway g = gateway;
-            if (g == null) return;
-            try {
-                lastStatus = g.statusJSON();
-                lastError = g.lastError();
-            } catch (Exception e) {
-                if (g.isRunning()) {
-                    lastError = e.getMessage() == null ? e.toString() : e.getMessage();
-                }
-            }
-        }, 1, 2, TimeUnit.SECONDS);
-    }
-
-    private void stopGateway() {
-        if (poller != null) {
-            poller.shutdownNow();
-            poller = null;
-        }
-        Gateway g = gateway;
-        gateway = null;
-        Holder.gateway = null;
-        if (g != null) {
-            try {
-                g.stop();
-            } catch (Exception e) {
-                lastError = e.getMessage() == null ? e.toString() : e.getMessage();
-            }
-        }
-        if (audioAdapter != null) {
-            audioAdapter.closeAll();
-            audioAdapter = null;
-        }
-        lastState = "gestoppt";
+    private void startGateway() throws Exception {
+        if (destroyed) return;
+        String config = ConfigStore.buildJson(this);
+        Mobilebridge.validateConfig(config);
+        lastError = "";
         lastStatus = "";
+        lastState = "Gateway startet";
+        MediaCodecAudioAdapter adapter = new MediaCodecAudioAdapter();
+        try {
+            acquireLocks();
+            Gateway next = Mobilebridge.start(config, new File(getFilesDir(), "gateway").getAbsolutePath(), adapter, new Listener() {
+                @Override public void onState(String state) {
+                    if (!destroyed) lastState = state.equals("stopped") ? "Gateway beendet" : "Gateway startet";
+                }
+                @Override public void onError(String error) { if (!destroyed) lastError = ConfigStore.redact(GatewayService.this, error); }
+            });
+            gateway = next;
+            audioAdapter = adapter;
+            activeGateway = next;
+            lastState = "Gateway läuft";
+            updateNotification(lastState);
+        } catch (Exception e) {
+            adapter.closeAll();
+            releaseLocks();
+            throw e;
+        }
     }
 
-    @Override
-    public void onDestroy() {
-        stopGateway();
+    private void poll() {
+        if (destroyed || gateway == null) return;
+        try {
+            if (!gateway.isRunning()) {
+                String error = gateway.lastError();
+                stopGateway();
+                lastState = "Gateway beendet";
+                lastError = error.isEmpty() ? "Bitte Einstellungen prüfen und erneut starten" : error;
+                updateNotification(lastState);
+                return;
+            }
+            lastStatus = gateway.statusJSON();
+            lastError = gateway.lastError();
+            String text = testAvailable() ? "Bereit für Anrufe" : "Gateway aktiv – Status in der App";
+            updateNotification(text);
+        } catch (Exception e) { lastError = message(e); }
+    }
+
+    private void stopGateway() throws Exception {
+        Gateway old = gateway;
+        if (activeGateway == old) activeGateway = null;
+        lastStatus = "";
+        if (old != null) {
+            // Retain the object and decoder on timeout: a subsequent restart must
+            // wait for the same runtime instead of racing its audio teardown.
+            old.stop();
+            gateway = null;
+        }
+        if (audioAdapter != null) { audioAdapter.closeAll(); audioAdapter = null; }
+        releaseLocks();
+    }
+
+    private void failure(Exception e) {
+        lastError = ConfigStore.redact(this, message(e));
+        lastState = "Gateway-Fehler";
+        updateNotification(lastState);
+    }
+    private static String message(Exception e) { return e.getMessage() == null ? e.toString() : e.getMessage(); }
+
+    private void acquireLocks() {
+        if (wakeLock == null) {
+            wakeLock = getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "reolinksip:gateway");
+            wakeLock.setReferenceCounted(false);
+        }
+        if (!wakeLock.isHeld()) wakeLock.acquire();
+        WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+        if (wifi != null && wifiLock == null) {
+            wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "reolinksip:gateway");
+            wifiLock.setReferenceCounted(false);
+        }
+        if (wifiLock != null && !wifiLock.isHeld()) wifiLock.acquire();
+    }
+    private void releaseLocks() {
+        if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
+        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+    }
+
+    private void watchNetwork() {
+        connectivity = getSystemService(ConnectivityManager.class);
+        if (connectivity == null) return;
+        Network active = connectivity.getActiveNetwork();
+        networkSignature = signature(active, active == null ? null : connectivity.getLinkProperties(active));
+        networkCallback = new ConnectivityManager.NetworkCallback() {
+            @Override public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
+                String next = signature(network, properties);
+                if (destroyed) return;
+                try {
+                    worker.execute(() -> {
+                        if (destroyed || next.equals(networkSignature)) return;
+                        networkSignature = next;
+                        if (gateway == null) return;
+                        if (networkRestart != null) networkRestart.cancel(false);
+                        networkRestart = worker.schedule(() -> {
+                            if (destroyed || gateway == null) return;
+                            try { lastState = "Netzwerk geändert – Neustart"; stopGateway(); startGateway(); }
+                            catch (Exception e) { failure(e); }
+                        }, 2, TimeUnit.SECONDS);
+                    });
+                } catch (RejectedExecutionException ignored) {}
+            }
+        };
+        connectivity.registerDefaultNetworkCallback(networkCallback);
+    }
+    private static String signature(Network n, LinkProperties p) {
+        if (n == null) return "";
+        java.util.List<String> addresses = new java.util.ArrayList<>();
+        if (p != null) for (android.net.LinkAddress address : p.getLinkAddresses())
+            if (address.getAddress() instanceof java.net.Inet4Address) addresses.add(address.toString());
+        java.util.Collections.sort(addresses);
+        return n.toString() + ":" + addresses;
+    }
+
+    @Override public void onDestroy() {
+        destroyed = true;
+        if (connectivity != null && networkCallback != null) connectivity.unregisterNetworkCallback(networkCallback);
+        worker.execute(() -> {
+            try { stopGateway(); }
+            catch (Exception e) { lastError = message(e); }
+            finally {
+                releaseLocks();
+                lastState = "Gestoppt";
+                lastStatus = "";
+            }
+        });
+        worker.shutdown();
+        stopForeground(STOP_FOREGROUND_REMOVE);
         super.onDestroy();
     }
-
-    @Override
-    public IBinder onBind(Intent intent) {
-        return null;
-    }
-
-    private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= 26) {
-            NotificationChannel channel = new NotificationChannel(
-                    CHANNEL, "Reolink SIP Gateway", NotificationManager.IMPORTANCE_LOW);
-            getSystemService(NotificationManager.class).createNotificationChannel(channel);
-        }
-    }
-
+    @Override public IBinder onBind(Intent intent) { return null; }
     private Notification notification(String text) {
-        Intent open = new Intent(this, MainActivity.class);
-        PendingIntent pending = PendingIntent.getActivity(
-                this, 0, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        return new Notification.Builder(this, CHANNEL)
-                .setSmallIcon(android.R.drawable.stat_sys_phone_call)
-                .setContentTitle("Reolink SIP Gateway")
-                .setContentText(text)
-                .setContentIntent(pending)
-                .setOngoing(true)
-                .build();
+        PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        return new Notification.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.stat_sys_phone_call)
+                .setContentTitle("Reolink SIP Gateway").setContentText(text).setContentIntent(open).setOngoing(true).build();
     }
-
-    private void startAsForeground(String text) {
-        Notification n = notification(text);
-        if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
-        } else {
-            startForeground(NOTIFICATION_ID, n);
-        }
-    }
-
     private void updateNotification(String text) {
-        getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, notification(text));
+        if (!destroyed) getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, notification(text));
     }
 }

@@ -152,6 +152,7 @@ func (t *rtspTalkback) Run(ctx context.Context, in *net.UDPConn, call *sip.Call,
 }
 
 type baichuanTalkback struct {
+	mode          string
 	client        *baichuan.Client
 	session       *baichuan.TalkSession
 	channel       int
@@ -161,7 +162,7 @@ type baichuanTalkback struct {
 
 func (t *baichuanTalkback) Info() TalkbackInfo {
 	return TalkbackInfo{
-		Mode:            "nvr",
+		Mode:            t.mode,
 		Codec:           strings.ToLower(t.session.AudioType()),
 		SampleRate:      t.session.SampleRate(),
 		SamplePrecision: t.session.SamplePrecision(),
@@ -258,7 +259,7 @@ func openBaichuanTalkback(ctx context.Context, cfg config.Config, logger *slog.L
 			"samples_per_block", session.SamplesPerBlock(),
 			"bytes_per_block", session.BytesPerBlock())
 	}
-	return &baichuanTalkback{client: client, session: session, channel: cfg.NVRChannel, logger: logger, rtpInactivity: cfg.RTPInactivityTimeout()}, nil
+	return &baichuanTalkback{mode: cfg.EffectiveReolinkMode(), client: client, session: session, channel: cfg.NVRChannel, logger: logger, rtpInactivity: cfg.RTPInactivityTimeout()}, nil
 }
 
 func validateBaichuanTalkProfile(audioType string, precision, rate, samplesPerBlock int) error {
@@ -339,9 +340,12 @@ func openConfiguredTalkback(ctx context.Context, cfg config.Config, logger *slog
 
 func openConfiguredTalkbackWith(ctx context.Context, cfg config.Config, logger *slog.Logger, rtspOpen, baichuanOpen talkbackOpener) (talkbackTransport, error) {
 	switch cfg.EffectiveReolinkMode() {
-	case "nvr":
+	case "nvr", "direct":
 		t, err := baichuanOpen(ctx, cfg, logger)
 		if err != nil {
+			if cfg.EffectiveReolinkMode() == "direct" {
+				return nil, fmt.Errorf("direct camera Baichuan talkback: %w", err)
+			}
 			return nil, fmt.Errorf("NVR talkback: %w", err)
 		}
 		return t, nil
