@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -94,7 +95,9 @@ func newChannelSource(cfg config.Config, logger *slog.Logger, channel int) *Sour
 		now:      time.Now,
 	}
 	s.client.CheckRedirect = sameHostRedirects
-	s.fallback = s.fetchRTSP
+	if runtime.GOOS != "android" {
+		s.fallback = s.fetchRTSP
+	}
 	return s
 }
 

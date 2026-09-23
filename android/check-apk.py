@@ -34,7 +34,8 @@ def check_elf(name, data):
 def main(path):
     with zipfile.ZipFile(path) as apk:
         libraries = [name for name in apk.namelist() if name.startswith("lib/") and name.endswith(".so")]
-        required = {"lib/arm64-v8a/libgojni.so", "lib/armeabi-v7a/libgojni.so"}
+        required = {f"lib/{abi}/{lib}.so" for abi in ("arm64-v8a", "armeabi-v7a")
+                    for lib in ("libgojni", "libreolink_apm")}
         if not required.issubset(libraries):
             raise ValueError("APK is missing an ARM64 or ARMv7 gateway library")
         for name in libraries:

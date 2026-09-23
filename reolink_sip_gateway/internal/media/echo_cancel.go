@@ -125,7 +125,7 @@ func startEchoCanceller(ctx context.Context, cfg config.Config, logger *slog.Log
 	if logger != nil {
 		logger.Info("WebRTC native echo cancellation active",
 			"engine", "libwebrtc-audio-processing-1",
-			"helper", nativeAECHelperBinary,
+			"processor", fmt.Sprintf("%T", proc),
 			"external_delay_alignment", true,
 			"apm_stream_delay_ms", 0,
 			"sample_rate", aecSampleRate,

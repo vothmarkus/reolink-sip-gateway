@@ -137,6 +137,10 @@ jobs:
           echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.0.12077973" >> "$GITHUB_ENV"
+      - name: Build Android WebRTC APM
+        run: |
+          python3 -m pip install meson==1.5.2 ninja==1.11.1.1
+          python3 android/build-aec.py
       - name: Build Go Android AAR
         run: bash android/build-core.sh
       - uses: gradle/actions/setup-gradle@v4

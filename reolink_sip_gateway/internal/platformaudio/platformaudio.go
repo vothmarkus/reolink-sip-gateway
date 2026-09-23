@@ -10,6 +10,14 @@ type Adapter interface {
 	StopAACDecoder(handle int64)
 }
 
+// EchoAdapter is optional so hosts that only supply AAC keep working.
+// Frames use the shared native AEC1/AER1 wire layout (8 kHz mono, 10 ms).
+type EchoAdapter interface {
+	StartAEC(highPass, noiseSuppression bool) (int64, error)
+	ProcessAEC(handle int64, request []byte) ([]byte, error)
+	StopAEC(handle int64)
+}
+
 var (
 	mu      sync.RWMutex
 	current Adapter

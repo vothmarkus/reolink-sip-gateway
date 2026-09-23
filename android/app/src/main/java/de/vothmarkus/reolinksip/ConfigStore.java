@@ -66,9 +66,9 @@ final class ConfigStore {
                 .put("parallel_password", p.optString("parallel_password", ""))
                 .put("parallel_local_port", p.optInt("parallel_port", 5071)));
         root.put("audio", new JSONObject()
-                .put("echo_cancellation_enabled", false)
-                .put("webrtc_high_pass_filter_enabled", false)
-                .put("webrtc_noise_suppression_enabled", false));
+                .put("echo_cancellation_enabled", p.optBoolean("aec_enabled", false))
+                .put("webrtc_high_pass_filter_enabled", p.optBoolean("aec_enabled", false) && p.optBoolean("high_pass", true))
+                .put("webrtc_noise_suppression_enabled", p.optBoolean("aec_enabled", false) && p.optBoolean("noise_suppression", true)));
         JSONArray callers = new JSONArray();
         for (String value : p.optString("allowed_callers", "*").split("[,;\\s]+")) {
             if (!value.isEmpty()) callers.put(value);
@@ -86,7 +86,8 @@ final class ConfigStore {
         for (int i = 1; i <= 3; i++) route.put("mobile_number_" + i, p.optString("mobile_" + i, "").trim());
         root.put("call_routes", new JSONArray().put(route));
         root.put("trigger", new JSONObject().put("source", "baichuan").put("route_id", "default"));
-        root.put("live_image", new JSONObject().put("fritzfon_live_image_enabled", false));
+        root.put("live_image", new JSONObject().put("fritzfon_live_image_enabled", p.optBoolean("live_image", false))
+                .put("http_port", p.optInt("image_port", 18099)));
         root.put("diagnostics", new JSONObject().put("dry_run", p.optBoolean("dry_run", true))
                 .put("log_level", "info"));
         return root.toString();

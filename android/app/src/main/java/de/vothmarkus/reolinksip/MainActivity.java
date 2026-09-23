@@ -7,6 +7,9 @@ import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.text.format.DateFormat;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -27,6 +30,11 @@ public final class MainActivity extends Activity {
     private final Map<String, int[]> ranges = new LinkedHashMap<>();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final ExecutorService imageExecutor = Executors.newSingleThreadExecutor();
+    private ImageView image;
+    private TextView imageStatus;
+    private boolean resumed, previewRequested, imageBusy;
+    private final Runnable imageRefresh = this::loadImage;
     private JSONObject values;
     private Spinner mode, codec;
     private TextView status;
@@ -58,7 +66,7 @@ public final class MainActivity extends Activity {
             return insets;
         });
         scroll.addView(root);
-        section(root, "Reolink SIP Gateway · 0.2.1 Alpha 3");
+        section(root, "Reolink SIP Gateway · 0.3.0 Alpha 4");
         note(root, "Kamera und Telefonanlage direkt verbinden – ohne Home Assistant. Für den Betrieb ohne NVR die eigene IP der Kamera verwenden.");
         section(root, "Status");
         status = new TextView(this);
@@ -69,7 +77,7 @@ public final class MainActivity extends Activity {
         button(root, "Diagnose kopieren", v -> {
             ClipboardManager clipboard = getSystemService(ClipboardManager.class);
             clipboard.setPrimaryClip(ClipData.newPlainText("Gateway-Diagnose", ConfigStore.redact(this,
-                    "Android-App 0.2.1-alpha3\n" + GatewayService.summary() + "\n\n" + GatewayService.rawStatus())));
+                    "Android-App 0.3.0-alpha4\n" + GatewayService.summary() + "\n\n" + GatewayService.rawStatus())));
             toast("Diagnose kopiert");
         });
 
@@ -126,11 +134,52 @@ public final class MainActivity extends Activity {
         number(timing, "rtp_timeout", "Abbruch ohne Telefonaudio (Sekunden)", 15, 5, 120);
         number(timing, "debounce", "Klingelsperre nach Auslösung (Sekunden)", 3, 0, 60);
 
+        LinearLayout audio = expandable(root, "Audio / WebRTC");
+        check(audio, "aec_enabled", "WebRTC-Echo-Unterdrückung aktivieren", false);
+        check(audio, "high_pass", "Hochpassfilter bei aktivem AEC", true);
+        check(audio, "noise_suppression", "Rauschunterdrückung bei aktivem AEC", true);
+        note(audio, "Beim Start mit AEC wird die Kameraverzögerung mit einem hörbaren Testsignal gemessen. Die Vorbereitung kann etwa eine Minute dauern. Das Android-Mikrofon wird nicht benötigt.");
+
+        section(root, "Live-Bild");
+        check(root, "live_image", "Live-Bild für App und FRITZ!Fon aktivieren", false);
+        number(root, "image_port", "Live-Bild-Port am Android-Gerät", 18099, 1024, 65535);
+        note(root, "HTTP oder HTTPS an der Kamera aktivieren. Änderungen unten speichern. Die Vorschau aktualisiert JPEG-Bilder alle 3 Sekunden, solange die App geöffnet ist.");
+        imageStatus = new TextView(this); root.addView(imageStatus);
+        image = new ImageView(this); image.setAdjustViewBounds(true); image.setMaxHeight(dp(360));
+        image.setContentDescription("Aktuelles Kamerabild"); image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        root.addView(image, new LinearLayout.LayoutParams(-1, -2));
+        button(root, "Vorschau starten / stoppen", v -> {
+            previewRequested = !previewRequested;
+            handler.removeCallbacks(imageRefresh);
+            if (previewRequested) loadImage();
+            else { image.setImageDrawable(null); imageStatus.setText("Vorschau gestoppt"); }
+        });
+        button(root, "FRITZ!Fon-Bildadresse kopieren", v -> imageExecutor.execute(() -> {
+            try {
+                String url = GatewayService.liveImageURL();
+                runOnUiThread(() -> {
+                    if (isDestroyed()) return;
+                    getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("FRITZ!Fon Live-Bild", url));
+                    toast("Bildadresse kopiert; in der FRITZ!Box als Live-Bild-Adresse eintragen");
+                });
+            } catch (Exception e) { runOnUiThread(() -> toast(e.getMessage())); }
+        }));
+        note(root, "In der FRITZ!Box dem Android-Gerät eine feste IPv4-Adresse zuweisen. Die Bildadresse enthält einen Zugangsschlüssel und ist für das lokale Netz bestimmt.");
+
         section(root, "Betrieb");
         check(root, "dry_run", "Passivmodus: Klingeln erkennen, SIP und Anrufe aus", true);
         check(root, "start_on_boot", "Nach Geräteneustart automatisch starten", false);
         note(root, "Der Dienst hält das Gerät bei ausgeschaltetem Bildschirm betriebsbereit. Für den Dauerbetrieb am Strom lassen und die Akkuoptimierung der App deaktivieren.");
-        note(root, "Echounterdrückung (AEC) und FRITZ!Fon-Livebilder folgen in einer späteren Version.");
+        button(root, "WebRTC-Lizenzen", v -> {
+            try (java.io.InputStream input = getAssets().open("webrtc-notices.txt")) {
+                java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+                byte[] block = new byte[4096];
+                int count;
+                while ((count = input.read(block)) != -1) buffer.write(block, 0, count);
+                String notices = new String(buffer.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+                new android.app.AlertDialog.Builder(this).setTitle("WebRTC / Abseil").setMessage(notices).setPositiveButton("Schließen", null).show();
+            } catch (Exception e) { toast("Lizenztext nicht verfügbar"); }
+        });
         save = button(root, "Speichern & Gateway neu starten", v -> saveAndRestart());
         button(root, "Gateway stoppen", v -> GatewayService.stop(this));
         button(root, "Akkuoptimierung öffnen", v -> {
@@ -184,9 +233,35 @@ public final class MainActivity extends Activity {
         } catch (Exception e) { toast(e.getMessage()); }
     }
 
-    @Override protected void onResume() { super.onResume(); handler.post(refresh); }
-    @Override protected void onPause() { handler.removeCallbacks(refresh); super.onPause(); }
-    @Override protected void onDestroy() { executor.shutdown(); super.onDestroy(); }
+    private void loadImage() {
+        if (!resumed || !previewRequested || imageBusy) return;
+        imageBusy = true;
+        imageStatus.setText("Bild wird geladen …");
+        imageExecutor.execute(() -> {
+            Bitmap bitmap = null;
+            String failure = "";
+            try {
+                byte[] jpeg = GatewayService.snapshotJPEG();
+                bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
+                if (bitmap == null) throw new IllegalStateException("Kamerabild konnte nicht geöffnet werden");
+            } catch (Exception e) { failure = e.getMessage(); }
+            final Bitmap result = bitmap;
+            final String error = failure;
+            runOnUiThread(() -> {
+                imageBusy = false;
+                if (isDestroyed() || !resumed || !previewRequested) return;
+                image.setImageBitmap(result);
+                imageStatus.setText(result == null ? ConfigStore.redact(this, error == null ? "Bildabruf fehlgeschlagen" : error) :
+                        "Kamerabild · " + DateFormat.format("HH:mm:ss", System.currentTimeMillis()));
+                handler.removeCallbacks(imageRefresh);
+                handler.postDelayed(imageRefresh, result == null ? 8000 : 3000);
+            });
+        });
+    }
+
+    @Override protected void onResume() { super.onResume(); resumed = true; handler.post(refresh); handler.post(imageRefresh); }
+    @Override protected void onPause() { resumed = false; handler.removeCallbacks(refresh); handler.removeCallbacks(imageRefresh); super.onPause(); }
+    @Override protected void onDestroy() { executor.shutdown(); imageExecutor.shutdown(); super.onDestroy(); }
     @Override protected void onSaveInstanceState(Bundle out) {
         try { out.putString("form", collect(false).toString()); } catch (Exception ignored) {}
         super.onSaveInstanceState(out);

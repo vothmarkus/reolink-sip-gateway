@@ -19,7 +19,7 @@ RUN apt-get update \
         libwebrtc-audio-processing-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
-COPY native/aec-helper/main.cc ./main.cc
+COPY native/aec-helper/main.cc native/aec-helper/processor.h ./
 # Debian's public WebRTC 1.3 header itself contains an intentionally unused
 # constructor parameter. Keep -Werror for our helper, but classify the packaged
 # third-party headers as system headers so their internal warnings do not become

@@ -15,6 +15,10 @@ final class GatewayStatus {
                 boolean passive = gateway.optBoolean("dry_run");
                 text.append(passive ? "\nPassivmodus: SIP und Anrufe sind ausgeschaltet." : "\nAktiver Betrieb");
                 text.append("\nKlingelverbindung: ").append(gateway.optBoolean("trigger_connected") ? "verbunden" : "Verbindung wird aufgebaut");
+                JSONObject events = gateway.optJSONObject("trigger_events");
+                if (events != null) text.append("\nKameraereignisse: ").append(events.optLong("messages"))
+                        .append(" · Klingelsignale: ").append(events.optLong("visitor_states"))
+                        .append(" · Auslösungen: ").append(events.optLong("emitted"));
                 text.append("\nSIP Tür: ").append(passive ? "im Passivmodus aus" :
                         !sip.optBoolean("door_call_enabled") ? "deaktiviert" : sip.optBoolean("door_registered") ? "registriert" : "nicht registriert");
                 if (sip.optBoolean("parallel_call_enabled")) text.append("\nSIP Parallelruf: ")
@@ -28,6 +32,9 @@ final class GatewayStatus {
                 if (media != null) {
                     text.append("\nAudio: ").append(media.optString("profile", "wird vorbereitet"));
                     if (!media.optString("receive_details").isEmpty()) text.append("\n").append(media.optString("receive_details"));
+                    String calibration = media.optString("calibration_status");
+                    if (!calibration.isEmpty()) text.append("\nAEC: ").append(calibration.equals("AEC disabled") ? "aus" : calibration)
+                            .append(calibration.equals("AEC disabled") ? "" : " · " + media.optInt("current_delay_ms") + " ms");
                     JSONObject audio = media.optJSONObject("camera_audio");
                     if (audio != null && audio.optBoolean("available")) {
                         text.append(call.optBoolean("active") ? "\nKamera → Telefon:" : "\nKamera → Telefon (letzter Anruf):");

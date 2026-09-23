@@ -8,3 +8,8 @@ coverage.out
 # Editors
 .vscode/
 .idea/
+
+# Generated Android native dependencies
+android/.native-build/
+android/app/src/main/jniLibs/
+android/app/src/main/assets/webrtc-notices.txt

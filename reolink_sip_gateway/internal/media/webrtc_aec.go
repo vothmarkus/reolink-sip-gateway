@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/vothmarkus/reolink-sip-gateway/internal/platformaudio"
 	"io"
 	"log/slog"
 	"math"
@@ -124,7 +125,10 @@ func (c *nativeAECStderrCapture) String() string {
 	return strings.TrimSpace(string(c.buf))
 }
 
-func newNativeAECProcessor(parent context.Context, opts nativeAECOptions, logger *slog.Logger) (*nativeAECProcessor, error) {
+func newNativeAECProcessor(parent context.Context, opts nativeAECOptions, logger *slog.Logger) (echoFrameProcessor, error) {
+	if adapter, ok := platformaudio.Current().(platformaudio.EchoAdapter); ok {
+		return newPlatformAECProcessor(adapter, opts)
+	}
 	return newNativeAECProcessorWithPath(parent, nativeAECHelperBinary, opts, logger, nil)
 }
 

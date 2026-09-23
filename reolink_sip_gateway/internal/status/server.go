@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vothmarkus/reolink-sip-gateway/internal/trigger"
 	"html/template"
 	"net"
 	"net/http"
@@ -21,7 +22,8 @@ import (
 var statusLogoPNG []byte
 
 type Snapshot struct {
-	CameraAudio audiostats.Snapshot `json:"camera_audio"`
+	TriggerEvents trigger.Diagnostics `json:"trigger_events"`
+	CameraAudio   audiostats.Snapshot `json:"camera_audio"`
 
 	Version                       string    `json:"version"`
 	StartedAt                     time.Time `json:"started_at"`

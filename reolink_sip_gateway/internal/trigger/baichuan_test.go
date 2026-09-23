@@ -1,19 +1,30 @@
 package trigger
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
-func TestVisitorSnapshotsAndRepeatedStatesDoNotCall(t *testing.T) {
-	var edge visitorEdge
-	states := []bool{true, true, false, false, true, true, false, true}
-	want := []bool{false, false, false, false, true, false, false, true}
-	for i, state := range states {
-		if got := edge.update(state); got != want[i] {
-			t.Fatalf("state %d: got %v want %v", i, got, want[i])
-		}
+func TestVisitorInitialStateAndEdges(t *testing.T) {
+	start := time.Unix(100, 0)
+	tests := []struct {
+		name         string
+		times        []time.Duration
+		states, want []bool
+	}{
+		{"startup snapshot", []time.Duration{0, time.Second, 3 * time.Second, 4 * time.Second, 5 * time.Second}, []bool{true, true, false, true, true}, []bool{false, false, false, true, false}},
+		{"no initial snapshot", []time.Duration{time.Minute, time.Minute + time.Second, 2 * time.Minute, 3 * time.Minute}, []bool{true, true, false, true}, []bool{true, false, false, true}},
+		{"press after idle during startup", []time.Duration{0, time.Millisecond}, []bool{false, true}, []bool{false, true}},
+		{"reconnect active snapshot", []time.Duration{time.Second, 3 * time.Second, 4 * time.Second, 5 * time.Second}, []bool{true, true, false, true}, []bool{false, false, false, true}},
 	}
-	// A reconnect establishes a new baseline, rather than replaying a press.
-	edge = visitorEdge{}
-	if edge.update(true) {
-		t.Fatal("reconnect snapshot caused a call")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			edge := visitorEdge{snapshotUntil: start.Add(2 * time.Second)}
+			for i, state := range tt.states {
+				if got := edge.update(state, start.Add(tt.times[i])); got != tt.want[i] {
+					t.Fatalf("event %d: got %v want %v", i, got, tt.want[i])
+				}
+			}
+		})
 	}
 }

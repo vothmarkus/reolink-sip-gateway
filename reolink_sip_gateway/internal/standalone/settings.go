@@ -28,6 +28,7 @@ type Settings struct {
 	Trigger       TriggerSettings    `json:"trigger"`
 	LiveImage     struct {
 		Enabled bool `json:"fritzfon_live_image_enabled"`
+		Port    int  `json:"http_port"`
 	} `json:"live_image"`
 	Diagnostics struct {
 		DryRun   bool   `json:"dry_run"`
@@ -90,6 +91,7 @@ func Defaults() Settings {
 	s.CallRoutes = []config.CallRoute{{ID: config.DefaultRouteID, Name: "Standardroute", DoorbellNumber: "11"}}
 	s.Trigger = TriggerSettings{Source: "baichuan", RouteID: config.DefaultRouteID}
 	s.LiveImage.Enabled = true
+	s.LiveImage.Port = 18099
 	s.Diagnostics.DryRun, s.Diagnostics.LogLevel = true, "info"
 	return s
 }
@@ -165,7 +167,12 @@ func (s Settings) Runtime(resolveGateway bool) (config.Config, error) {
 	if err != nil {
 		return config.Config{}, err
 	}
-	return config.Decode(b)
+	cfg, err := config.Decode(b)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.StatusPort = s.LiveImage.Port
+	return cfg, cfg.Validate()
 }
 
 func DefaultIPv4Gateway(path string) (string, error) {

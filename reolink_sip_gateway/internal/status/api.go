@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vothmarkus/reolink-sip-gateway/internal/trigger"
 	"net"
 	"net/http"
 	"strings"
@@ -73,15 +74,16 @@ type APIStatus struct {
 }
 
 type APIGatewayStatus struct {
-	Version                string     `json:"version"`
-	State                  string     `json:"state"`
-	StartedAt              time.Time  `json:"started_at"`
-	HomeAssistantConnected bool       `json:"home_assistant_connected"`
-	TriggerConnected       bool       `json:"trigger_connected"`
-	TriggerSource          string     `json:"trigger_source"`
-	DryRun                 bool       `json:"dry_run"`
-	LastVisitorEvent       *time.Time `json:"last_visitor_event,omitempty"`
-	LastError              string     `json:"last_error,omitempty"`
+	TriggerEvents          trigger.Diagnostics `json:"trigger_events"`
+	Version                string              `json:"version"`
+	State                  string              `json:"state"`
+	StartedAt              time.Time           `json:"started_at"`
+	HomeAssistantConnected bool                `json:"home_assistant_connected"`
+	TriggerConnected       bool                `json:"trigger_connected"`
+	TriggerSource          string              `json:"trigger_source"`
+	DryRun                 bool                `json:"dry_run"`
+	LastVisitorEvent       *time.Time          `json:"last_visitor_event,omitempty"`
+	LastError              string              `json:"last_error,omitempty"`
 }
 
 type APISIPStatus struct {
@@ -278,6 +280,7 @@ func newAPIStatus(snapshot Snapshot, routes []RouteDefinition) APIStatus {
 			Version: snapshot.Version, State: snapshot.State, StartedAt: snapshot.StartedAt,
 			HomeAssistantConnected: snapshot.HAConnected, DryRun: snapshot.DryRun,
 			TriggerConnected: snapshot.TriggerConnected, TriggerSource: snapshot.TriggerSource,
+			TriggerEvents:    snapshot.TriggerEvents,
 			LastVisitorEvent: timePointer(snapshot.LastVisitorEvent), LastError: snapshot.LastError,
 		},
 		SIP: APISIPStatus{

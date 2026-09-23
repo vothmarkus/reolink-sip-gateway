@@ -15,6 +15,7 @@ import de.vothmarkus.reolinksip.core.mobilebridge.PlatformAudio;
 final class MediaCodecAudioAdapter implements PlatformAudio {
     private static final long IO_TIMEOUT_US = 20_000;
     private final AtomicLong nextHandle = new AtomicLong(1);
+    private final Map<Long, NativeEchoProcessor> echoProcessors = new ConcurrentHashMap<>();
     private final Map<Long, Decoder> decoders = new ConcurrentHashMap<>();
 
     @Override
@@ -49,7 +50,27 @@ final class MediaCodecAudioAdapter implements PlatformAudio {
         }
     }
 
+    @Override public long startAEC(boolean highPass, boolean noiseSuppression) throws Exception {
+        try {
+            NativeEchoProcessor processor = new NativeEchoProcessor(highPass, noiseSuppression);
+            long handle = nextHandle.getAndIncrement();
+            echoProcessors.put(handle, processor);
+            return handle;
+        } catch (LinkageError e) {
+            throw new IllegalStateException("WebRTC-Bibliothek konnte nicht geladen werden", e);
+        }
+    }
+    @Override public byte[] processAEC(long handle, byte[] request) {
+        NativeEchoProcessor processor = echoProcessors.get(handle);
+        if (processor == null) throw new IllegalStateException("Unknown WebRTC AEC handle");
+        return processor.process(request);
+    }
+    @Override public void stopAEC(long handle) {
+        NativeEchoProcessor processor = echoProcessors.remove(handle);
+        if (processor != null) processor.close();
+    }
     void closeAll() {
+        for (Long handle : echoProcessors.keySet()) stopAEC(handle);
         for (Long handle : decoders.keySet()) {
             stopAACDecoder(handle);
         }

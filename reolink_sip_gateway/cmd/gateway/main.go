@@ -265,6 +265,7 @@ func runGateway(parent context.Context, cfg config.Config, options gatewayRuntim
 		listener := &trigger.Baichuan{
 			Config:  baichuan.Config{Host: cfg.ReolinkHost, Port: cfg.BaichuanPort, Username: cfg.ReolinkUsername, Password: cfg.ReolinkPassword},
 			Channel: channel, RouteID: cfg.TriggerRouteID, Logger: logger, OnConnection: onConnection,
+			OnDiagnostics: func(d trigger.Diagnostics) { store.Update(func(s *statuspkg.Snapshot) { s.TriggerEvents = d }) },
 		}
 		listen = listener.Run
 	case "manual":

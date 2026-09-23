@@ -54,9 +54,8 @@ func TestAndroidValidationIncludesSharedRules(t *testing.T) {
 		"RTSP requires Linux":               func(s *standalone.Settings) { s.Reolink.Mode = "standalone" },
 		"auto may select FFmpeg":            func(s *standalone.Settings) { s.Reolink.Mode = "auto" },
 		"registrar auto unavailable":        func(s *standalone.Settings) { s.SIP.Registrar = "auto" },
-		"AEC unavailable":                   func(s *standalone.Settings) { s.Audio.AEC = true },
-		"filters unavailable":               func(s *standalone.Settings) { s.Audio.HighPass = true },
-		"live images unavailable":           func(s *standalone.Settings) { s.LiveImage.Enabled = true },
+		"filters need AEC":                  func(s *standalone.Settings) { s.Audio.HighPass = true },
+		"privileged image port":             func(s *standalone.Settings) { s.LiveImage.Port = 80 },
 		"camera host required":              func(s *standalone.Settings) { s.Reolink.Host = "" },
 		"credentials for active SIP":        func(s *standalone.Settings) { s.Diagnostics.DryRun = false },
 		"invalid SIP port":                  func(s *standalone.Settings) { s.SIP.LocalPort = 0 },
@@ -117,5 +116,18 @@ func TestAndroidRuntimeStopsAndReleasesLoopbackAndSingleton(t *testing.T) {
 			conn.Close()
 			t.Fatal("loopback port remained open after stop")
 		}
+	}
+}
+
+func TestAndroidAcceptsAECAndLiveImages(t *testing.T) {
+	s := androidSettings()
+	s.Audio = standalone.AudioSettings{AEC: true, HighPass: true, NoiseSuppression: true}
+	s.LiveImage.Enabled = true
+	if err := ValidateConfig(encodeSettings(t, s)); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := s.Runtime(false)
+	if err != nil || !cfg.EchoCancellationEnabled || !cfg.FritzFonLiveImageEnabled || cfg.StatusPort != 18099 {
+		t.Fatalf("feature configuration lost: %+v %v", cfg, err)
 	}
 }

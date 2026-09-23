@@ -21,6 +21,9 @@ import (
 )
 
 type PlatformAudio interface {
+	StartAEC(highPass, noiseSuppression bool) (int64, error)
+	ProcessAEC(handle int64, request []byte) ([]byte, error)
+	StopAEC(handle int64)
 	StartAACDecoder(sampleRate int32, channels int32) (int64, error)
 	DecodeAAC(handle int64, adts []byte) ([]byte, error)
 	StopAACDecoder(handle int64)
@@ -32,15 +35,20 @@ type Listener interface {
 }
 
 type Gateway struct {
-	mu       sync.Mutex
-	cancel   context.CancelFunc
-	done     chan struct{}
-	server   *http.Server
-	listener net.Listener
-	baseURL  string
-	token    string
-	lastErr  string
-	running  bool
+	mu            sync.Mutex
+	cancel        context.CancelFunc
+	done          chan struct{}
+	server        *http.Server
+	imageServer   *http.Server
+	imageListener net.Listener
+	imagePath     string
+	imagePort     int
+	registrar     string
+	listener      net.Listener
+	baseURL       string
+	token         string
+	lastErr       string
+	running       bool
 }
 
 // The audio adapter belongs to one runtime. A failed/slow stop must not let a
@@ -91,6 +99,9 @@ func Start(raw, dataDir string, audio PlatformAudio, listener Listener) (*Gatewa
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		return nil, fmt.Errorf("create Android data directory: %w", err)
 	}
+	if cfg.EchoCancellationEnabled && audio == nil {
+		return nil, errors.New("Android WebRTC AEC needs the platform audio adapter")
+	}
 	cfg.DataDir = dataDir
 	identity, err := statuspkg.LoadOrCreateIdentity(dataDir)
 	if err != nil {
@@ -100,10 +111,23 @@ func Start(raw, dataDir string, audio PlatformAudio, listener Listener) (*Gatewa
 	if err != nil {
 		return nil, fmt.Errorf("open Android loopback API: %w", err)
 	}
+	var imageListener net.Listener
+	if cfg.FritzFonLiveImageEnabled {
+		imageListener, err = net.Listen("tcp4", fmt.Sprintf("0.0.0.0:%d", cfg.StatusPort))
+		if err != nil {
+			ln.Close()
+			return nil, fmt.Errorf("open Android live image port %d: %w", cfg.StatusPort, err)
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	g := &Gateway{
 		cancel: cancel, done: make(chan struct{}), listener: ln,
 		baseURL: "http://" + ln.Addr().String(), token: identity.Token, running: true,
+		imageListener: imageListener, imagePort: cfg.StatusPort,
+		registrar: net.JoinHostPort(cfg.SIPRegistrar, fmt.Sprint(cfg.SIPRegistrarPort)),
+	}
+	if imageListener != nil {
+		g.imagePath = "/fritzfon/" + identity.LiveImageToken + ".jpg"
 	}
 	restoreAudio := platformaudio.Set(audio)
 	started = true
@@ -113,27 +137,44 @@ func Start(raw, dataDir string, audio PlatformAudio, listener Listener) (*Gatewa
 		defer releaseRuntime()
 		defer restoreAudio()
 		defer ln.Close()
+		if imageListener != nil {
+			defer imageListener.Close()
+		}
 		defer func() {
 			g.mu.Lock()
 			srv := g.server
+			imageSrv := g.imageServer
 			g.mu.Unlock()
 			if srv != nil {
 				_ = srv.Close()
 			}
+			if imageSrv != nil {
+				_ = imageSrv.Close()
+			}
 		}()
 		err := gatewayruntime.Run(ctx, cfg, gatewayruntime.Options{
 			Publish: func(handler http.Handler) {
-				srv := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
-				g.mu.Lock()
-				g.server = srv
-				g.mu.Unlock()
-				go func() {
-					if serveErr := srv.Serve(ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-						g.setError(serveErr.Error())
-						notifyError(listener, serveErr.Error())
-						cancel()
+				serve := func(ln net.Listener, h http.Handler, image bool) {
+					srv := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
+					g.mu.Lock()
+					if image {
+						g.imageServer = srv
+					} else {
+						g.server = srv
 					}
-				}()
+					g.mu.Unlock()
+					go func() {
+						if serveErr := srv.Serve(ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+							g.setError(serveErr.Error())
+							notifyError(listener, serveErr.Error())
+							cancel()
+						}
+					}()
+				}
+				serve(ln, handler, false)
+				if imageListener != nil {
+					serve(imageListener, imageOnlyHandler(handler, g.imagePath), true)
+				}
 			},
 		})
 		g.mu.Lock()
@@ -158,11 +199,11 @@ func validateAndroidSettings(settings standalone.Settings) error {
 	if strings.EqualFold(strings.TrimSpace(settings.SIP.Registrar), "auto") {
 		return errors.New("Android alpha requires an explicit SIP registrar/FRITZ!Box address")
 	}
-	if settings.Audio.AEC || settings.Audio.HighPass || settings.Audio.NoiseSuppression {
-		return errors.New("Android does not yet provide WebRTC AEC or its audio filters; disable them")
+	if !settings.Audio.AEC && (settings.Audio.HighPass || settings.Audio.NoiseSuppression) {
+		return errors.New("Android WebRTC filters require echo cancellation to be enabled")
 	}
-	if settings.LiveImage.Enabled {
-		return errors.New("Android alpha does not yet provide FRITZ!Fon live images; disable live images")
+	if settings.LiveImage.Port < 1024 || settings.LiveImage.Port > 65535 {
+		return errors.New("Android live image port must be 1024..65535")
 	}
 	_, err := settings.Runtime(false)
 	return err

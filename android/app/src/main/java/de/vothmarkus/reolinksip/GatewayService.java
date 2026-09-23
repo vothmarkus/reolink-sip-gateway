@@ -38,6 +38,16 @@ public final class GatewayService extends Service {
     static void restart(Context c) { c.startForegroundService(new Intent(c, GatewayService.class).setAction(ACTION_RESTART)); }
     static void stop(Context c) { c.stopService(new Intent(c, GatewayService.class)); }
     static String summary() { return GatewayStatus.summary(lastState, lastStatus, lastError); }
+    static byte[] snapshotJPEG() throws Exception {
+        Gateway current = activeGateway;
+        if (current == null) throw new IllegalStateException("Gateway ist gestoppt");
+        return current.snapshotJPEG();
+    }
+    static String liveImageURL() throws Exception {
+        Gateway current = activeGateway;
+        if (current == null) throw new IllegalStateException("Gateway ist gestoppt");
+        return current.liveImageURL();
+    }
     static String rawStatus() { return lastStatus; }
     static boolean testAvailable() { return activeGateway != null && GatewayStatus.available(lastStatus, "test_call_available"); }
     static boolean hangupAvailable() { return activeGateway != null && GatewayStatus.available(lastStatus, "hangup_available"); }

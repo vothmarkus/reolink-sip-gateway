@@ -60,4 +60,20 @@ public class ConfigStoreTest {
         audio.put("pcm_samples", 0).put("pcm_peak", 0);
         assertTrue(GatewayStatus.summary("", state.toString(), "").contains("Decoder liefert noch keinen Ton"));
     }
+    @Test public void audioAndImageOptionsAreOptInAndSurviveConversion() throws Exception {
+        JSONObject defaults = new JSONObject(ConfigStore.buildJson(new JSONObject()));
+        assertFalse(defaults.getJSONObject("audio").getBoolean("echo_cancellation_enabled"));
+        assertFalse(defaults.getJSONObject("live_image").getBoolean("fritzfon_live_image_enabled"));
+        JSONObject values = new JSONObject().put("aec_enabled", true).put("noise_suppression", false)
+                .put("live_image", true).put("image_port", 18123);
+        JSONObject root = new JSONObject(ConfigStore.buildJson(values));
+        assertTrue(root.getJSONObject("audio").getBoolean("echo_cancellation_enabled"));
+        assertTrue(root.getJSONObject("audio").getBoolean("webrtc_high_pass_filter_enabled"));
+        assertFalse(root.getJSONObject("audio").getBoolean("webrtc_noise_suppression_enabled"));
+        assertTrue(root.getJSONObject("live_image").getBoolean("fritzfon_live_image_enabled"));
+        assertEquals(18123, root.getJSONObject("live_image").getInt("http_port"));
+        values.put("aec_enabled", false);
+        root = new JSONObject(ConfigStore.buildJson(values));
+        assertFalse(root.getJSONObject("audio").getBoolean("webrtc_high_pass_filter_enabled"));
+    }
 }

@@ -277,6 +277,8 @@ components:
         trigger_connected:
           type: boolean
           description: Active trigger provider is ready; manual mode is always ready
+        trigger_events:
+          $ref: '#/components/schemas/TriggerDiagnostics'
         dry_run:
           type: boolean
         last_visitor_event:
@@ -284,6 +286,37 @@ components:
           format: date-time
         last_error:
           type: string
+    TriggerDiagnostics:
+      type: object
+      additionalProperties: false
+      description: Baichuan event counts since gateway startup; emitted counts trigger events, not completed SIP calls. Contains no raw XML or credentials.
+      properties:
+        messages:
+          type: integer
+          minimum: 0
+        channel_events:
+          type: integer
+          minimum: 0
+        visitor_states:
+          type: integer
+          minimum: 0
+        emitted:
+          type: integer
+          minimum: 0
+        invalid_messages:
+          type: integer
+          minimum: 0
+        initial_active_states:
+          type: integer
+          minimum: 0
+        last_channel:
+          type: integer
+          minimum: 0
+          maximum: 255
+          description: Last parsed zero-based channel; meaningful after channel events arrive.
+        last_message_at:
+          type: string
+          format: date-time
     SIPStatus:
       type: object
       additionalProperties: false

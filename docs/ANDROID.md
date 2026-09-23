@@ -1,9 +1,44 @@
-# Android 0.2.1-alpha3
+# Android 0.3.0-alpha4
 
 The Android target lives on `feature/v2-android`, independently of `main` and
 `feature/v2-standalone`. Android 8 / API 26 or newer is supported; APKs contain
 ARM64 and ARMv7. The app reuses the HA gateway's Go SIP/RTP, Baichuan,
 visitor-trigger, call-control and codec code through a gomobile AAR.
+
+## New in alpha4
+
+- Visitor events no longer discard a first press arriving after subscription
+  startup just because the firmware did not send an initial idle state. Only an
+  initial active state within two seconds after subscribing is treated as a
+  snapshot; an idle-to-active edge inside that window still triggers immediately.
+  Repeated active states remain suppressed. Wait a few seconds after connection
+  before the first hardware test. Reconnect snapshots have the same short guard.
+- `gateway.trigger_events` reports received messages, matching-channel states,
+  visitor states, emitted trigger events, invalid messages, initial active states,
+  last protocol channel (zero-based), and last message time. These are camera
+  event counters, not successful call counts. They contain no raw XML or secrets.
+- **Audio / WebRTC** enables native WebRTC APM/AEC3 in the app process, with the
+  HA runtime's calibrated delay alignment, optional high-pass filter and optional
+  moderate noise suppression. Android and Linux use the same C++ processor and
+  diagnostic protocol. No Android microphone or external executable is involved.
+- **Live-Bild** enables an app JPEG preview and a copyable FRITZ!Fon URL. Enable
+  HTTP or HTTPS on the camera, save/restart, then start the preview. JPEG refreshes
+  every three seconds while the preview and activity are active; this is not a
+  continuous video stream. HTTP/HTTPS snapshot capture runs entirely in Go.
+- A separate image-only LAN listener defaults to port **18099** (configurable).
+  The exact tokenized primary JPEG URL is available via **FRITZ!Fon-Bildadresse
+  kopieren**. The status/control API and setup UI stay inaccessible on that port.
+  The image route also enforces private/local source IPs. No camera credentials
+  are included in the URL. The image token is persistent and separate from the API
+  token; diagnostic copies do not contain either token. Assign Android a stable
+  IPv4 address in the FRITZ!Box before configuring the phone image URL.
+
+AEC and live images are opt-in; updating does not silently change working audio
+settings. Starting an active gateway with AEC enabled can play the existing
+calibration signal and take about a minute. Actual echo quality and visitor-event
+compatibility still require a test with the user's camera. Two-way audio was
+confirmed on alpha3. The alpha4 signer is intended to match alpha3 so an update
+can retain preferences.
 
 ## Camera-to-phone audio fix in alpha3
 
@@ -19,7 +54,7 @@ packets/bytes, decoded 8 kHz PCM samples, maximum absolute PCM level (0–32768)
 and RTP packets sent to the phone. Counters remain visible after hangup and reset
 for the next call. Growing RTP counts prove local UDP sends, not phone playback;
 a zero peak means the camera stream decoded to silence. These counters contain
-no audio recordings. Hardware confirmation is still required.
+no audio recordings. Two-way audio was confirmed by the user on alpha3.
 
 ## Direct camera operation (no NVR, no Home Assistant)
 
@@ -52,10 +87,10 @@ without these services are not established compatibility targets.
 - Readable connection/registration/call status, last visitor event, error details
   and copyable diagnostics. Test/hangup availability follows the running core.
 
-AEC, its high-pass/noise filters and FRITZ!Fon live images remain unavailable
-on Android. Validation rejects these features. There is no Android DTMF action
-configuration in this version. Hardware verification of audio, echo and latency
-is still required; protocol/unit tests do not establish camera compatibility.
+There is no Android DTMF action configuration or continuous RTSP/WebRTC video
+player in this version. Android live images use camera HTTP/HTTPS snapshots;
+the Linux FFmpeg fallback is not attempted on Android. Hardware verification of
+echo and latency is still required; unit tests do not establish camera compatibility.
 
 ## Android lifecycle
 
@@ -87,12 +122,21 @@ Install Android SDK API 36, NDK 27.0.12077973, Go (CI: 1.26), Gradle 8.13 and
 JDK 17, then run:
 
 ```sh
+python3 -m pip install meson==1.5.2 ninja==1.11.1.1
+python3 android/build-aec.py
 bash android/build-core.sh
 gradle -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 python3 android/check-apk.py android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Native Go libraries are linked with 16 KiB ELF page alignment; CI checks all
+The WebRTC 1.3 archive is SHA-256 pinned; its upstream Meson wrap pins Abseil
+20230125.1 and its Meson patch. Both are built as static dependencies of the JNI
+library, including a static C++ runtime. Their license notices are packaged in
+the APK and available via **WebRTC-Lizenzen**. `python3 android/build-aec.py
+--host-smoke` builds the identical processor on Linux and runs the PCM protocol
+smoke test without an Android SDK.
+
+Native Go and WebRTC libraries are linked with 16 KiB ELF page alignment; CI checks all
 ARM native LOAD segments and verifies the APK with `zipalign -P 16`.
 The generated AAR and APK are CI artifacts. CI also runs the shared Go tests,
 shuffle tests, race detector and Linux/HA builds. Starting with alpha3, CI creates
@@ -118,6 +162,10 @@ generated into the source repository.
 4. Uncheck Passivmodus, save/restart, verify registration and place a test call.
    Verify camera-to-phone audio, phone-to-camera talkback and hangup on both ends.
 5. Check a real doorbell press and repeated presses within the configured debounce.
+   Inspect camera-event, visitor-state and emitted counters when a press does not call.
+   Then enable AEC, save/restart, wait for calibration and compare echo during a call.
+   Enable live images, save/restart, verify the preview, and copy the image URL to
+   the FRITZ!Box. Test the image during calls and with the Android screen off.
 6. If enabled: test allowed/denied incoming callers, connection tone and parallel
    destinations. Check that other destinations stop ringing when one answers.
 7. Save a changed setting while running; verify that it takes effect. Stop/start
