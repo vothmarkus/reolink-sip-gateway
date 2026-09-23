@@ -946,12 +946,11 @@ func forwardMediaEvents(
 }
 
 func updateCameraAudio(store *statuspkg.Store, session *media.Session, started time.Time) {
-	value := session.CameraAudio()
 	store.Update(func(s *statuspkg.Snapshot) {
 		// A delayed event pump from the preceding call must not overwrite
 		// the new call's counters after a rapid hangup/redial.
 		if s.LastCallStarted.Equal(started) {
-			s.CameraAudio = value
+			s.CameraAudio = session.CameraAudio()
 		}
 	})
 }
