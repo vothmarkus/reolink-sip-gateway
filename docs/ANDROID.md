@@ -95,13 +95,17 @@ python3 android/check-apk.py android/app/build/outputs/apk/debug/app-debug.apk
 Native Go libraries are linked with 16 KiB ELF page alignment; CI checks all
 ARM native LOAD segments and verifies the APK with `zipalign -P 16`.
 The generated AAR and APK are CI artifacts. CI also runs the shared Go tests,
-shuffle tests, race detector and Linux/HA builds. The debug keystore is cached
-per Android branch to support subsequent updates while that cache survives.
-Debug signing is not a permanent release-signing solution: cache loss or a build
-from a different machine can change the certificate. Alpha1 used an ephemeral
-CI debug key; Android may therefore require uninstalling alpha1 before alpha2.
-Record the settings first, since uninstalling removes them. No production
-signing key is committed or generated into the source repository.
+shuffle tests, race detector and Linux/HA builds. Starting with alpha3, CI creates
+or restores a debug keystore at `REOLINK_ANDROID_KEYSTORE`, passes that exact path
+to Gradle and verifies the APK signature. The key is cached per Android branch.
+The previous implicit path did not exist when the cache was saved, so alpha1/2
+keys were ephemeral. **Updating from alpha2 to alpha3 requires recording the
+settings, uninstalling alpha2, installing alpha3 and entering the settings again.**
+Uninstalling removes the app's configuration; there is no settings export yet.
+Future updates can retain settings while the cache survives. Debug signing is
+not a permanent release-signing solution: cache loss or another build machine
+can still change the certificate. No production signing key is committed or
+generated into the source repository.
 
 ## Device acceptance test
 

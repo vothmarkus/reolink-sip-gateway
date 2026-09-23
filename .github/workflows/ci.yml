@@ -113,6 +113,8 @@ jobs:
 
   android:
     runs-on: ubuntu-latest
+    env:
+      REOLINK_ANDROID_KEYSTORE: ${{ runner.temp }}/reolink-signing/debug.keystore
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -145,14 +147,25 @@ jobs:
       - name: Preserve debug signing identity for Android branch updates
         uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
-          key: android-debug-keystore-v1-${{ github.ref_name }}
+          path: ${{ env.REOLINK_ANDROID_KEYSTORE }}
+          key: android-debug-keystore-v2-${{ github.ref_name }}
+      - name: Ensure the cached Android signing key exists
+        run: |
+          mkdir -p "$(dirname "$REOLINK_ANDROID_KEYSTORE")"
+          if [ ! -s "$REOLINK_ANDROID_KEYSTORE" ]; then
+            keytool -genkeypair -noprompt -storetype JKS \
+              -keystore "$REOLINK_ANDROID_KEYSTORE" -storepass android \
+              -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 \
+              -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          test -s "$REOLINK_ANDROID_KEYSTORE"
       - name: Test, lint and build Android debug APK
         run: gradle -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
       - name: Verify native and APK page alignment
         run: |
           python3 android/check-apk.py android/app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 -v 4 android/app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs android/app/build/outputs/apk/debug/app-debug.apk
       - name: Upload Android test and lint reports
         if: always()
         uses: actions/upload-artifact@v4

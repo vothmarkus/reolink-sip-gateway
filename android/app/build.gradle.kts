@@ -14,6 +14,14 @@ android {
         versionName = "0.2.1-alpha3"
     }
 
+    signingConfigs {
+        getByName("debug") {
+            // CI creates/restores this exact file; do not rely on AGP's
+            // machine-dependent default Android user-directory location.
+            System.getenv("REOLINK_ANDROID_KEYSTORE")?.let { storeFile = file(it) }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
