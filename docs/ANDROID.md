@@ -1,9 +1,25 @@
-# Android 0.2.0-alpha2
+# Android 0.2.1-alpha3
 
 The Android target lives on `feature/v2-android`, independently of `main` and
 `feature/v2-standalone`. Android 8 / API 26 or newer is supported; APKs contain
 ARM64 and ARMv7. The app reuses the HA gateway's Go SIP/RTP, Baichuan,
 visitor-trigger, call-control and codec code through a gomobile AAR.
+
+## Camera-to-phone audio fix in alpha3
+
+Alpha2 could accept an AAC header without decoding audible camera audio. Alpha3
+configures MediaCodec with the AAC AudioSpecificConfig from ADTS and feeds one
+raw AAC-LC access unit per buffer (including CRC-header handling). The synchronous
+Go/Android bridge returns PCM directly, removing a queue that could block its own
+consumer. Camera receive becomes ready only after the first decoded PCM; a
+10-second startup timeout now reports received packet and decoded sample counts.
+
+The status and copied diagnostics include `media.camera_audio`: received camera
+packets/bytes, decoded 8 kHz PCM samples, maximum absolute PCM level (0–32768),
+and RTP packets sent to the phone. Counters remain visible after hangup and reset
+for the next call. Growing RTP counts prove local UDP sends, not phone playback;
+a zero peak means the camera stream decoded to silence. These counters contain
+no audio recordings. Hardware confirmation is still required.
 
 ## Direct camera operation (no NVR, no Home Assistant)
 

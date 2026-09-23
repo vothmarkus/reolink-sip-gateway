@@ -64,6 +64,12 @@ func (f *fakePCMSource) PCM() <-chan []int16 { return f.pcm }
 func (f *fakePCMSource) Done() <-chan error  { return f.done }
 
 func TestForwardBaichuanToPhoneProducesPacedG711RTP(t *testing.T) {
+	for _, codec := range []sip.Codec{{Name: g711.PCMA, PayloadType: 8}, {Name: g711.PCMU, PayloadType: 0}} {
+		t.Run(codec.Name, func(t *testing.T) { testForwardBaichuanToPhone(t, codec) })
+	}
+}
+
+func testForwardBaichuanToPhone(t *testing.T, codec sip.Codec) {
 	remote, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
 	if err != nil {
 		t.Fatal(err)
@@ -75,8 +81,8 @@ func TestForwardBaichuanToPhoneProducesPacedG711RTP(t *testing.T) {
 	}
 	defer out.Close()
 
-	call := &sip.Call{Codec: sip.Codec{Name: g711.PCMA, PayloadType: 8}, RemoteRTP: remote.LocalAddr().(*net.UDPAddr)}
-	cfg := config.Defaults()
+	call := &sip.Call{Codec: codec, RemoteRTP: remote.LocalAddr().(*net.UDPAddr)}
+	cfg := config.Defaults().WithResolvedReolinkMode("direct")
 	s := &Session{cfg: cfg, call: call}
 	source := &fakePCMSource{pcm: make(chan []int16, 4), done: make(chan error, 1)}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -103,8 +109,11 @@ func TestForwardBaichuanToPhoneProducesPacedG711RTP(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if pkt.PayloadType != 8 || len(pkt.Payload) != 160 {
+		if pkt.PayloadType != codec.PayloadType || len(pkt.Payload) != 160 {
 			t.Fatalf("unexpected RTP packet: PT=%d payload=%d", pkt.PayloadType, len(pkt.Payload))
+		}
+		if g711.RMSDBFS(g711.DecodePayload(pkt.Payload, codec.Name)) < -30 {
+			t.Fatal("camera-to-phone RTP contains silence instead of the input waveform")
 		}
 		if i == 0 {
 			if !pkt.Marker {
@@ -125,5 +134,8 @@ func TestForwardBaichuanToPhoneProducesPacedG711RTP(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("bridge did not stop")
+	}
+	if stats := s.CameraAudio(); !stats.Available || stats.RTPPackets < 5 {
+		t.Fatalf("missing sent RTP diagnostics: %+v", stats)
 	}
 }

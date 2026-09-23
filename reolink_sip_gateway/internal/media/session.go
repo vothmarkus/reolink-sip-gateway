@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/vothmarkus/reolink-sip-gateway/internal/acousticmarker"
+	"github.com/vothmarkus/reolink-sip-gateway/internal/audiostats"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/baichuan"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/baichuanaudio"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/config"
@@ -55,6 +56,7 @@ type Session struct {
 	aecStatus               chan AECStatus
 	dtmfEvents              chan DTMFEvent
 	dtmfDetector            *telephoneEventDetector
+	cameraAudio             audiostats.Counters
 	ffmpegTimestampWarnings atomic.Uint64
 }
 
@@ -73,12 +75,19 @@ func New(cfg config.Config, call *sip.Call, rtpConn, ffConn *net.UDPConn, logger
 	return session
 }
 
-// Ready receives exactly once after talkback negotiation succeeded and FFmpeg
-// was started. It deliberately means "media workers are active", not that the
-// first camera RTP packet has already arrived.
+// Ready receives once after talkback negotiation and receive preparation
+// (first decoded Baichuan PCM or FFmpeg startup). It indicates active media
+// workers, not confirmation that the phone received RTP.
 func (s *Session) Ready() <-chan SessionInfo    { return s.ready }
 func (s *Session) AECStatus() <-chan AECStatus  { return s.aecStatus }
 func (s *Session) DTMFEvents() <-chan DTMFEvent { return s.dtmfEvents }
+
+func (s *Session) CameraAudio() audiostats.Snapshot {
+	if s.cfg.ReceiveMode() != "baichuan" {
+		return audiostats.Snapshot{}
+	}
+	return s.cameraAudio.Snapshot()
+}
 
 func (s *Session) handleTelephoneEvent(packet rtp.Packet) bool {
 	if s.call == nil || s.call.TelephoneEvent == nil || packet.PayloadType != s.call.TelephoneEvent.PayloadType {
@@ -223,7 +232,7 @@ func (s *Session) Run(ctx context.Context) error {
 			Username: s.cfg.ReolinkUsername, Password: s.cfg.ReolinkPassword,
 			Channel: uint8(s.cfg.NVRChannel), Stream: stream,
 			OutputRate: g711SampleRate, FFmpegPath: s.cfg.FFmpegPath(),
-			Logger: s.logger, Debug: s.cfg.DebugEnabled(),
+			Logger: s.logger, Debug: s.cfg.DebugEnabled(), Stats: &s.cameraAudio,
 		})
 		if err != nil {
 			s.closeTalkback(talkback)
@@ -238,7 +247,11 @@ func (s *Session) Run(ctx context.Context) error {
 			if !ok {
 				cleanupReceive()
 				s.closeTalkback(talkback)
-				return errors.New("Baichuan receive ended before audio became ready")
+				recvErr := <-bcReceiver.Done()
+				if recvErr == nil {
+					recvErr = errors.New("Baichuan receive ended before audio became ready")
+				}
+				return fmt.Errorf("Baichuan camera receive: %w", recvErr)
 			}
 			receiveInfo = ReceiveInfo{Mode: "baichuan", Details: ri.Details()}
 		case recvErr := <-bcReceiver.Done():
@@ -254,7 +267,8 @@ func (s *Session) Run(ctx context.Context) error {
 		case <-readyTimer.C:
 			cleanupReceive()
 			s.closeTalkback(talkback)
-			return errors.New("no Baichuan camera audio detected within 10 seconds")
+			st := s.CameraAudio()
+			return fmt.Errorf("no decoded Baichuan camera audio within 10 seconds (camera packets=%d, PCM samples=%d)", st.Packets, st.PCMSamples)
 		case <-runCtx.Done():
 			if !readyTimer.Stop() {
 				<-readyTimer.C
@@ -564,6 +578,7 @@ func (s *Session) forwardBaichuanToPhone(ctx context.Context, source cameraPCMSo
 			seq++
 			timestamp += cameraPlayoutFrameSamples
 			packetsSent++
+			s.cameraAudio.SentRTP()
 		}
 	}
 }

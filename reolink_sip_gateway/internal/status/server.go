@@ -13,12 +13,16 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/vothmarkus/reolink-sip-gateway/internal/audiostats"
 )
 
 //go:embed logo.png
 var statusLogoPNG []byte
 
 type Snapshot struct {
+	CameraAudio audiostats.Snapshot `json:"camera_audio"`
+
 	Version                       string    `json:"version"`
 	StartedAt                     time.Time `json:"started_at"`
 	UpdatedAt                     time.Time `json:"updated_at"`

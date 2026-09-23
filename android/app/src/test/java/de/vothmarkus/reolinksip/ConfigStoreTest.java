@@ -47,4 +47,17 @@ public class ConfigStoreTest {
         assertFalse(GatewayStatus.available(raw, "test_call_available"));
         assertFalse(GatewayStatus.available("", "hangup_available"));
     }
+    @Test public void lastCallAudioCountersRemainReadableAfterHangup() throws Exception {
+        JSONObject audio = new JSONObject().put("available", true).put("packets", 100)
+                .put("pcm_samples", 8000).put("pcm_peak", 1200).put("rtp_packets", 50);
+        JSONObject state = new JSONObject().put("gateway", new JSONObject()).put("sip", new JSONObject())
+                .put("call", new JSONObject().put("active", false))
+                .put("media", new JSONObject().put("camera_audio", audio));
+        String summary = GatewayStatus.summary("Gateway läuft", state.toString(), "");
+        assertTrue(summary.contains("letzter Anruf"));
+        assertTrue(summary.contains("Empfang: 100 Pakete"));
+        assertTrue(summary.contains("Zum Telefon: 50 RTP-Pakete"));
+        audio.put("pcm_samples", 0).put("pcm_peak", 0);
+        assertTrue(GatewayStatus.summary("", state.toString(), "").contains("Decoder liefert noch keinen Ton"));
+    }
 }

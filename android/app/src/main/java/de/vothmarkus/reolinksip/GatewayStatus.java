@@ -28,6 +28,19 @@ final class GatewayStatus {
                 if (media != null) {
                     text.append("\nAudio: ").append(media.optString("profile", "wird vorbereitet"));
                     if (!media.optString("receive_details").isEmpty()) text.append("\n").append(media.optString("receive_details"));
+                    JSONObject audio = media.optJSONObject("camera_audio");
+                    if (audio != null && audio.optBoolean("available")) {
+                        text.append(call.optBoolean("active") ? "\nKamera → Telefon:" : "\nKamera → Telefon (letzter Anruf):");
+                        text.append("\nEmpfang: ").append(audio.optLong("packets")).append(" Pakete")
+                                .append(" · PCM: ").append(audio.optLong("pcm_samples")).append(" Samples")
+                                .append("\nZum Telefon: ").append(audio.optLong("rtp_packets")).append(" RTP-Pakete")
+                                .append(" · Spitzenpegel: ").append(audio.optInt("pcm_peak")).append("/32768");
+                        if (audio.optLong("packets") > 0 && audio.optLong("pcm_samples") == 0) {
+                            text.append("\nKamera liefert Daten, Decoder liefert noch keinen Ton.");
+                        } else if (audio.optLong("pcm_samples") > 0 && audio.optInt("pcm_peak") == 0) {
+                            text.append("\nDie decodierten Kamera-Audiodaten enthalten nur Stille.");
+                        }
+                    }
                 }
                 appendError(text, "Gateway", gateway.optString("last_error"));
                 appendError(text, "SIP Tür", sip.optString("last_registration_error"));

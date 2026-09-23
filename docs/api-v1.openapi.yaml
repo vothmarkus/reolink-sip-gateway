@@ -357,6 +357,8 @@ components:
       additionalProperties: false
       required: [configured_reolink_mode, calibrated_delay_ms, current_delay_ms]
       properties:
+        camera_audio:
+          $ref: "#/components/schemas/CameraAudioStatus"
         configured_reolink_mode:
           type: string
           enum: [auto, standalone, nvr, direct]
@@ -386,6 +388,30 @@ components:
         last_calibration:
           type: string
           format: date-time
+    CameraAudioStatus:
+      type: object
+      additionalProperties: false
+      description: Baichuan camera-to-phone counters, retained after hangup until the next call. Sent RTP does not confirm phone playback.
+      required: [available, packets, encoded_bytes, pcm_samples, pcm_peak, rtp_packets]
+      properties:
+        available:
+          type: boolean
+        packets:
+          type: integer
+          minimum: 0
+        encoded_bytes:
+          type: integer
+          minimum: 0
+        pcm_samples:
+          type: integer
+          minimum: 0
+        pcm_peak:
+          type: integer
+          minimum: 0
+          maximum: 32768
+        rtp_packets:
+          type: integer
+          minimum: 0
     Controls:
       type: object
       additionalProperties: false

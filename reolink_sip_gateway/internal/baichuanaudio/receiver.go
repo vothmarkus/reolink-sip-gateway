@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vothmarkus/reolink-sip-gateway/internal/audiostats"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/baichuan"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/codec"
 	"github.com/vothmarkus/reolink-sip-gateway/internal/platformaudio"
@@ -38,6 +39,7 @@ type Config struct {
 	FFmpegPath string
 	Logger     *slog.Logger
 	Debug      bool
+	Stats      *audiostats.Counters
 }
 
 type Info struct {
@@ -133,6 +135,10 @@ func (r *Receiver) Close() {
 
 func (r *Receiver) run(ctx context.Context, cfg Config, adpcmRate int) {
 	defer r.wg.Done()
+	r.receive(ctx, cfg, adpcmRate, r.reader.Packets, r.client.Done(), r.client.Err)
+}
+
+func (r *Receiver) receive(ctx context.Context, cfg Config, adpcmRate int, packets <-chan baichuan.MediaPacket, disconnected <-chan struct{}, connectionErr func() error) {
 	defer close(r.pcm)
 	defer close(r.ready)
 	var terminalErr error
@@ -146,20 +152,26 @@ func (r *Receiver) run(ctx context.Context, cfg Config, adpcmRate int) {
 
 	var activeCodec string
 	var decoder codec.ADPCMDecoder
-	var aac aacStreamDecoder
+	var aac *aacDecoder
+	var platformAAC *platformAACDecoder
+	var aacRate int
+	var ready bool
 	var aacPCM <-chan []int16
 	var aacDone <-chan error
 	defer func() {
 		if aac != nil {
 			aac.Close()
 		}
+		if platformAAC != nil {
+			platformAAC.Close()
+		}
 	}()
 
 	signalReady := func(codecName string, inputRate int) {
-		if activeCodec != "" {
+		if ready {
 			return
 		}
-		activeCodec = codecName
+		ready = true
 		info := Info{Codec: codecName, InputSampleRate: inputRate, OutputSampleRate: cfg.OutputRate, Channel: cfg.Channel, Stream: cfg.Stream}
 		select {
 		case r.ready <- info:
@@ -170,13 +182,24 @@ func (r *Receiver) run(ctx context.Context, cfg Config, adpcmRate int) {
 		}
 	}
 
+	emit := func(pcm []int16, codecName string, inputRate int) bool {
+		if len(pcm) == 0 {
+			return true
+		}
+		cfg.Stats.Decoded(pcm)
+		// A parsed AAC header is not evidence of successful decoding. Signal
+		// readiness only once actual PCM can be consumed by the media worker.
+		signalReady(codecName, inputRate)
+		return r.emitPCM(ctx, pcm)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			terminalErr = ctx.Err()
 			return
-		case <-r.client.Done():
-			terminalErr = r.client.Err()
+		case <-disconnected:
+			terminalErr = connectionErr()
 			if terminalErr == nil {
 				terminalErr = errors.New("Baichuan preview connection closed")
 			}
@@ -186,7 +209,7 @@ func (r *Receiver) run(ctx context.Context, cfg Config, adpcmRate int) {
 				aacPCM = nil
 				continue
 			}
-			if !r.emitPCM(ctx, pcm) {
+			if !emit(pcm, "aac", aacRate) {
 				terminalErr = ctx.Err()
 				return
 			}
@@ -200,9 +223,9 @@ func (r *Receiver) run(ctx context.Context, cfg Config, adpcmRate int) {
 				terminalErr = fmt.Errorf("Baichuan AAC decoder: %w", err)
 				return
 			}
-		case packet, ok := <-r.reader.Packets:
+		case packet, ok := <-packets:
 			if !ok {
-				terminalErr = r.client.Err()
+				terminalErr = connectionErr()
 				if terminalErr == nil && ctx.Err() == nil {
 					terminalErr = errors.New("Baichuan preview ended")
 				}
@@ -214,7 +237,8 @@ func (r *Receiver) run(ctx context.Context, cfg Config, adpcmRate int) {
 					terminalErr = fmt.Errorf("Baichuan preview audio codec changed from %s to ADPCM", activeCodec)
 					return
 				}
-				signalReady("adpcm", adpcmRate)
+				activeCodec = "adpcm"
+				cfg.Stats.Received(len(packet.Data))
 				pcm := decoder.Decode(packet.Data)
 				if len(pcm) == 0 {
 					continue
@@ -222,7 +246,7 @@ func (r *Receiver) run(ctx context.Context, cfg Config, adpcmRate int) {
 				if adpcmRate != cfg.OutputRate {
 					pcm = resampleLinear(pcm, adpcmRate, cfg.OutputRate)
 				}
-				if !r.emitPCM(ctx, pcm) {
+				if !emit(pcm, "adpcm", adpcmRate) {
 					terminalErr = ctx.Err()
 					return
 				}
@@ -232,16 +256,18 @@ func (r *Receiver) run(ctx context.Context, cfg Config, adpcmRate int) {
 					terminalErr = fmt.Errorf("Baichuan preview audio codec changed from %s to AAC", activeCodec)
 					return
 				}
-				if aac == nil {
-					inputRate := adtsSampleRate(packet.Data)
+				activeCodec = "aac"
+				cfg.Stats.Received(len(packet.Data))
+				if aac == nil && platformAAC == nil {
+					aacRate = adtsSampleRate(packet.Data)
 					var err error
 					if adapter := platformaudio.Current(); adapter != nil {
 						channels := adtsChannelCount(packet.Data)
-						if inputRate == 0 || channels == 0 {
+						if aacRate == 0 || channels == 0 {
 							terminalErr = errors.New("Android AAC decoder requires a valid ADTS header")
 							return
 						}
-						aac, err = startPlatformAACDecoder(ctx, adapter, inputRate, channels, cfg.OutputRate)
+						platformAAC, err = startPlatformAACDecoder(ctx, adapter, aacRate, channels, cfg.OutputRate)
 					} else {
 						if strings.TrimSpace(cfg.FFmpegPath) == "" {
 							terminalErr = errors.New("FFmpeg binary path is required to decode Baichuan AAC audio")
@@ -253,11 +279,22 @@ func (r *Receiver) run(ctx context.Context, cfg Config, adpcmRate int) {
 						terminalErr = err
 						return
 					}
-					signalReady("aac", inputRate)
-					aacPCM = aac.PCM()
-					aacDone = aac.Done()
+					if aac != nil {
+						aacPCM = aac.PCM()
+						aacDone = aac.Done()
+					}
 				}
-				if err := aac.Write(packet.Data); err != nil {
+				if platformAAC != nil {
+					pcm, err := platformAAC.Decode(packet.Data)
+					if err != nil {
+						terminalErr = fmt.Errorf("decode Baichuan AAC: %w", err)
+						return
+					}
+					if !emit(pcm, "aac", aacRate) {
+						terminalErr = ctx.Err()
+						return
+					}
+				} else if err := aac.Write(packet.Data); err != nil {
 					terminalErr = fmt.Errorf("feed Baichuan AAC decoder: %w", err)
 					return
 				}
@@ -332,21 +369,12 @@ func resampleLinear(in []int16, inRate, outRate int) []int16 {
 	return out
 }
 
-type aacStreamDecoder interface {
-	Write([]byte) error
-	PCM() <-chan []int16
-	Done() <-chan error
-	Close()
-}
-
 type platformAACDecoder struct {
 	ctx        context.Context
 	adapter    platformaudio.Adapter
 	handle     int64
 	inputRate  int
 	outputRate int
-	pcm        chan []int16
-	done       chan error
 	once       sync.Once
 }
 
@@ -363,23 +391,27 @@ func startPlatformAACDecoder(parent context.Context, adapter platformaudio.Adapt
 	}
 	return &platformAACDecoder{
 		ctx: parent, adapter: adapter, handle: handle, inputRate: inputRate, outputRate: outputRate,
-		pcm: make(chan []int16, 8), done: make(chan error, 1),
 	}, nil
 }
 
-func (d *platformAACDecoder) Write(frame []byte) error {
+// Decode returns PCM directly to the receive loop. A buffered PCM channel
+// written and drained by that same loop can deadlock as soon as it fills.
+func (d *platformAACDecoder) Decode(frame []byte) ([]int16, error) {
 	if d == nil || d.adapter == nil {
-		return errors.New("platform AAC decoder is not running")
+		return nil, errors.New("platform AAC decoder is not running")
+	}
+	if err := d.ctx.Err(); err != nil {
+		return nil, err
 	}
 	raw, err := d.adapter.DecodeAAC(d.handle, frame)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(raw) == 0 {
-		return nil
+		return nil, nil
 	}
 	if len(raw)%2 != 0 {
-		return fmt.Errorf("platform AAC decoder returned odd PCM byte count %d", len(raw))
+		return nil, fmt.Errorf("platform AAC decoder returned odd PCM byte count %d", len(raw))
 	}
 	pcm := make([]int16, len(raw)/2)
 	for i := range pcm {
@@ -388,16 +420,8 @@ func (d *platformAACDecoder) Write(frame []byte) error {
 	if d.inputRate != d.outputRate {
 		pcm = resampleLinear(pcm, d.inputRate, d.outputRate)
 	}
-	select {
-	case d.pcm <- pcm:
-		return nil
-	case <-d.ctx.Done():
-		return d.ctx.Err()
-	}
+	return pcm, nil
 }
-
-func (d *platformAACDecoder) PCM() <-chan []int16 { return d.pcm }
-func (d *platformAACDecoder) Done() <-chan error  { return d.done }
 
 func (d *platformAACDecoder) Close() {
 	if d == nil {
@@ -405,9 +429,6 @@ func (d *platformAACDecoder) Close() {
 	}
 	d.once.Do(func() {
 		d.adapter.StopAACDecoder(d.handle)
-		close(d.pcm)
-		d.done <- nil
-		close(d.done)
 	})
 }
 

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vothmarkus/reolink-sip-gateway/internal/audiostats"
 )
 
 type testCommands struct {
@@ -349,4 +351,24 @@ func authenticatedRequest(method, path string) *http.Request {
 	req.RemoteAddr = "192.168.1.20:1234"
 	req.Header.Set("Authorization", "Bearer test-token")
 	return req
+}
+
+func TestAPICameraAudioDiagnosticsSurviveHangup(t *testing.T) {
+	store, handler := newTestAPI(t, testCommands{})
+	counts := audiostats.Snapshot{Available: true, Packets: 100, EncodedBytes: 2048, PCMSamples: 8000, PCMPeak: 8192, RTPPackets: 50}
+	store.Update(func(s *Snapshot) { s.State = "active"; s.CameraAudio = counts })
+	store.Update(func(s *Snapshot) { s.State = "idle"; s.ActiveReceive = ""; s.ReceiveDetails = "" })
+	req := authenticatedRequest(http.MethodGet, "/api/v1/status")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	var result APIStatus
+	if err := json.Unmarshal(res.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Call.Active || result.Media.CameraAudio == nil || *result.Media.CameraAudio != counts {
+		t.Fatalf("last-call diagnostics lost: %s", res.Body.String())
+	}
+	if got := newAPIStatus(Snapshot{}, nil).Media.CameraAudio; got != nil {
+		t.Fatalf("unexpected counters without Baichuan: %+v", got)
+	}
 }

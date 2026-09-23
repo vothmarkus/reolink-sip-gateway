@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/vothmarkus/reolink-sip-gateway/internal/audiostats"
 )
 
 const APIVersion = 1
@@ -109,6 +111,8 @@ type APICallStatus struct {
 }
 
 type APIMediaStatus struct {
+	CameraAudio *audiostats.Snapshot `json:"camera_audio,omitempty"`
+
 	ConfiguredReolinkMode string     `json:"configured_reolink_mode"`
 	ActiveReolinkMode     string     `json:"active_reolink_mode,omitempty"`
 	Profile               string     `json:"profile,omitempty"`
@@ -297,6 +301,7 @@ func newAPIStatus(snapshot Snapshot, routes []RouteDefinition) APIStatus {
 			EchoCancellation: snapshot.ActiveEchoCancellation, CalibratedDelayMS: snapshot.CalibratedDelayMS,
 			CurrentDelayMS: snapshot.CurrentDelayMS, CalibrationStatus: snapshot.CalibrationStatus,
 			LastCalibration: timePointer(snapshot.LastCalibration),
+			CameraAudio:     cameraAudioPointer(snapshot.CameraAudio),
 		},
 		Controls: APIControls{
 			TestCallAvailable: legacyTestCallAvailable,
@@ -440,4 +445,13 @@ func timePointer(value time.Time) *time.Time {
 	}
 	copy := value
 	return &copy
+}
+
+// The last call's counters survive hangup; RTSP sessions do not expose these
+// Baichuan-specific counters and older clients can ignore this additive field.
+func cameraAudioPointer(value audiostats.Snapshot) *audiostats.Snapshot {
+	if !value.Available {
+		return nil
+	}
+	return &value
 }
