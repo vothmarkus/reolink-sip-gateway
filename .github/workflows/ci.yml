@@ -113,8 +113,6 @@ jobs:
 
   android:
     runs-on: ubuntu-latest
-    env:
-      REOLINK_ANDROID_KEYSTORE: ${{ runner.temp }}/reolink-signing/debug.keystore
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -144,6 +142,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
+      - name: Select Android signing key path
+        run: echo "REOLINK_ANDROID_KEYSTORE=$RUNNER_TEMP/reolink-signing/debug.keystore" >> "$GITHUB_ENV"
       - name: Preserve debug signing identity for Android branch updates
         uses: actions/cache@v4
         with:
