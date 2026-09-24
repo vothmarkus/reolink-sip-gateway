@@ -1,4 +1,4 @@
-> **Android 0.3.1-alpha5:** Direkte Kameraanbindung ohne NVR, Android-Einstellungen und Testablauf: [docs/ANDROID.md](docs/ANDROID.md).
+> **Android 0.3.2-alpha6:** Direkte Kameraanbindung ohne NVR, Android-Einstellungen und Testablauf: [docs/ANDROID.md](docs/ANDROID.md).
 
 # Reolink SIP Gateway
 

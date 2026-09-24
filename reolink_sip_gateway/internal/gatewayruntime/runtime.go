@@ -544,7 +544,6 @@ func handleIncomingCall(parent context.Context, cfg config.Config, incoming *sip
 	store.Update(func(s *statuspkg.Snapshot) {
 		s.State = "connecting_media"
 		s.LastCallStarted = started
-		s.CameraAudio = audiostats.Snapshot{Available: cfg.ReceiveMode() == "baichuan"}
 		s.CurrentCallDirection = "incoming"
 		s.LastCallDirection = "incoming"
 		s.CurrentCallerNumber = incoming.CallerID()
@@ -592,7 +591,8 @@ func handleIncomingCall(parent context.Context, cfg config.Config, incoming *sip
 	callCtx, cancelCall := context.WithTimeout(parent, cfg.MaxCallDuration())
 	defer cancelCall()
 	mediaSession := media.New(cfg, call, rtpConn, ffConn, logger)
-	defer updateCameraAudio(store, mediaSession, started)
+	beginMediaStats(store, cfg, started)
+	defer updateMediaStats(store, mediaSession, started)
 	mediaErr := make(chan error, 1)
 	go func() { mediaErr <- mediaSession.Run(callCtx) }()
 	go forwardMediaEvents(callCtx, mediaSession, store, "incoming", incoming.CallerID(), call.CallID, started)
@@ -690,7 +690,6 @@ func handleCall(parent context.Context, cfg config.Config, route config.Resolved
 	store.Update(func(s *statuspkg.Snapshot) {
 		s.State = "dialing"
 		s.LastCallStarted = started
-		s.CameraAudio = audiostats.Snapshot{Available: cfg.ReceiveMode() == "baichuan"}
 		s.CurrentCallDirection = "outgoing"
 		s.LastCallDirection = "outgoing"
 		s.CurrentCallerNumber = ""
@@ -768,7 +767,8 @@ func handleCall(parent context.Context, cfg config.Config, route config.Resolved
 	callCtx, cancelCall := context.WithTimeout(parent, cfg.MaxCallDuration())
 	defer cancelCall()
 	mediaSession := media.New(cfg, call, rtpConn, ffConn, logger)
-	defer updateCameraAudio(store, mediaSession, started)
+	beginMediaStats(store, cfg, started)
+	defer updateMediaStats(store, mediaSession, started)
 	mediaErr := make(chan error, 1)
 	go func() { mediaErr <- mediaSession.Run(callCtx) }()
 	go forwardMediaEvents(
@@ -926,9 +926,7 @@ func forwardMediaEvents(
 	for {
 		select {
 		case <-ticker.C:
-			updateCameraAudio(store, session, started)
-		case update := <-session.AECStatus():
-			store.Update(func(s *statuspkg.Snapshot) { s.CurrentDelayMS = update.CurrentDelayMS })
+			updateMediaStats(store, session, started)
 		case event := <-session.DTMFEvents():
 			store.PublishDTMF(
 				event.Digit,
@@ -944,12 +942,28 @@ func forwardMediaEvents(
 	}
 }
 
-func updateCameraAudio(store *statuspkg.Store, session *media.Session, started time.Time) {
+// A SIP attempt is not an audio session. Retain the preceding session's
+// counters until media actually starts, and record which call they describe.
+func beginMediaStats(store *statuspkg.Store, cfg config.Config, started time.Time) {
 	store.Update(func(s *statuspkg.Snapshot) {
-		// A delayed event pump from the preceding call must not overwrite
-		// the new call's counters after a rapid hangup/redial.
 		if s.LastCallStarted.Equal(started) {
-			s.CameraAudio = session.CameraAudio()
+			s.MediaCallStarted = started
+			s.CameraAudio = audiostats.Snapshot{Available: cfg.ReceiveMode() == "baichuan"}
+			s.EchoStats = audiostats.EchoSnapshot{}
+		}
+	})
+}
+
+func updateMediaStats(store *statuspkg.Store, session *media.Session, started time.Time) {
+	camera, echo := session.CameraAudio(), session.EchoStats()
+	store.Update(func(s *statuspkg.Snapshot) {
+		// A late pump from the preceding call must not overwrite a new session.
+		if s.LastCallStarted.Equal(started) && s.MediaCallStarted.Equal(started) {
+			s.CameraAudio = camera
+			s.EchoStats = echo
+			if echo.Available {
+				s.CurrentDelayMS = echo.CurrentDelayMS
+			}
 		}
 	})
 }

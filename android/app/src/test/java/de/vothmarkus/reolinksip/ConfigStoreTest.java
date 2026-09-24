@@ -54,7 +54,7 @@ public class ConfigStoreTest {
                 .put("call", new JSONObject().put("active", false))
                 .put("media", new JSONObject().put("camera_audio", audio));
         String summary = GatewayStatus.summary("Gateway läuft", state.toString(), "");
-        assertTrue(summary.contains("letzter Anruf"));
+        assertTrue(summary.contains("letzte Audioverbindung"));
         assertTrue(summary.contains("Empfang: 100 Pakete"));
         assertTrue(summary.contains("Zum Telefon: 50 RTP-Pakete"));
         audio.put("pcm_samples", 0).put("pcm_peak", 0);
@@ -91,5 +91,28 @@ public class ConfigStoreTest {
         assertEquals("Statusabruf: vor 2 s", GatewayStatus.pollAge(1000, 3500));
         assertTrue(GatewayStatus.pollAge(1000, 12000).contains("Aktualisierung ausstehend"));
         assertTrue(GatewayStatus.pollAge(0, 1000).contains("noch keine Antwort"));
+    }
+    @Test public void measurementFallbackIsSeparateFromWebRTCProcessing() throws Exception {
+        JSONObject echo = new JSONObject().put("available", true).put("capture_frames", 1000)
+                .put("render_frames", 1050).put("missing_render_frames", 145).put("erle_valid", false);
+        JSONObject media = new JSONObject().put("echo_cancellation_enabled", true).put("stats_current_call", true)
+                .put("calibration_status", "safe fallback").put("calibrated_delay_ms", 1450)
+                .put("calibration_details", "measurement failed: no acoustic marker").put("echo_stats", echo);
+        JSONObject state = new JSONObject().put("gateway", new JSONObject()).put("sip", new JSONObject())
+                .put("call", new JSONObject().put("active", true)).put("media", media);
+        String text = GatewayStatus.summary("", state.toString(), "");
+        assertTrue(text.contains("AEC: WebRTC aktiv"));
+        assertTrue(text.contains("Laufzeitmessung: fehlgeschlagen · Ersatzwert · 1450 ms"));
+        assertTrue(text.contains("no acoustic marker"));
+        assertTrue(text.contains("Referenz fehlt: 145/1000"));
+        assertTrue(text.contains("noch kein Messwert"));
+        assertFalse(text.contains("0,0 dB"));
+        media.put("stats_current_call", false).put("calibration_status", "measured").put("calibrated_delay_ms", 873);
+        echo.put("erle_valid", true).put("erle_db", 12.5);
+        text = GatewayStatus.summary("", state.toString(), "");
+        assertTrue(text.contains("WebRTC (letzte Audioverbindung)"));
+        assertTrue(text.contains("12,5 dB"));
+        assertTrue(text.contains("Laufzeitmessung: gemessen · 873 ms"));
+        assertFalse(text.contains("AEC: WebRTC aktiv"));
     }
 }

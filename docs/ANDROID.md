@@ -1,9 +1,42 @@
-# Android 0.3.1-alpha5
+# Android 0.3.2-alpha6
 
 The Android target lives on `feature/v2-android`, independently of `main` and
 `feature/v2-standalone`. Android 8 / API 26 or newer is supported; APKs contain
 ARM64 and ARMv7. The app reuses the HA gateway's Go SIP/RTP, Baichuan,
 visitor-trigger, call-control and codec code through a gomobile AAR.
+
+## WebRTC and acoustic measurement in alpha6
+
+- Fix the unconditional FFmpeg executable check in acoustic calibration. Direct
+  camera and NVR capture now use the same decoder selection as calls: Android
+  MediaCodec for AAC, built-in ADPCM decoding where applicable. RTSP still needs
+  FFmpeg. Previously Android always chose `safe fallback` before contacting the
+  camera; 1450 ms was the built-in value, not a measurement.
+- The app separates **AEC** (WebRTC processing) from **Laufzeitmessung** (the
+  coarse acoustic delay). `calibration_details` now exposes the failure reason
+  or accepted correlation and peak ratio. An enabled AEC with a fallback delay
+  is not labelled as successfully calibrated. Restart with AEC enabled to run
+  the audible coded marker; allow up to about one minute before placing a call.
+- `media.echo_stats` reports actual native processing: capture/render frame
+  counts, missing aligned reference frames, native ERLE and residual echo
+  likelihood. Validity flags distinguish absent statistics from measured zero.
+  Counts are sampled without depending on debug logging and retained on hangup.
+  Frames/ERLE are diagnostics, not a guarantee of echo-free physical audio.
+- Audio/echo counters now reset when a media session starts, after an outgoing
+  call is answered. An unsuccessful SIP dial does not erase previous media
+  diagnostics. `stats_call_started_at` identifies their source session;
+  `stats_current_call` prevents old counters being displayed as a new call's.
+- Native tests now check synthetic echo attenuation AND near-end signal retention
+  with HPF/NS disabled, in addition to the wire protocol on silence. Platform
+  tests cover 16 kHz calibration PCM without FFmpeg, preserved post-call stats,
+  unavailable/invalid native measurements and rejected outgoing calls.
+
+For a hardware check, enable AEC, restart, wait for calibration to complete,
+then answer a call and alternate speaking at the phone and doorbell for 20–30
+seconds. Copy diagnostics during or immediately after the call. A failed
+measurement keeps a cached/default delay and now includes its reason. Changing
+acoustic conditions or timing can still require another gateway restart to
+measure again; live coarse-delay tracking remains disabled as in the HA core.
 
 ## Connection recovery and diagnosis in alpha5
 

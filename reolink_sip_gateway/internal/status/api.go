@@ -114,7 +114,11 @@ type APICallStatus struct {
 }
 
 type APIMediaStatus struct {
-	CameraAudio *audiostats.Snapshot `json:"camera_audio,omitempty"`
+	CameraAudio             *audiostats.Snapshot     `json:"camera_audio,omitempty"`
+	EchoStats               *audiostats.EchoSnapshot `json:"echo_stats,omitempty"`
+	StatsCallStartedAt      *time.Time               `json:"stats_call_started_at,omitempty"`
+	StatsCurrentCall        bool                     `json:"stats_current_call"`
+	EchoCancellationEnabled bool                     `json:"echo_cancellation_enabled"`
 
 	ConfiguredReolinkMode string     `json:"configured_reolink_mode"`
 	ActiveReolinkMode     string     `json:"active_reolink_mode,omitempty"`
@@ -127,6 +131,7 @@ type APIMediaStatus struct {
 	CalibratedDelayMS     int        `json:"calibrated_delay_ms"`
 	CurrentDelayMS        int        `json:"current_delay_ms"`
 	CalibrationStatus     string     `json:"calibration_status,omitempty"`
+	CalibrationDetails    string     `json:"calibration_details,omitempty"`
 	LastCalibration       *time.Time `json:"last_calibration,omitempty"`
 }
 
@@ -305,8 +310,13 @@ func newAPIStatus(snapshot Snapshot, routes []RouteDefinition) APIStatus {
 			TalkbackMode: snapshot.ActiveTalkback, TalkbackDetails: snapshot.TalkbackDetails,
 			EchoCancellation: snapshot.ActiveEchoCancellation, CalibratedDelayMS: snapshot.CalibratedDelayMS,
 			CurrentDelayMS: snapshot.CurrentDelayMS, CalibrationStatus: snapshot.CalibrationStatus,
-			LastCalibration: timePointer(snapshot.LastCalibration),
-			CameraAudio:     cameraAudioPointer(snapshot.CameraAudio),
+			CalibrationDetails:      snapshot.CalibrationDetails,
+			EchoCancellationEnabled: snapshot.EchoCancellationEnabled,
+			EchoStats:               echoStatsPointer(snapshot.EchoStats),
+			StatsCallStartedAt:      timePointer(snapshot.MediaCallStarted),
+			StatsCurrentCall:        active && !snapshot.MediaCallStarted.IsZero() && snapshot.MediaCallStarted.Equal(snapshot.LastCallStarted),
+			LastCalibration:         timePointer(snapshot.LastCalibration),
+			CameraAudio:             cameraAudioPointer(snapshot.CameraAudio),
 		},
 		Controls: APIControls{
 			TestCallAvailable: legacyTestCallAvailable,
@@ -459,4 +469,11 @@ func cameraAudioPointer(value audiostats.Snapshot) *audiostats.Snapshot {
 		return nil
 	}
 	return &value
+}
+
+func echoStatsPointer(st audiostats.EchoSnapshot) *audiostats.EchoSnapshot {
+	if !st.Available {
+		return nil
+	}
+	return &st
 }

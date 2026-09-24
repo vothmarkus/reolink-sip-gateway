@@ -41,10 +41,6 @@ type SessionInfo struct {
 	EchoCancellation string
 }
 
-type AECStatus struct {
-	CurrentDelayMS int
-}
-
 type Session struct {
 	cfg                     config.Config
 	call                    *sip.Call
@@ -53,7 +49,8 @@ type Session struct {
 	logger                  *slog.Logger
 	ready                   chan SessionInfo
 	readyOnce               sync.Once
-	aecStatus               chan AECStatus
+	echoMu                  sync.RWMutex
+	echo                    *echoCanceller
 	dtmfEvents              chan DTMFEvent
 	dtmfDetector            *telephoneEventDetector
 	cameraAudio             audiostats.Counters
@@ -67,7 +64,7 @@ type Session struct {
 func New(cfg config.Config, call *sip.Call, rtpConn, ffConn *net.UDPConn, logger *slog.Logger) *Session {
 	session := &Session{
 		cfg: cfg, call: call, rtpConn: rtpConn, ffConn: ffConn, logger: logger,
-		ready: make(chan SessionInfo, 1), aecStatus: make(chan AECStatus, 1), dtmfEvents: make(chan DTMFEvent, 64),
+		ready: make(chan SessionInfo, 1), dtmfEvents: make(chan DTMFEvent, 64),
 	}
 	if call != nil && call.TelephoneEvent != nil {
 		session.dtmfDetector = newTelephoneEventDetector(call.TelephoneEvent.ClockRate)
@@ -79,7 +76,6 @@ func New(cfg config.Config, call *sip.Call, rtpConn, ffConn *net.UDPConn, logger
 // (first decoded Baichuan PCM or FFmpeg startup). It indicates active media
 // workers, not confirmation that the phone received RTP.
 func (s *Session) Ready() <-chan SessionInfo    { return s.ready }
-func (s *Session) AECStatus() <-chan AECStatus  { return s.aecStatus }
 func (s *Session) DTMFEvents() <-chan DTMFEvent { return s.dtmfEvents }
 
 func (s *Session) CameraAudio() audiostats.Snapshot {
@@ -139,21 +135,11 @@ func (s *Session) Run(ctx context.Context) error {
 			return fmt.Errorf("start WebRTC echo cancellation: %w", echoErr)
 		}
 		controls.SetRenderObserver(echo.AddRender)
-		echo.SetStatusCallback(func(st echoStats) {
-			update := AECStatus{CurrentDelayMS: st.CurrentDelayMS}
-			select {
-			case s.aecStatus <- update:
-			default:
-				select {
-				case <-s.aecStatus:
-				default:
-				}
-				select {
-				case s.aecStatus <- update:
-				default:
-				}
-			}
-		})
+		// Retain counters after shutdown. The runtime samples them once per
+		// second and once at hangup, independently of debug logging.
+		s.echoMu.Lock()
+		s.echo = echo
+		s.echoMu.Unlock()
 		defer echo.Close()
 	}
 	if s.logger != nil {

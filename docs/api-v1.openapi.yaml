@@ -448,13 +448,56 @@ components:
           minimum: 0
         calibration_status:
           type: string
+        calibration_details:
+          type: string
+          description: Failure reason or accepted acoustic correlation and peak ratio; a fallback delay is not a new measurement.
+        echo_cancellation_enabled:
+          type: boolean
+        echo_stats:
+          $ref: '#/components/schemas/EchoProcessingStatus'
+        stats_call_started_at:
+          type: string
+          format: date-time
+          description: Call that owns the retained media counters.
+        stats_current_call:
+          type: boolean
+          description: Whether the retained counters belong to the currently active call.
         last_calibration:
           type: string
           format: date-time
+    EchoProcessingStatus:
+      type: object
+      additionalProperties: false
+      description: Native WebRTC processing counters; validity flags must be checked before interpreting ERLE or residual echo. Initialization silence is not a live measurement.
+      required: [available, capture_frames, render_frames, missing_render_frames, current_delay_ms, erle_valid, erle_db, residual_echo_valid, residual_echo_likelihood]
+      properties:
+        available:
+          type: boolean
+        capture_frames:
+          type: integer
+          minimum: 0
+        render_frames:
+          type: integer
+          minimum: 0
+        missing_render_frames:
+          type: integer
+          minimum: 0
+        current_delay_ms:
+          type: integer
+          minimum: 0
+        erle_valid:
+          type: boolean
+        erle_db:
+          type: number
+          description: Echo return loss enhancement reported by WebRTC, not the gateway energy-ratio estimate.
+        residual_echo_valid:
+          type: boolean
+        residual_echo_likelihood:
+          type: number
     CameraAudioStatus:
       type: object
       additionalProperties: false
-      description: Baichuan camera-to-phone counters, retained after hangup until the next call. Sent RTP does not confirm phone playback.
+      description: Baichuan camera-to-phone counters, retained after hangup until the next media session; an unanswered SIP dial does not reset them. Sent RTP does not confirm phone playback.
       required: [available, packets, encoded_bytes, pcm_samples, pcm_peak, rtp_packets]
       properties:
         available:

@@ -22,8 +22,10 @@ import (
 var statusLogoPNG []byte
 
 type Snapshot struct {
-	TriggerEvents trigger.Diagnostics `json:"trigger_events"`
-	CameraAudio   audiostats.Snapshot `json:"camera_audio"`
+	TriggerEvents    trigger.Diagnostics     `json:"trigger_events"`
+	CameraAudio      audiostats.Snapshot     `json:"camera_audio"`
+	EchoStats        audiostats.EchoSnapshot `json:"echo_stats"`
+	MediaCallStarted time.Time               `json:"media_call_started,omitempty"`
 
 	Version                       string    `json:"version"`
 	StartedAt                     time.Time `json:"started_at"`

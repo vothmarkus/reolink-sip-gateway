@@ -144,3 +144,31 @@ func TestPlatformDecoderFailureDoesNotReportReady(t *testing.T) {
 		t.Fatalf("decoder cleanup count=%d", adapter.stopped)
 	}
 }
+
+func TestPlatformCalibrationCaptureKeepsSixteenKHzPCMWithoutFFmpeg(t *testing.T) {
+	adapter := &fakePlatformAAC{decode: func() ([]byte, error) { return []byte{0, 0x80, 0, 0, 0, 0x40, 0, 0}, nil }}
+	defer platformaudio.Set(adapter)()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := &Receiver{pcm: make(chan []int16, 1), ready: make(chan Info, 1), done: make(chan error, 1)}
+	packets := make(chan baichuan.MediaPacket, 1)
+	packets <- baichuan.MediaPacket{Kind: baichuan.MediaPacketAAC, Data: []byte{0xff, 0xf1, 0x60, 0x40}}
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		r.receive(ctx, Config{OutputRate: 16000, FFmpegPath: "/no-ffmpeg-on-android"}, 16000, packets, nil, func() error { return nil })
+	}()
+	defer func() { cancel(); <-finished }()
+	select {
+	case pcm := <-r.PCM():
+		if !reflect.DeepEqual(pcm, []int16{-32768, 0, 16384, 0}) {
+			t.Fatalf("calibration PCM altered: %v", pcm)
+		}
+		info := <-r.Ready()
+		if info.OutputSampleRate != 16000 || info.InputSampleRate != 16000 {
+			t.Fatalf("wrong calibration sample clock: %+v", info)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("calibration decoder did not produce PCM")
+	}
+}

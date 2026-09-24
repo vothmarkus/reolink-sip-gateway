@@ -396,3 +396,23 @@ func TestAPICameraAudioDiagnosticsSurviveHangup(t *testing.T) {
 		t.Fatalf("unexpected counters without Baichuan: %+v", got)
 	}
 }
+
+func TestAPIMeasurementAndEchoSessionAttribution(t *testing.T) {
+	started := time.Now()
+	snapshot := Snapshot{State: "active", CurrentCallDirection: "outgoing", LastCallStarted: started, MediaCallStarted: started,
+		EchoCancellationEnabled: true, CalibrationStatus: "safe fallback", CalibrationDetails: "measurement failed (no marker); using built-in 1450 ms",
+		EchoStats: audiostats.EchoSnapshot{Available: true, CaptureFrames: 123, ERLEValid: true, ERLEDB: 12.5}}
+	got := newAPIStatus(snapshot, nil)
+	if !got.Media.StatsCurrentCall || got.Media.StatsCallStartedAt == nil || !got.Media.EchoCancellationEnabled || got.Media.CalibrationDetails != snapshot.CalibrationDetails || got.Media.EchoStats == nil || got.Media.EchoStats.ERLEDB != 12.5 {
+		t.Fatalf("incomplete media diagnostics: %+v", got.Media)
+	}
+	snapshot.State = "dialing"
+	snapshot.LastCallStarted = started.Add(time.Minute)
+	got = newAPIStatus(snapshot, nil)
+	if got.Media.StatsCurrentCall || !got.Media.StatsCallStartedAt.Equal(started) || got.Media.EchoStats.CaptureFrames != 123 {
+		t.Fatal("old media attributed to unanswered new call")
+	}
+	if newAPIStatus(Snapshot{}, nil).Media.EchoStats != nil {
+		t.Fatal("uninitialized AEC reported as available")
+	}
+}

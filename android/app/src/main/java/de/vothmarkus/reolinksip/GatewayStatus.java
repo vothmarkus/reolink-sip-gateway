@@ -1,6 +1,7 @@
 package de.vothmarkus.reolinksip;
 
 import org.json.JSONObject;
+import java.util.Locale;
 
 /** Pure presentation of the shared API contract, also used by notifications. */
 final class GatewayStatus {
@@ -41,12 +42,10 @@ final class GatewayStatus {
                 if (media != null) {
                     text.append("\nAudio: ").append(media.optString("profile", "wird vorbereitet"));
                     if (!media.optString("receive_details").isEmpty()) text.append("\n").append(media.optString("receive_details"));
-                    String calibration = media.optString("calibration_status");
-                    if (!calibration.isEmpty()) text.append("\nAEC: ").append(calibration.equals("AEC disabled") ? "aus" : calibration)
-                            .append(calibration.equals("AEC disabled") ? "" : " · " + media.optInt("current_delay_ms") + " ms");
+                    appendEchoStatus(text, media, call.optBoolean("active"));
                     JSONObject audio = media.optJSONObject("camera_audio");
                     if (audio != null && audio.optBoolean("available")) {
-                        text.append(call.optBoolean("active") ? "\nKamera → Telefon:" : "\nKamera → Telefon (letzter Anruf):");
+                        text.append(media.optBoolean("stats_current_call", call.optBoolean("active")) ? "\nKamera → Telefon:" : "\nKamera → Telefon (letzte Audioverbindung):");
                         text.append("\nEmpfang: ").append(audio.optLong("packets")).append(" Pakete")
                                 .append(" · PCM: ").append(audio.optLong("pcm_samples")).append(" Samples")
                                 .append("\nZum Telefon: ").append(audio.optLong("rtp_packets")).append(" RTP-Pakete")
@@ -72,6 +71,50 @@ final class GatewayStatus {
     static boolean available(String raw, String control) {
         try { return new JSONObject(raw).getJSONObject("controls").optBoolean(control); }
         catch (Exception e) { return false; }
+    }
+
+    private static void appendEchoStatus(StringBuilder text, JSONObject media, boolean callActive) {
+        String calibration = media.optString("calibration_status");
+        boolean enabled = media.optBoolean("echo_cancellation_enabled", !calibration.isEmpty() && !calibration.equals("AEC disabled"));
+        if (!enabled) {
+            text.append("\nAEC: aus");
+            return;
+        }
+        JSONObject echo = media.optJSONObject("echo_stats");
+        boolean available = echo != null && echo.optBoolean("available");
+        boolean current = media.optBoolean("stats_current_call", callActive);
+        text.append("\nAEC: ").append(current && available && echo.optLong("capture_frames") > 0 ? "WebRTC aktiv" : "WebRTC eingeschaltet · wartet auf Audioverbindung");
+        if (!calibration.isEmpty()) {
+            text.append("\nLaufzeitmessung: ").append(calibrationLabel(calibration));
+            if (!calibration.equals("pending") && !calibration.equals("measuring")) {
+                text.append(" · ").append(media.optInt("calibrated_delay_ms")).append(" ms");
+            }
+        }
+        String details = media.optString("calibration_details");
+        if (!details.isEmpty()) text.append("\nMessdetails: ").append(details);
+        if (available) {
+            text.append(current ? "\nWebRTC-Verarbeitung: " : "\nWebRTC (letzte Audioverbindung): ")
+                    .append(echo.optLong("capture_frames")).append(" Audioblöcke · ")
+                    .append(echo.optLong("render_frames")).append(" Referenzblöcke")
+                    .append("\nReferenz fehlt: ").append(echo.optLong("missing_render_frames"))
+                    .append("/").append(echo.optLong("capture_frames"));
+            if (echo.optBoolean("erle_valid")) text.append("\nWebRTC Echo-Dämpfung (ERLE): ")
+                    .append(String.format(Locale.GERMANY, "%.1f dB", echo.optDouble("erle_db")));
+            else text.append("\nWebRTC Echo-Dämpfung: noch kein Messwert");
+        }
+    }
+
+    static String calibrationLabel(String state) {
+        switch (state) {
+            case "pending": return "wartet";
+            case "measuring": return "Testsignal / Messung läuft";
+            case "measured": return "gemessen";
+            case "safe fallback": return "fehlgeschlagen · Ersatzwert";
+            case "cached fallback": return "fehlgeschlagen · gespeicherter Messwert";
+            case "cached (dry run)": return "Passivmodus · gespeicherter Messwert";
+            case "skipped (dry run)": return "Passivmodus · Ersatzwert";
+            default: return state;
+        }
     }
 
     static String stageLabel(String stage) {

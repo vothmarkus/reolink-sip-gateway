@@ -66,7 +66,7 @@ public final class MainActivity extends Activity {
             return insets;
         });
         scroll.addView(root);
-        section(root, "Reolink SIP Gateway · 0.3.1 Alpha 5");
+        section(root, "Reolink SIP Gateway · 0.3.2 Alpha 6");
         note(root, "Kamera und Telefonanlage direkt verbinden – ohne Home Assistant. Für den Betrieb ohne NVR die eigene IP der Kamera verwenden.");
         section(root, "Status");
         status = new TextView(this);
@@ -77,7 +77,7 @@ public final class MainActivity extends Activity {
         button(root, "Diagnose kopieren", v -> {
             ClipboardManager clipboard = getSystemService(ClipboardManager.class);
             clipboard.setPrimaryClip(ClipData.newPlainText("Gateway-Diagnose", ConfigStore.redact(this,
-                    "Android-App 0.3.1-alpha5\n" + GatewayService.summary() + "\n\n" + GatewayService.rawStatus())));
+                    "Android-App 0.3.2-alpha6\n" + GatewayService.summary() + "\n\n" + GatewayService.rawStatus())));
             toast("Diagnose kopiert");
         });
 

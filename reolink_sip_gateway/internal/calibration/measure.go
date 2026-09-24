@@ -189,8 +189,13 @@ func MeasureAcousticLatency(parent context.Context, cfg config.Config, logger *s
 		Channel:     cfg.NVRChannel,
 		SampleRate:  latencyCaptureRate,
 	}
-	if _, err := exec.LookPath(cfg.FFmpegPath()); err != nil {
-		return result, fmt.Errorf("ffmpeg not found at %q: %w", cfg.FFmpegPath(), err)
+	// Only RTSP capture needs an executable. Baichuan selects its decoder from
+	// the received codec and uses Android MediaCodec when a platform adapter is
+	// installed, exactly as the live call path does.
+	if cfg.ReceiveMode() == "rtsp" {
+		if _, err := exec.LookPath(cfg.FFmpegPath()); err != nil {
+			return result, fmt.Errorf("ffmpeg not found at %q: %w", cfg.FFmpegPath(), err)
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(parent, latencyTestTimeout)
