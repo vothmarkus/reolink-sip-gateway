@@ -41,7 +41,7 @@ public class ReleaseConfigTest {
         p.put("routes_json", routes.toString());
         String exported = ConfigStore.buildJson(p);
         JSONObject imported = ConfigStore.fromJson(exported, new JSONObject().put("start_on_boot", true).put("gateway_requested", true));
-        assertTrue(new JSONObject(exported).similar(new JSONObject(ConfigStore.buildJson(imported))));
+        assertEquals(jsonValue(new JSONObject(exported)), jsonValue(new JSONObject(ConfigStore.buildJson(imported))));
         assertTrue(imported.getBoolean("start_on_boot"));
         assertFalse(imported.has("gateway_requested"));
         assertFalse(exported.contains("start_on_boot"));
@@ -81,5 +81,24 @@ public class ReleaseConfigTest {
         assertFalse(GatewayStatus.overview(raw.toString(), "").contains("Verbindung wird aufgebaut"));
         assertTrue(GatewayStatus.overview(raw.toString(), "").contains("SIP Parallelruf: registriert"));
         assertTrue(GatewayStatus.summary("Gateway läuft", raw.toString(), "").contains("manueller Betrieb"));
+    }
+
+    // Android's JSONObject API does not provide JSON-java's similar(). Compare
+    // all nested values structurally without relying on object-key order.
+    private static Object jsonValue(Object value) throws Exception {
+        if (value instanceof JSONObject) {
+            JSONObject object = (JSONObject) value;
+            java.util.Map<String, Object> result = new java.util.TreeMap<>();
+            java.util.Iterator<String> keys = object.keys();
+            while (keys.hasNext()) { String key = keys.next(); result.put(key, jsonValue(object.get(key))); }
+            return result;
+        }
+        if (value instanceof JSONArray) {
+            JSONArray array = (JSONArray) value;
+            java.util.List<Object> result = new java.util.ArrayList<>();
+            for (int i = 0; i < array.length(); i++) result.add(jsonValue(array.get(i)));
+            return result;
+        }
+        return value;
     }
 }
