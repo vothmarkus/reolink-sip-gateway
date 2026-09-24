@@ -19,6 +19,30 @@ type testCommands struct {
 	hangup   func(context.Context) error
 }
 
+func TestStatusGenerationTimeDoesNotPretendTheStateChanged(t *testing.T) {
+	store, handler := newTestAPI(t, testCommands{})
+	read := func() APIStatus {
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, authenticatedRequest(http.MethodGet, "/api/v1/status"))
+		var state APIStatus
+		if err := json.Unmarshal(res.Body.Bytes(), &state); err != nil {
+			t.Fatal(err)
+		}
+		return state
+	}
+	first := read()
+	// An unchanged periodic connection callback must not invent a state change.
+	store.Update(func(s *Snapshot) { s.TriggerConnected = false })
+	time.Sleep(time.Millisecond)
+	second := read()
+	if first.Revision != second.Revision || !first.UpdatedAt.Equal(second.UpdatedAt) {
+		t.Fatal("unchanged state modified revision/time")
+	}
+	if first.GeneratedAt.IsZero() || !second.GeneratedAt.After(first.GeneratedAt) {
+		t.Fatal("fresh HTTP status is indistinguishable from a stale copy")
+	}
+}
+
 const testInstanceID = "12345678-1234-5678-9234-567812345678"
 
 func (c testCommands) StartTestCall(ctx context.Context, routeID string) error {

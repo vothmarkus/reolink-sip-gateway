@@ -229,9 +229,6 @@ func Run(parent context.Context, cfg config.Config, options Options) error {
 						s.ParallelSIPRegistered = parallelSIPClient.Registered()
 						s.LastParallelRegistrationErr = parallelSIPClient.LastRegisterError()
 					}
-					if s.State == "starting" && anySIPRegistered(doorSIPClient, parallelSIPClient) && s.TriggerConnected {
-						s.State = "idle"
-					}
 				})
 				select {
 				case <-ctx.Done():
@@ -247,9 +244,6 @@ func Run(parent context.Context, cfg config.Config, options Options) error {
 		store.Update(func(s *statuspkg.Snapshot) {
 			s.TriggerConnected = ok
 			s.HAConnected = ok && cfg.TriggerSource == "homeassistant"
-			if ok && s.State == "starting" && (cfg.DryRun || anySIPRegistered(doorSIPClient, parallelSIPClient)) {
-				s.State = "idle"
-			}
 		})
 	}
 	var listen func(context.Context, chan<- trigger.Event) error
@@ -324,6 +318,10 @@ func Run(parent context.Context, cfg config.Config, options Options) error {
 		},
 	)
 	defer commands.Disable()
+	// The trigger reconnects independently. Manual calls remain usable once
+	// media preparation and call-control setup have completed (SIP registration
+	// and route availability are still enforced by the API/controller).
+	store.Update(func(s *statuspkg.Snapshot) { s.State = "idle" })
 
 	lastTriggers := make(map[string]time.Time, len(routes))
 	var incomingCalls <-chan *sip.IncomingInvite

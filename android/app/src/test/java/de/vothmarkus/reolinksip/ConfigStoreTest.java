@@ -76,4 +76,20 @@ public class ConfigStoreTest {
         root = new JSONObject(ConfigStore.buildJson(values));
         assertFalse(root.getJSONObject("audio").getBoolean("webrtc_high_pass_filter_enabled"));
     }
+    @Test public void failedConnectionShowsStageAndMostRecentError() throws Exception {
+        JSONObject events = new JSONObject().put("stage", "retry_wait").put("connection_attempts", 3)
+                .put("last_error_stage", "login").put("last_error", "Baichuan command 1 rejected by camera (status 401)");
+        JSONObject state = new JSONObject().put("gateway", new JSONObject().put("trigger_connected", false).put("trigger_events", events))
+                .put("sip", new JSONObject().put("parallel_call_enabled", true).put("parallel_registered", true))
+                .put("call", new JSONObject());
+        String summary = GatewayStatus.summary("Gateway läuft", state.toString(), "");
+        assertTrue(summary.contains("Warte auf nächsten Versuch"));
+        assertTrue(summary.contains("Versuch 3"));
+        assertTrue(summary.contains("Letzter Kamerafehler (Benutzer anmelden)"));
+        assertTrue(summary.contains("status 401"));
+        assertTrue(summary.contains("SIP Parallelruf: registriert"));
+        assertEquals("Statusabruf: vor 2 s", GatewayStatus.pollAge(1000, 3500));
+        assertTrue(GatewayStatus.pollAge(1000, 12000).contains("Aktualisierung ausstehend"));
+        assertTrue(GatewayStatus.pollAge(0, 1000).contains("noch keine Antwort"));
+    }
 }

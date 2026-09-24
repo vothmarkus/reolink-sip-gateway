@@ -194,6 +194,10 @@ components:
         revision:
           type: integer
           minimum: 1
+        generated_at:
+          type: string
+          format: date-time
+          description: Time this response or event snapshot was generated; advances independently of state revision.
         updated_at:
           type: string
           format: date-time
@@ -291,6 +295,32 @@ components:
       additionalProperties: false
       description: Baichuan event counts since gateway startup; emitted counts trigger events, not completed SIP calls. Contains no raw XML or credentials.
       properties:
+        stage:
+          type: string
+          enum: [connecting, nonce, login, subscribing, listening, keepalive, retry_wait, stopped]
+        connection_attempts:
+          type: integer
+          minimum: 0
+        successful_connections:
+          type: integer
+          minimum: 0
+        last_attempt_at:
+          type: string
+          format: date-time
+        last_connected_at:
+          type: string
+          format: date-time
+        last_error:
+          type: string
+          maxLength: 512
+        last_error_stage:
+          type: string
+        last_error_at:
+          type: string
+          format: date-time
+        next_retry_at:
+          type: string
+          format: date-time
         messages:
           type: integer
           minimum: 0

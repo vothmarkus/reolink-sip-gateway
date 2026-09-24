@@ -1,9 +1,48 @@
-# Android 0.3.0-alpha4
+# Android 0.3.1-alpha5
 
 The Android target lives on `feature/v2-android`, independently of `main` and
 `feature/v2-standalone`. Android 8 / API 26 or newer is supported; APKs contain
 ARM64 and ARMv7. The app reuses the HA gateway's Go SIP/RTP, Baichuan,
 visitor-trigger, call-control and codec code through a gomobile AAR.
+
+## Connection recovery and diagnosis in alpha5
+
+Alpha4 could remain at `starting` while SIP was registered and the visitor
+connection failed. Its last-change timestamp (`updated_at`) and revision then
+stayed unchanged, because repeated `trigger_connected=false` callbacks were
+identical and connection errors were logged without appearing in the API.
+The reported dump alone cannot identify TCP, authentication or subscription as
+the failing step, and does not establish an Android polling failure.
+
+- Event sessions now use the reference protocol's host-control header channel
+  250 for nonce/login/keepalive and 251 for the event subscription. The audio
+  preview/talkback headers and zero-based camera channel remain unchanged.
+- A valid authenticated alarm push can confirm a subscription before/without a
+  separate command-31 acknowledgement. Buffered events remain ordered; malformed
+  pushes cannot confirm it, and login failures are never bypassed. Once events
+  arrive, liveness uses command 93 instead of periodically replaying subscription
+  snapshots. A failed keepalive write closes the connection for recovery.
+- `gateway.trigger_events` now also reports `stage`, `connection_attempts`,
+  `successful_connections`, `last_attempt_at`, `last_connected_at`, `last_error`,
+  `last_error_stage`, `last_error_at`, and `next_retry_at`. The last error remains
+  visible while retrying and clears on a successful subscription. Raw nonce XML,
+  hashes and configured credentials are excluded from these diagnostics.
+- The app displays the connection stage, last camera error and status-poll age.
+  API `generated_at` advances on every status response, independently of the
+  state-change timestamp. This distinguishes a quiet/unavailable camera from a
+  stalled status display without inventing state-change events.
+- Manual test calls become available after call-control setup and SIP registration,
+  independently of visitor push connectivity. Passive mode, route availability
+  and the single-call lock still apply. This lets a test call separately check
+  the working SIP/audio path when automatic ringing is unavailable.
+
+Install over alpha3/alpha4, keep AEC off for the initial comparison, wait about
+30 seconds, copy diagnostics, and try **Testanruf**. The protocol regression tests
+cover rejected login/subscription, missing acknowledgement with valid pushes,
+invalid/absent pushes, reconnect diagnostics and real UDP SIP registration/test
+calling while the camera TCP port is unavailable. Actual camera compatibility
+still needs the user's hardware test; these changes do not claim the dump's
+unknown camera-side cause has been conclusively identified.
 
 ## New in alpha4
 

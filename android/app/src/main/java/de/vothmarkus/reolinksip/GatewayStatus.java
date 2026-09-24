@@ -16,9 +16,18 @@ final class GatewayStatus {
                 text.append(passive ? "\nPassivmodus: SIP und Anrufe sind ausgeschaltet." : "\nAktiver Betrieb");
                 text.append("\nKlingelverbindung: ").append(gateway.optBoolean("trigger_connected") ? "verbunden" : "Verbindung wird aufgebaut");
                 JSONObject events = gateway.optJSONObject("trigger_events");
-                if (events != null) text.append("\nKameraereignisse: ").append(events.optLong("messages"))
-                        .append(" · Klingelsignale: ").append(events.optLong("visitor_states"))
-                        .append(" · Auslösungen: ").append(events.optLong("emitted"));
+                if (events != null) {
+                    if (!gateway.optBoolean("trigger_connected") && !events.optString("stage").isEmpty()) {
+                        text.append("\nVerbindungsschritt: ").append(stageLabel(events.optString("stage")))
+                                .append(" · Versuch ").append(events.optLong("connection_attempts"));
+                    }
+                    String connectionError = events.optString("last_error");
+                    if (!connectionError.isEmpty()) text.append("\nLetzter Kamerafehler (")
+                            .append(stageLabel(events.optString("last_error_stage"))).append("): ").append(connectionError);
+                    text.append("\nKameraereignisse: ").append(events.optLong("messages"))
+                            .append(" · Klingelsignale: ").append(events.optLong("visitor_states"))
+                            .append(" · Auslösungen: ").append(events.optLong("emitted"));
+                }
                 text.append("\nSIP Tür: ").append(passive ? "im Passivmodus aus" :
                         !sip.optBoolean("door_call_enabled") ? "deaktiviert" : sip.optBoolean("door_registered") ? "registriert" : "nicht registriert");
                 if (sip.optBoolean("parallel_call_enabled")) text.append("\nSIP Parallelruf: ")
@@ -63,6 +72,26 @@ final class GatewayStatus {
     static boolean available(String raw, String control) {
         try { return new JSONObject(raw).getJSONObject("controls").optBoolean(control); }
         catch (Exception e) { return false; }
+    }
+
+    static String stageLabel(String stage) {
+        switch (stage) {
+            case "connecting": return "TCP-Verbindung";
+            case "nonce": return "Anmeldeantwort anfordern";
+            case "login": return "Benutzer anmelden";
+            case "subscribing": return "Klingelereignisse abonnieren";
+            case "listening": return "Klingelereignisse empfangen";
+            case "keepalive": return "Verbindung prüfen";
+            case "retry_wait": return "Warte auf nächsten Versuch";
+            case "stopped": return "Gestoppt";
+            default: return stage;
+        }
+    }
+
+    static String pollAge(long receivedAt, long now) {
+        if (receivedAt == 0) return "Statusabruf: noch keine Antwort";
+        long age = Math.max(0, (now - receivedAt) / 1000);
+        return "Statusabruf: vor " + age + " s" + (age >= 10 ? " · Aktualisierung ausstehend" : "");
     }
 
     private static void appendError(StringBuilder text, String label, String error) {

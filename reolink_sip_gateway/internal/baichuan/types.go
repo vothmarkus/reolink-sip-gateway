@@ -146,6 +146,9 @@ type Config struct {
 	Username string
 	Password string
 	Timeout  time.Duration
+	// Host-level event/control sessions use 250, as in reolink_aio. Zero
+	// retains the established preview/talkback header for media sessions.
+	ControlChannel uint8
 }
 
 func (c Config) normalized() Config {

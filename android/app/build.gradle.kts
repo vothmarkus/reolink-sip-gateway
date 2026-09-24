@@ -10,8 +10,8 @@ android {
         applicationId = "de.vothmarkus.reolinksip"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.3.0-alpha4"
+        versionCode = 5
+        versionName = "0.3.1-alpha5"
     }
 
     signingConfigs {

@@ -125,23 +125,28 @@ func (c *Client) Err() error            { return c.closeErr.get() }
 func (c *Client) Done() <-chan struct{} { return c.closed }
 
 func (c *Client) Login(ctx context.Context) error {
+	return c.LoginWithProgress(ctx, nil)
+}
+
+// LoginWithProgress reports protocol stages without returning XML, nonces or
+// authentication hashes to the host UI. Existing media callers use Login.
+func (c *Client) LoginWithProgress(ctx context.Context, progress func(string)) error {
 	c.loginMu.Lock()
 	defer c.loginMu.Unlock()
 	if c.loggedIn {
 		return nil
 	}
 
-	nonceResp, err := c.sendRequest(ctx, request{MsgID: msgIDLogin, Class: classLegacy, ForceBC: true})
+	if progress != nil {
+		progress("nonce")
+	}
+	nonceResp, err := c.sendRequest(ctx, request{MsgID: msgIDLogin, ChannelID: c.cfg.ControlChannel, Class: classLegacy, ForceBC: true})
 	if err != nil {
 		return fmt.Errorf("request nonce: %w", err)
 	}
 	nonce, err := parseNonce(nonceResp.XML)
 	if err != nil {
-		snippet := nonceResp.XML
-		if len(snippet) > 160 {
-			snippet = snippet[:160]
-		}
-		return fmt.Errorf("parse nonce: %w (response_code=%#x class=%#x xml_prefix=%q)", err, nonceResp.Header.ResponseCode, nonceResp.Header.Class, snippet)
+		return fmt.Errorf("invalid nonce response (response_code=%#x class=%#x)", nonceResp.Header.ResponseCode, nonceResp.Header.Class)
 	}
 
 	c.stateMu.Lock()
@@ -153,7 +158,10 @@ func (c *Client) Login(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := c.sendRequest(ctx, request{MsgID: msgIDLogin, Class: classModernWithOffset, Body: body, ForceBC: true}); err != nil {
+	if progress != nil {
+		progress("login")
+	}
+	if _, err := c.sendRequest(ctx, request{MsgID: msgIDLogin, ChannelID: c.cfg.ControlChannel, Class: classModernWithOffset, Body: body, ForceBC: true}); err != nil {
 		return fmt.Errorf("login failed: %w", err)
 	}
 
@@ -174,7 +182,10 @@ func (c *Client) keepAliveLoop() {
 	for {
 		select {
 		case <-ticker.C:
-			_ = c.sendNoReply(request{MsgID: msgIDPing, Class: classModernWithOffset})
+			if err := c.sendNoReply(request{MsgID: msgIDPing, ChannelID: c.cfg.ControlChannel, Class: classModernWithOffset}); err != nil {
+				c.shutdown(err)
+				return
+			}
 		case <-c.closed:
 			return
 		}

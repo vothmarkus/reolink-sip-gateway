@@ -11,6 +11,7 @@ import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import java.io.File;
 import java.util.concurrent.*;
 import de.vothmarkus.reolinksip.core.mobilebridge.Gateway;
@@ -23,6 +24,7 @@ public final class GatewayService extends Service {
     private static final int NOTIFICATION_ID = 4102;
     private static volatile String lastState = "Gestoppt", lastStatus = "", lastError = "";
     private static volatile Gateway activeGateway;
+    private static volatile long lastStatusAt;
     private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
     private Gateway gateway;
     private MediaCodecAudioAdapter audioAdapter;
@@ -37,7 +39,10 @@ public final class GatewayService extends Service {
     static void start(Context c) { c.startForegroundService(new Intent(c, GatewayService.class)); }
     static void restart(Context c) { c.startForegroundService(new Intent(c, GatewayService.class).setAction(ACTION_RESTART)); }
     static void stop(Context c) { c.stopService(new Intent(c, GatewayService.class)); }
-    static String summary() { return GatewayStatus.summary(lastState, lastStatus, lastError); }
+    static String summary() {
+        String summary = GatewayStatus.summary(lastState, lastStatus, lastError);
+        return activeGateway == null ? summary : summary + "\n" + GatewayStatus.pollAge(lastStatusAt, SystemClock.elapsedRealtime());
+    }
     static byte[] snapshotJPEG() throws Exception {
         Gateway current = activeGateway;
         if (current == null) throw new IllegalStateException("Gateway ist gestoppt");
@@ -92,6 +97,7 @@ public final class GatewayService extends Service {
         Mobilebridge.validateConfig(config);
         lastError = "";
         lastStatus = "";
+        lastStatusAt = 0;
         lastState = "Gateway startet";
         MediaCodecAudioAdapter adapter = new MediaCodecAudioAdapter();
         try {
@@ -126,6 +132,7 @@ public final class GatewayService extends Service {
                 return;
             }
             lastStatus = gateway.statusJSON();
+            lastStatusAt = SystemClock.elapsedRealtime();
             lastError = gateway.lastError();
             String text = testAvailable() ? "Bereit für Anrufe" : "Gateway aktiv – Status in der App";
             updateNotification(text);
@@ -136,6 +143,7 @@ public final class GatewayService extends Service {
         Gateway old = gateway;
         if (activeGateway == old) activeGateway = null;
         lastStatus = "";
+        lastStatusAt = 0;
         if (old != null) {
             // Retain the object and decoder on timeout: a subsequent restart must
             // wait for the same runtime instead of racing its audio teardown.
@@ -220,6 +228,7 @@ public final class GatewayService extends Service {
                 releaseLocks();
                 lastState = "Gestoppt";
                 lastStatus = "";
+                lastStatusAt = 0;
             }
         });
         worker.shutdown();

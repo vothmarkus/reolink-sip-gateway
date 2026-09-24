@@ -20,17 +20,62 @@ func (c *Client) SubscribeEvents(ctx context.Context) (<-chan *Message, func(), 
 		return nil, nil, err
 	}
 	events, unsubscribe := c.subscribe(msgIDAlarmEvent, 64, true)
-	if err := c.RenewEvents(ctx); err != nil {
-		unsubscribe()
-		return nil, nil, err
+	// Keep the consumer queue intact (and ordered) while independently watching
+	// for an authenticated event push. Some cameras push before/without the
+	// command-31 reply; waiting exclusively for the reply discards a working
+	// event session on timeout. No fallback is allowed before successful login.
+	witness, stopWitness := c.subscribe(msgIDAlarmEvent, 8, false)
+	defer stopWitness()
+	requestCtx, cancel := context.WithCancel(ctx)
+	finished := make(chan struct{})
+	var requestErr error
+	go func() { requestErr = c.RenewEvents(requestCtx); close(finished) }()
+	defer func() { cancel(); <-finished }()
+	for {
+		select {
+		case <-finished:
+			if requestErr == nil {
+				return events, unsubscribe, nil
+			}
+			unsubscribe()
+			return nil, nil, requestErr
+		case msg := <-witness:
+			alarms, err := ParseAlarmEvents(msg.XML)
+			if err == nil && len(alarms) > 0 {
+				if err := ctx.Err(); err != nil {
+					unsubscribe()
+					return nil, nil, err
+				}
+				return events, unsubscribe, nil
+			}
+		case <-ctx.Done():
+			unsubscribe()
+			return nil, nil, ctx.Err()
+		case <-c.Done():
+			// A camera may close immediately after rejecting command 31. Let
+			// roundTripRequest consume that buffered response before using EOF,
+			// otherwise the useful rejection code disappears from diagnostics.
+			<-finished
+			unsubscribe()
+			if requestErr != nil {
+				return nil, nil, requestErr
+			}
+			return nil, nil, c.Err()
+		}
 	}
-	return events, unsubscribe, nil
 }
 
 // RenewEvents doubles as a bounded request/response liveness check. Repeated
 // subscriptions are supported by Reolink and restore a silently lost subscription.
 func (c *Client) RenewEvents(ctx context.Context) error {
 	_, err := c.sendRequest(ctx, request{MsgID: msgIDAlarmSubscribe, ChannelID: 251, Class: classModernWithOffset})
+	return err
+}
+
+// CheckEventConnection is a bounded liveness check after receiving events.
+// Re-subscribing every 30 seconds needlessly replays camera state snapshots.
+func (c *Client) CheckEventConnection(ctx context.Context) error {
+	_, err := c.sendRequest(ctx, request{MsgID: msgIDPing, ChannelID: c.cfg.ControlChannel, Class: classModernWithOffset})
 	return err
 }
 

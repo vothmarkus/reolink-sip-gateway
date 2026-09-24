@@ -2,6 +2,7 @@ package mobilebridge
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/url"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/vothmarkus/reolink-sip-gateway/internal/standalone"
+	statuspkg "github.com/vothmarkus/reolink-sip-gateway/internal/status"
 )
 
 func androidSettings() standalone.Settings {
@@ -18,6 +20,105 @@ func androidSettings() standalone.Settings {
 	s.Audio = standalone.AudioSettings{}
 	s.LiveImage.Enabled = false
 	return s
+}
+
+func TestRegisteredSIPCanTestCallWhileCameraConnectionFails(t *testing.T) {
+	registrar, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registrar.Close()
+	local, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	localPort := local.LocalAddr().(*net.UDPAddr).Port
+	local.Close()
+	camera, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cameraPort := camera.Addr().(*net.TCPAddr).Port
+	camera.Close()
+	invite := make(chan struct{}, 1)
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		buf := make([]byte, 8192)
+		for {
+			n, peer, err := registrar.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			lines := strings.Split(string(buf[:n]), "\r\n")
+			code, reason := 200, "OK"
+			if strings.HasPrefix(lines[0], "INVITE ") {
+				code, reason = 486, "Busy Here"
+				select {
+				case invite <- struct{}{}:
+				default:
+				}
+			}
+			if strings.HasPrefix(lines[0], "ACK ") {
+				continue
+			}
+			response := fmt.Sprintf("SIP/2.0 %d %s\r\n", code, reason)
+			for _, line := range lines[1:] {
+				key, _, ok := strings.Cut(line, ":")
+				if !ok {
+					continue
+				}
+				switch strings.ToLower(key) {
+				case "via", "from", "to", "call-id", "cseq", "contact":
+					response += line + "\r\n"
+				}
+			}
+			_, _ = registrar.WriteToUDP([]byte(response+"Expires: 300\r\nContent-Length: 0\r\n\r\n"), peer)
+		}
+	}()
+	defer func() { registrar.Close(); <-serverDone }()
+	s := androidSettings()
+	s.Reolink.Host, s.Reolink.BaichuanPort = "127.0.0.1", cameraPort
+	s.SIP.Registrar, s.SIP.RegistrarPort = "127.0.0.1", registrar.LocalAddr().(*net.UDPAddr).Port
+	s.SIP.DoorEnabled = false
+	s.SIP.ParallelEnabled = true
+	s.SIP.ParallelUsername, s.SIP.ParallelPassword = "gateway-test", "sip-secret"
+	s.SIP.ParallelLocalPort = localPort
+	s.CallRoutes[0].MobileNumber1 = "**610"
+	s.Diagnostics.DryRun = false
+	g, err := Start(encodeSettings(t, s), t.TempDir(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Stop()
+	deadline := time.Now().Add(4 * time.Second)
+	var state statuspkg.APIStatus
+	for {
+		raw, err := g.StatusJSON()
+		if err == nil {
+			if err = json.Unmarshal([]byte(raw), &state); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if state.Controls.TestCallAvailable && state.Gateway.TriggerEvents.LastError != "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("registered SIP still blocked by camera connection: %s %v", raw, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if state.Gateway.TriggerConnected || state.Gateway.State != "idle" {
+		t.Fatalf("incorrect readiness: %+v", state.Gateway)
+	}
+	if err = g.TestCall("default"); err != nil {
+		t.Fatal("test command rejected:", err)
+	}
+	select {
+	case <-invite:
+	case <-time.After(2 * time.Second):
+		t.Fatal("manual test never reached SIP registrar")
+	}
 }
 func encodeSettings(t *testing.T, s standalone.Settings) string {
 	t.Helper()

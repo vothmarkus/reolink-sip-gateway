@@ -62,15 +62,16 @@ type APIInfo struct {
 }
 
 type APIStatus struct {
-	APIVersion int              `json:"api_version"`
-	Revision   uint64           `json:"revision"`
-	UpdatedAt  time.Time        `json:"updated_at"`
-	Gateway    APIGatewayStatus `json:"gateway"`
-	SIP        APISIPStatus     `json:"sip"`
-	Call       APICallStatus    `json:"call"`
-	Media      APIMediaStatus   `json:"media"`
-	Controls   APIControls      `json:"controls"`
-	Routes     []APIRouteStatus `json:"routes,omitempty"`
+	GeneratedAt time.Time        `json:"generated_at"`
+	APIVersion  int              `json:"api_version"`
+	Revision    uint64           `json:"revision"`
+	UpdatedAt   time.Time        `json:"updated_at"`
+	Gateway     APIGatewayStatus `json:"gateway"`
+	SIP         APISIPStatus     `json:"sip"`
+	Call        APICallStatus    `json:"call"`
+	Media       APIMediaStatus   `json:"media"`
+	Controls    APIControls      `json:"controls"`
+	Routes      []APIRouteStatus `json:"routes,omitempty"`
 }
 
 type APIGatewayStatus struct {
@@ -273,9 +274,10 @@ func newAPIStatus(snapshot Snapshot, routes []RouteDefinition) APIStatus {
 		legacyTestCallAvailable = anyRouteAvailable
 	}
 	return APIStatus{
-		APIVersion: APIVersion,
-		Revision:   snapshot.Revision,
-		UpdatedAt:  snapshot.UpdatedAt,
+		GeneratedAt: time.Now(),
+		APIVersion:  APIVersion,
+		Revision:    snapshot.Revision,
+		UpdatedAt:   snapshot.UpdatedAt,
 		Gateway: APIGatewayStatus{
 			Version: snapshot.Version, State: snapshot.State, StartedAt: snapshot.StartedAt,
 			HomeAssistantConnected: snapshot.HAConnected, DryRun: snapshot.DryRun,
