@@ -1,9 +1,57 @@
-# Android 0.3.2-alpha6
+# Android 1.0.0
 
 The Android target lives on `feature/v2-android`, independently of `main` and
 `feature/v2-standalone`. Android 8 / API 26 or newer is supported; APKs contain
 ARM64 and ARMv7. The app reuses the HA gateway's Go SIP/RTP, Baichuan,
 visitor-trigger, call-control and codec code through a gomobile AAR.
+
+## V1.0: operation, routes and backup
+
+- **Übersicht** contains the Gateway on/off switch, compact connection status,
+  a route selector for test calls, hangup, calibration status and live preview.
+  The switch follows service state and is disabled during startup/teardown.
+  An active call or dial attempt is confirmed before stop or settings restart.
+- **Einstellungen** groups camera, SIP, routes, timing, WebRTC, live image,
+  operation and backup in expandable sections. Turning on applies and validates
+  the visible form. **Einstellungen speichern** restarts an enabled gateway;
+  saving while off leaves it off. Existing alpha credentials, destinations,
+  device mode and opt-in audio/image settings are retained.
+- **Klingeln & Rufrouten** supports up to 32 named routes with a door destination
+  and up to three parallel destinations each. One route is selected for the
+  camera visitor trigger. All routes share one camera and the configured SIP
+  accounts, with one active call globally. Tests target the selected *running*
+  route and respect its runtime availability; unsaved routes cannot be called.
+- **Nur manuell / Testanrufe** disables automatic visitor calls, while SIP and
+  manual calls remain usable. **Passivmodus** retains its separate meaning:
+  automatic event monitoring without SIP/calls. Log level is now configurable.
+- **Sicherung & Wiederherstellung** exports the saved configuration through the
+  Android document picker and loads standalone schema-2 JSON files (max 256 KiB).
+  Credentials are exported exactly, including spaces. The file therefore needs
+  private storage. Import validates schema, fields and Android compatibility,
+  expands standalone defaults, then loads a draft. It does not modify saved
+  settings or restart until **Speichern** is pressed. Unsupported Linux
+  RTSP/automatic profiles or `sip_registrar=auto` are rejected explicitly.
+- **Diagnose** retains the complete connection, WebRTC/AEC, acoustic measurement
+  and last media-session counters from alpha6, with a redacted copy action.
+- Explicit switch-off persists through device restart and package replacement.
+  Boot startup requires both the saved on-intent and **Nach Geräteneustart
+  automatisch starten**. Package replacement resumes an enabled gateway; legacy
+  alpha preferences keep their previous autostart behavior until first toggled.
+  One process-wide service executor serializes old-instance audio teardown and
+  new-instance startup during quick stop/start or Activity recreation.
+
+See [ANDROID-PARITY.md](ANDROID-PARITY.md) for the branch comparison and remaining
+platform differences. This is Android app version 1.0.0; the reused gateway core
+continues to identify itself separately as 2.0.0-beta.1.
+
+Update over alpha3–alpha6 using the same branch signing identity; do not
+uninstall to update. First check: verify saved targets under **Klingeln &
+Rufrouten**, toggle the gateway on, press the doorbell and answer. Then toggle
+off/on, export/import a backup and verify AEC/live image if enabled. V1.0 unit
+tests cover alpha routing migration, full configuration round-trip including
+secrets, autostart/off policy, per-route availability and invalid imports.
+CI compiles/tests/lints the Android app and checks APK/native alignment and its
+signer. The new menu and service behavior still need this device-level check.
 
 ## WebRTC and acoustic measurement in alpha6
 
@@ -166,8 +214,8 @@ echo and latency is still required; unit tests do not establish camera compatibi
 
 ## Android lifecycle
 
-**Speichern & Gateway neu starten** validates the entire candidate configuration
-before saving, then stops the previous runtime before starting the new one.
+**Einstellungen speichern** validates the entire candidate configuration
+before saving, then restarts an enabled gateway or leaves a stopped one off.
 Lifecycle and API calls run off the UI thread. The Go bridge refuses overlapping
 runtimes and closes the private loopback API on shutdown or fatal runtime exit.
 Configuration includes credentials and is kept in private app preferences; app
@@ -182,7 +230,8 @@ so SIP can bind to the new address. An active call ends during that restart.
 OEM battery policies still require testing on the actual device.
 
 Optional boot start runs after normal BOOT_COMPLETED (after unlock where
-required) or an app update; no credential access is attempted during locked boot.
+required), provided the gateway was not explicitly switched off. App updates
+resume a gateway with saved on-intent. No credentials are read during locked boot.
 
 References:
 - https://developer.android.com/develop/background-work/services/fgs/service-types
@@ -217,7 +266,8 @@ to Gradle and verifies the APK signature. The key is cached per Android branch.
 The previous implicit path did not exist when the cache was saved, so alpha1/2
 keys were ephemeral. **Updating from alpha2 to alpha3 requires recording the
 settings, uninstalling alpha2, installing alpha3 and entering the settings again.**
-Uninstalling removes the app's configuration; there is no settings export yet.
+Uninstalling removes the app's configuration. V1.0 adds explicit settings export;
+alpha2 itself does not have it.
 Future updates can retain settings while the cache survives. Debug signing is
 not a permanent release-signing solution: cache loss or another build machine
 can still change the certificate. No production signing key is committed or

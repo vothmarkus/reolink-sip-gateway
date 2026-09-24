@@ -10,9 +10,11 @@ android {
         applicationId = "de.vothmarkus.reolinksip"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.3.2-alpha6"
+        versionCode = 7
+        versionName = "1.0.0"
     }
+
+    buildFeatures { buildConfig = true }
 
     signingConfigs {
         getByName("debug") {

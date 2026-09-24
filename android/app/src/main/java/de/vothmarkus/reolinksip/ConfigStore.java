@@ -16,7 +16,19 @@ final class ConfigStore {
     }
 
     static JSONObject read(Context c) {
-        return new JSONObject(prefs(c).getAll());
+        JSONObject values = new JSONObject(prefs(c).getAll());
+        values.remove("gateway_requested"); // Runtime intent must never be overwritten by an old form.
+        return values;
+    }
+
+    static void requestRun(Context c, boolean enabled) {
+        if (!prefs(c).edit().putBoolean("gateway_requested", enabled).commit())
+            throw new IllegalStateException("Gateway-Schaltzustand konnte nicht gespeichert werden");
+    }
+
+    static boolean autoStart(JSONObject preferences, boolean packageUpdated) {
+        boolean requested = preferences.optBoolean("gateway_requested", preferences.optBoolean("start_on_boot", false));
+        return requested && (packageUpdated || preferences.optBoolean("start_on_boot", false));
     }
 
     // Keep existing alpha installations on their NVR configuration. Only a new
@@ -30,6 +42,7 @@ final class ConfigStore {
         Iterator<String> keys = values.keys();
         while (keys.hasNext()) {
             String key = keys.next();
+            if (key.equals("gateway_requested")) continue;
             Object value = values.get(key);
             if (value instanceof Boolean) e.putBoolean(key, (Boolean) value);
             else if (value instanceof Number) e.putInt(key, ((Number) value).intValue());
@@ -50,7 +63,7 @@ final class ConfigStore {
                 .put("reolink_password", p.optString("reolink_password", ""))
                 .put("reolink_mode", mode)
                 .put("nvr_channel_number", mode.equals("direct") ? 1 : p.optInt("nvr_channel", 1))
-                .put("reolink_rtsp_port", 554)
+                .put("reolink_rtsp_port", p.optInt("rtsp_port", 554))
                 .put("baichuan_port", p.optInt("baichuan_port", 9000)));
         root.put("sip", new JSONObject()
                 .put("sip_registrar", p.optString("sip_registrar", "").trim())
@@ -81,16 +94,63 @@ final class ConfigStore {
                 .put("ring_timeout_seconds", p.optInt("ring_timeout", 30))
                 .put("rtp_inactivity_timeout_seconds", p.optInt("rtp_timeout", 15))
                 .put("max_call_duration_seconds", p.optInt("max_duration", 300)));
-        JSONObject route = new JSONObject().put("id", "default").put("name", "Haustür")
-                .put("visitor_entity", "").put("doorbell_number", p.optString("door_number", "11").trim());
-        for (int i = 1; i <= 3; i++) route.put("mobile_number_" + i, p.optString("mobile_" + i, "").trim());
-        root.put("call_routes", new JSONArray().put(route));
-        root.put("trigger", new JSONObject().put("source", "baichuan").put("route_id", "default"));
+        root.put("call_routes", routes(p));
+        root.put("trigger", new JSONObject().put("source", p.optString("trigger_source", "baichuan"))
+                .put("route_id", p.optString("trigger_route", "default")));
         root.put("live_image", new JSONObject().put("fritzfon_live_image_enabled", p.optBoolean("live_image", false))
                 .put("http_port", p.optInt("image_port", 18099)));
         root.put("diagnostics", new JSONObject().put("dry_run", p.optBoolean("dry_run", true))
-                .put("log_level", "info"));
+                .put("log_level", p.optString("log_level", "info")));
         return root.toString();
+    }
+
+    static JSONArray routes(JSONObject p) throws Exception {
+        if (p.has("routes_json")) return new JSONArray(p.getString("routes_json"));
+        JSONObject route = new JSONObject().put("id", "default").put("name", "Haustür")
+                .put("visitor_entity", "").put("doorbell_number", p.optString("door_number", "11").trim());
+        for (int i = 1; i <= 3; i++) route.put("mobile_number_" + i, p.optString("mobile_" + i, "").trim());
+        return new JSONArray().put(route);
+    }
+
+    // Input is the fully defaulted, strictly validated schema-2 document returned
+    // by Mobilebridge.normalizeConfig. Android device preferences stay local.
+    static JSONObject fromJson(String normalized, JSONObject local) throws Exception {
+        JSONObject root = new JSONObject(normalized);
+        if (root.getInt("schema_version") != 2) throw new IllegalArgumentException("Konfigurationsversion wird nicht unterstützt");
+        JSONObject p = new JSONObject();
+        copy(root.getJSONObject("reolink"), p, new String[][]{
+                {"reolink_host", "reolink_host"}, {"reolink_username", "reolink_user"}, {"reolink_password", "reolink_password"},
+                {"reolink_mode", "device_mode"}, {"nvr_channel_number", "nvr_channel"}, {"reolink_rtsp_port", "rtsp_port"}, {"baichuan_port", "baichuan_port"}});
+        copy(root.getJSONObject("sip"), p, new String[][]{
+                {"sip_registrar", "sip_registrar"}, {"sip_registrar_port", "sip_port"}, {"door_call_enabled", "door_enabled"},
+                {"sip_username", "sip_user"}, {"sip_password", "sip_password"}, {"sip_local_port", "sip_local_port"},
+                {"sip_display_name", "display_name"}, {"sip_codec_preference", "codec"}, {"parallel_call_enabled", "parallel_enabled"},
+                {"parallel_username", "parallel_user"}, {"parallel_password", "parallel_password"}, {"parallel_local_port", "parallel_port"}});
+        copy(root.getJSONObject("audio"), p, new String[][]{
+                {"echo_cancellation_enabled", "aec_enabled"}, {"webrtc_high_pass_filter_enabled", "high_pass"},
+                {"webrtc_noise_suppression_enabled", "noise_suppression"}});
+        JSONObject call = root.getJSONObject("call");
+        copy(call, p, new String[][]{
+                {"incoming_calls_enabled", "incoming_enabled"}, {"incoming_connection_tone_enabled", "connection_tone"},
+                {"debounce_seconds", "debounce"}, {"ring_timeout_seconds", "ring_timeout"},
+                {"rtp_inactivity_timeout_seconds", "rtp_timeout"}, {"max_call_duration_seconds", "max_duration"}});
+        JSONArray callers = call.optJSONArray("incoming_allowed_callers");
+        StringBuilder allowed = new StringBuilder();
+        if (callers != null) for (int i = 0; i < callers.length(); i++) {
+            if (i > 0) allowed.append(", ");
+            allowed.append(callers.getString(i));
+        }
+        p.put("allowed_callers", allowed.toString());
+        p.put("routes_json", root.getJSONArray("call_routes").toString());
+        copy(root.getJSONObject("trigger"), p, new String[][]{{"source", "trigger_source"}, {"route_id", "trigger_route"}});
+        copy(root.getJSONObject("live_image"), p, new String[][]{{"fritzfon_live_image_enabled", "live_image"}, {"http_port", "image_port"}});
+        copy(root.getJSONObject("diagnostics"), p, new String[][]{{"dry_run", "dry_run"}, {"log_level", "log_level"}});
+        p.put("start_on_boot", local.optBoolean("start_on_boot", false));
+        return p;
+    }
+
+    private static void copy(JSONObject source, JSONObject target, String[][] mapping) throws Exception {
+        for (String[] pair : mapping) target.put(pair[1], source.get(pair[0]));
     }
 
     static String redact(Context c, String text) {

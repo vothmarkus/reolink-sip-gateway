@@ -15,7 +15,7 @@ final class GatewayStatus {
                 JSONObject call = s.getJSONObject("call");
                 boolean passive = gateway.optBoolean("dry_run");
                 text.append(passive ? "\nPassivmodus: SIP und Anrufe sind ausgeschaltet." : "\nAktiver Betrieb");
-                text.append("\nKlingelverbindung: ").append(gateway.optBoolean("trigger_connected") ? "verbunden" : "Verbindung wird aufgebaut");
+                text.append("\nKlingelverbindung: ").append(gateway.optString("trigger_source").equals("manual") ? "manueller Betrieb" : gateway.optBoolean("trigger_connected") ? "verbunden" : "Verbindung wird aufgebaut");
                 JSONObject events = gateway.optJSONObject("trigger_events");
                 if (events != null) {
                     if (!gateway.optBoolean("trigger_connected") && !events.optString("stage").isEmpty()) {
@@ -71,6 +71,53 @@ final class GatewayStatus {
     static boolean available(String raw, String control) {
         try { return new JSONObject(raw).getJSONObject("controls").optBoolean(control); }
         catch (Exception e) { return false; }
+    }
+
+    static boolean routeAvailable(String raw, String id) {
+        try {
+            org.json.JSONArray routes = new JSONObject(raw).getJSONArray("routes");
+            for (int i = 0; i < routes.length(); i++) {
+                JSONObject route = routes.getJSONObject(i);
+                if (id.equals(route.getString("id"))) return route.optBoolean("test_call_available");
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    static String overview(String raw, String error) {
+        if (raw.isEmpty()) return error.isEmpty() ? "Verbindungen werden bei eingeschaltetem Gateway angezeigt." : error;
+        try {
+            JSONObject s = new JSONObject(raw), g = s.getJSONObject("gateway"), sip = s.getJSONObject("sip"), call = s.getJSONObject("call");
+            boolean passive = g.optBoolean("dry_run");
+            StringBuilder b = new StringBuilder(passive ? "Passivmodus · Anrufe ausgeschaltet" : "Aktiver Betrieb");
+            b.append("\nKlingeln: ").append(g.optString("trigger_source").equals("manual") ? "nur manuell" : g.optBoolean("trigger_connected") ? "verbunden" : "Verbindung wird aufgebaut");
+            b.append("\nSIP Tür: ").append(registration(sip, "door", passive));
+            b.append("\nSIP Parallelruf: ").append(registration(sip, "parallel", passive));
+            b.append("\nAnruf: ").append(call.optBoolean("active") ? call.optString("state", "aktiv") : "kein Gespräch");
+            if (!call.optString("caller_number").isEmpty()) b.append(" · ").append(call.optString("caller_number"));
+            appendError(b, "Gateway", g.optString("last_error"));
+            appendError(b, "Dienst", error);
+            return b.toString();
+        } catch (Exception e) { return "Status wird geladen …"; }
+    }
+
+    private static String registration(JSONObject sip, String account, boolean passive) {
+        return passive ? "im Passivmodus aus" : !sip.optBoolean(account + "_call_enabled") ? "deaktiviert" :
+                sip.optBoolean(account + "_registered") ? "registriert" : "nicht registriert";
+    }
+
+    static String audioOverview(String raw) {
+        try {
+            JSONObject media = new JSONObject(raw).getJSONObject("media");
+            String calibration = media.optString("calibration_status");
+            boolean enabled = media.optBoolean("echo_cancellation_enabled", !calibration.isEmpty() && !calibration.equals("AEC disabled"));
+            String text = media.optString("profile", "Audio wird vorbereitet") + "\nWebRTC AEC: " + (enabled ? "eingeschaltet" : "aus");
+            if (enabled && !calibration.isEmpty()) {
+                text += "\nMessung: " + calibrationLabel(calibration);
+                if (!calibration.equals("pending") && !calibration.equals("measuring")) text += " · " + media.optInt("calibrated_delay_ms") + " ms";
+            }
+            return text;
+        } catch (Exception e) { return "Audioprofil und Messung erscheinen nach dem Start."; }
     }
 
     private static void appendEchoStatus(StringBuilder text, JSONObject media, boolean callActive) {

@@ -25,7 +25,12 @@ public final class GatewayService extends Service {
     private static volatile String lastState = "Gestoppt", lastStatus = "", lastError = "";
     private static volatile Gateway activeGateway;
     private static volatile long lastStatusAt;
-    private final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
+    // Shared across Service instances: Android can create the next instance
+    // before the previous asynchronous native/audio teardown has completed.
+    private static final ScheduledExecutorService worker = Executors.newSingleThreadScheduledExecutor();
+    private static volatile GatewayService currentService;
+    private static volatile String phase = "stopped";
+    private ScheduledFuture<?> polling;
     private Gateway gateway;
     private MediaCodecAudioAdapter audioAdapter;
     private ScheduledFuture<?> networkRestart;
@@ -36,9 +41,32 @@ public final class GatewayService extends Service {
     private String networkSignature = "";
     private volatile boolean destroyed;
 
-    static void start(Context c) { c.startForegroundService(new Intent(c, GatewayService.class)); }
-    static void restart(Context c) { c.startForegroundService(new Intent(c, GatewayService.class).setAction(ACTION_RESTART)); }
-    static void stop(Context c) { c.stopService(new Intent(c, GatewayService.class)); }
+    static void start(Context c) { requestStart(c, false); }
+    static void restart(Context c) { requestStart(c, true); }
+    private static void requestStart(Context c, boolean restart) {
+        boolean previous = ConfigStore.getBool(c, "gateway_requested", false);
+        ConfigStore.requestRun(c, true);
+        try {
+            c.startForegroundService(new Intent(c, GatewayService.class).setAction(restart ? ACTION_RESTART : null));
+        } catch (RuntimeException e) { ConfigStore.requestRun(c, previous); throw e; }
+    }
+    static void stop(Context c) {
+        ConfigStore.requestRun(c, false);
+        phase = "stopping";
+        if (!c.stopService(new Intent(c, GatewayService.class))) { phase = "stopped"; lastState = "Gestoppt"; }
+    }
+    static boolean enabled() { return phase.equals("starting") || phase.equals("running"); }
+    static boolean busy() { return phase.equals("starting") || phase.equals("stopping"); }
+    static String phaseLabel() {
+        switch (phase) {
+            case "starting": return "Gateway startet …";
+            case "running": return "Gateway eingeschaltet";
+            case "stopping": return "Gateway wird beendet …";
+            case "failed": return "Start oder Betrieb fehlgeschlagen";
+            default: return "Gateway ausgeschaltet";
+        }
+    }
+    static String error() { return lastError; }
     static String summary() {
         String summary = GatewayStatus.summary(lastState, lastStatus, lastError);
         return activeGateway == null ? summary : summary + "\n" + GatewayStatus.pollAge(lastStatusAt, SystemClock.elapsedRealtime());
@@ -56,10 +84,10 @@ public final class GatewayService extends Service {
     static String rawStatus() { return lastStatus; }
     static boolean testAvailable() { return activeGateway != null && GatewayStatus.available(lastStatus, "test_call_available"); }
     static boolean hangupAvailable() { return activeGateway != null && GatewayStatus.available(lastStatus, "hangup_available"); }
-    static void testCall() throws Exception {
+    static void testCall(String routeID) throws Exception {
         Gateway g = activeGateway;
         if (g == null) throw new IllegalStateException("Gateway läuft nicht");
-        g.testCall("default");
+        g.testCall(routeID);
     }
     static void hangup() throws Exception {
         Gateway g = activeGateway;
@@ -69,13 +97,15 @@ public final class GatewayService extends Service {
 
     @Override public void onCreate() {
         super.onCreate();
+        currentService = this;
+        phase = "starting";
         getSystemService(NotificationManager.class).createNotificationChannel(
                 new NotificationChannel(CHANNEL, "Reolink SIP Gateway", NotificationManager.IMPORTANCE_LOW));
         Notification n = notification("Gateway wird gestartet");
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
         else startForeground(NOTIFICATION_ID, n);
         // Blocking Go startup/stop and API calls never run on Android's main thread.
-        worker.scheduleWithFixedDelay(this::poll, 1, 2, TimeUnit.SECONDS);
+        polling = worker.scheduleWithFixedDelay(this::poll, 1, 2, TimeUnit.SECONDS);
         watchNetwork();
     }
 
@@ -84,7 +114,7 @@ public final class GatewayService extends Service {
         worker.execute(() -> {
             if (destroyed) return;
             try {
-                if (restart) stopGateway();
+                if (restart || phase.equals("failed")) stopGateway();
                 if (gateway == null) startGateway();
             } catch (Exception e) { failure(e); }
         });
@@ -93,6 +123,7 @@ public final class GatewayService extends Service {
 
     private void startGateway() throws Exception {
         if (destroyed) return;
+        phase = "starting";
         String config = ConfigStore.buildJson(this);
         Mobilebridge.validateConfig(config);
         lastError = "";
@@ -111,6 +142,8 @@ public final class GatewayService extends Service {
             gateway = next;
             audioAdapter = adapter;
             activeGateway = next;
+            if (destroyed) return; // Queued teardown owns this instance now.
+            phase = "running";
             lastState = "Gateway läuft";
             updateNotification(lastState);
         } catch (Exception e) {
@@ -126,17 +159,21 @@ public final class GatewayService extends Service {
             if (!gateway.isRunning()) {
                 String error = gateway.lastError();
                 stopGateway();
+                if (destroyed) return;
+                phase = "failed";
                 lastState = "Gateway beendet";
                 lastError = error.isEmpty() ? "Bitte Einstellungen prüfen und erneut starten" : error;
                 updateNotification(lastState);
                 return;
             }
-            lastStatus = gateway.statusJSON();
+            String snapshot = gateway.statusJSON();
+            if (destroyed) return;
+            lastStatus = snapshot;
             lastStatusAt = SystemClock.elapsedRealtime();
             lastError = gateway.lastError();
             String text = testAvailable() ? "Bereit für Anrufe" : "Gateway aktiv – Status in der App";
             updateNotification(text);
-        } catch (Exception e) { lastError = message(e); }
+        } catch (Exception e) { if (!destroyed) lastError = message(e); }
     }
 
     private void stopGateway() throws Exception {
@@ -155,6 +192,8 @@ public final class GatewayService extends Service {
     }
 
     private void failure(Exception e) {
+        if (destroyed) return;
+        phase = "failed";
         lastError = ConfigStore.redact(this, message(e));
         lastState = "Gateway-Fehler";
         updateNotification(lastState);
@@ -220,18 +259,24 @@ public final class GatewayService extends Service {
 
     @Override public void onDestroy() {
         destroyed = true;
+        if (currentService == this) phase = "stopping";
+        if (polling != null) polling.cancel(false);
+        if (networkRestart != null) networkRestart.cancel(false);
         if (connectivity != null && networkCallback != null) connectivity.unregisterNetworkCallback(networkCallback);
         worker.execute(() -> {
             try { stopGateway(); }
             catch (Exception e) { lastError = message(e); }
             finally {
                 releaseLocks();
-                lastState = "Gestoppt";
-                lastStatus = "";
-                lastStatusAt = 0;
+                if (currentService == this) {
+                    currentService = null;
+                    phase = "stopped";
+                    lastState = "Gestoppt";
+                    lastStatus = "";
+                    lastStatusAt = 0;
+                }
             }
         });
-        worker.shutdown();
         stopForeground(STOP_FOREGROUND_REMOVE);
         super.onDestroy();
     }

@@ -10,7 +10,8 @@ public final class BootReceiver extends BroadcastReceiver {
         String action = intent == null ? "" : intent.getAction();
         if ((Intent.ACTION_BOOT_COMPLETED.equals(action)
                 || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action))
-                && ConfigStore.getBool(context, "start_on_boot", false)) {
+                && ConfigStore.autoStart(new org.json.JSONObject(ConfigStore.prefs(context).getAll()),
+                        Intent.ACTION_MY_PACKAGE_REPLACED.equals(action))) {
             try {
                 GatewayService.start(context);
             } catch (IllegalStateException | SecurityException e) {

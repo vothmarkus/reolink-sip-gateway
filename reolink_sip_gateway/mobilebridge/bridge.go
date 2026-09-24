@@ -3,6 +3,7 @@ package mobilebridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -66,6 +67,31 @@ func ValidateConfig(raw string) error {
 		return err
 	}
 	return validateAndroidSettings(settings)
+}
+
+// NormalizeConfig validates imports before any Android preference is changed
+// and expands omitted schema-2 fields using the standalone defaults.
+func NormalizeConfig(raw string) (string, error) {
+	settings, err := standalone.DecodeSettings([]byte(raw))
+	if err != nil {
+		return "", err
+	}
+	if err := validateAndroidSettings(settings); err != nil {
+		return "", err
+	}
+	effective, err := settings.Runtime(false)
+	if err != nil {
+		return "", err
+	}
+	settings.CallRoutes = effective.CallRoutes
+	settings.Reolink.Mode = strings.ToLower(strings.TrimSpace(settings.Reolink.Mode))
+	settings.SIP.Codec = strings.ToLower(strings.TrimSpace(settings.SIP.Codec))
+	settings.Diagnostics.LogLevel = strings.ToLower(strings.TrimSpace(settings.Diagnostics.LogLevel))
+	if settings.Diagnostics.LogLevel == "warning" {
+		settings.Diagnostics.LogLevel = "warn"
+	}
+	data, err := json.Marshal(settings)
+	return string(data), err
 }
 
 func Start(raw, dataDir string, audio PlatformAudio, listener Listener) (*Gateway, error) {
@@ -197,7 +223,7 @@ func validateAndroidSettings(settings standalone.Settings) error {
 		return errors.New("Android requires direct (camera without NVR) or nvr mode; RTSP/auto need the Linux host")
 	}
 	if strings.EqualFold(strings.TrimSpace(settings.SIP.Registrar), "auto") {
-		return errors.New("Android alpha requires an explicit SIP registrar/FRITZ!Box address")
+		return errors.New("Android requires an explicit SIP registrar/FRITZ!Box address")
 	}
 	if !settings.Audio.AEC && (settings.Audio.HighPass || settings.Audio.NoiseSuppression) {
 		return errors.New("Android WebRTC filters require echo cancellation to be enabled")
