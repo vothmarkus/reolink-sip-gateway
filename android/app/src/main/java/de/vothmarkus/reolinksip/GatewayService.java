@@ -55,7 +55,9 @@ public final class GatewayService extends Service {
         phase = "stopping";
         if (!c.stopService(new Intent(c, GatewayService.class))) { phase = "stopped"; lastState = "Gestoppt"; }
     }
-    static boolean enabled() { return phase.equals("starting") || phase.equals("running"); }
+    // A failed foreground service remains switchable OFF. Showing an unchecked
+    // switch on failure would prevent clearing its saved autostart intent.
+    static boolean enabled() { return phase.equals("starting") || phase.equals("running") || phase.equals("failed"); }
     static boolean busy() { return phase.equals("starting") || phase.equals("stopping"); }
     static String phaseLabel() {
         switch (phase) {
@@ -110,12 +112,19 @@ public final class GatewayService extends Service {
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
-        boolean restart = intent != null && ACTION_RESTART.equals(intent.getAction());
+        // A delayed/sticky start must not undo a subsequent explicit switch-off.
+        if (!ConfigStore.getBool(this, "gateway_requested", true)) {
+            stopSelf(startId);
+            return START_NOT_STICKY;
+        }
+        boolean restart = (intent != null && ACTION_RESTART.equals(intent.getAction())) || phase.equals("failed");
+        phase = "starting";
         worker.execute(() -> {
             if (destroyed) return;
             try {
-                if (restart || phase.equals("failed")) stopGateway();
+                if (restart) stopGateway();
                 if (gateway == null) startGateway();
+                else if (!destroyed) phase = "running";
             } catch (Exception e) { failure(e); }
         });
         return START_STICKY;
@@ -239,7 +248,7 @@ public final class GatewayService extends Service {
                         if (networkRestart != null) networkRestart.cancel(false);
                         networkRestart = worker.schedule(() -> {
                             if (destroyed || gateway == null) return;
-                            try { lastState = "Netzwerk geändert – Neustart"; stopGateway(); startGateway(); }
+                            try { phase = "starting"; lastState = "Netzwerk geändert – Neustart"; stopGateway(); startGateway(); }
                             catch (Exception e) { failure(e); }
                         }, 2, TimeUnit.SECONDS);
                     });
