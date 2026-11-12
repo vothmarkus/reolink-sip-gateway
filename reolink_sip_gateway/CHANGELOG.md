@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.1
+
+- Ergänzt `aarch64` (ARM64) für die Home-Assistant-App neben `amd64` (x86-64).
+- CI baut das App-Image auf beiden Architekturen, validiert die Gateway-Konfiguration im Container und prüft die Verarbeitung von Audioframes durch den nativen WebRTC-AEC-Helfer.
+
 ## 1.5.0
 
 - NVR-Kanäle werden beim Start und anschließend alle fünf Minuten read-only neu erkannt. Fehler ersetzen keinen erfolgreichen Katalog; der letzte Stand wird NVR-gebunden und atomar mit Modus `0600` unter `/data/fritzfon-live-image-catalog.json` gespeichert.

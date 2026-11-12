@@ -6,6 +6,8 @@ Community Home Assistant app that bridges bidirectional audio between a Reolink 
 
 ## Current release
 
+**v1.5.1** adds ARM64 support for Home Assistant OS, including the Raspberry Pi 4 with the 64-bit OS image.
+
 **v1.5.0** makes the multi-camera FRITZ!Fon feature resilient and faster. NVR channels are refreshed every five minutes and the last successful catalog survives restarts and temporary NVR outages. Every camera with a Reolink UID receives a one-way, UID-derived URL that follows it across NVR channel moves; the v1.3 door URL and all v1.4 numbered URLs remain unchanged. Accepted visitor events asynchronously prefetch the door frame, while the Ingress page reports discovery, online/offline and image-source diagnostics.
 
 The direct v1.2.2 call-route model remains unchanged: a fresh installation contains one editable `Standardroute` with visitor sensor `auto`, FRITZ!Box doorbell number `11` and three optional mobile-number fields. All routes continue to share one Reolink camera/media path and the same two optional SIP accounts.
@@ -43,7 +45,7 @@ Highlights:
 - `visitor_entity: auto` uses Home Assistant's compact enabled-entity registry view; ambiguous multi-doorbell setups require manual selection.
 - The UI calls `dry_run` **Passive mode / Passivmodus**; the internal key remains unchanged for configuration compatibility.
 
-The current build targets **amd64** Home Assistant hosts.
+Supported Home Assistant architectures are **amd64** (x86-64) and **aarch64** (ARM64).
 
 ## Installation
 
@@ -230,7 +232,8 @@ go test ./...
 go test -shuffle=on ./...
 go vet ./...
 go test -race -p 1 ./...
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./cmd/gateway
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/gateway-amd64 ./cmd/gateway
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /tmp/gateway-arm64 ./cmd/gateway
 ```
 
 The Docker image additionally builds a small native C++ helper against Debian's `libwebrtc-audio-processing-1` development package.

@@ -39,6 +39,8 @@ jobs:
         run: go test -race -p 1 ./...
       - name: Static amd64 build
         run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/reolink-sip-gateway ./cmd/gateway
+      - name: Static ARM64 build
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o /tmp/reolink-sip-gateway-arm64 ./cmd/gateway
       - name: Configuration adapter regression
         run: bash ../scripts/test-config-adapter.sh
       - name: Runtime configuration validation
@@ -60,13 +62,38 @@ jobs:
           abort "missing optional door-account status" unless sip_required.include?("door_call_enabled") && sip_required.include?("door_registered")'
 
   container:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            ha_arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            ha_arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - name: Build Home Assistant image
         run: >-
-          docker build
-          --build-arg BUILD_VERSION=1.5.0
-          --build-arg BUILD_ARCH=amd64
+          docker build --platform linux/${{ matrix.arch }}
+          --build-arg BUILD_VERSION=1.5.1
+          --build-arg BUILD_ARCH=${{ matrix.ha_arch }}
           -t reolink-sip-gateway:ci
           reolink_sip_gateway
+      - name: Check image architecture and Home Assistant label
+        run: |
+          image=reolink-sip-gateway:ci
+          test "$(docker image inspect --format '{{.Architecture}}' "$image")" = "${{ matrix.arch }}"
+          test "$(docker image inspect --format '{{index .Config.Labels "io.hass.arch"}}' "$image")" = "${{ matrix.ha_arch }}"
+      - name: Run gateway configuration check in image
+        run: >-
+          docker run --rm
+          -v "$PWD/reolink_sip_gateway/testdata/options.runtime.valid.json:/options.json:ro"
+          --entrypoint /usr/bin/reolink-sip-gateway reolink-sip-gateway:ci
+          -check-config -config /options.json
+      - name: Exercise native WebRTC AEC in image
+        run: >-
+          python3 scripts/smoke-aec.py docker run --rm -i
+          --entrypoint /usr/bin/reolink-aec-helper reolink-sip-gateway:ci
