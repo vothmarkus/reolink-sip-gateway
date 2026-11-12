@@ -1,4 +1,4 @@
-# Prüfprotokoll 1.5.0
+# Prüfprotokoll
 
 ## Ziel
 
@@ -12,13 +12,14 @@
 - `go test -shuffle=on ./...`
 - `go test -race -p 1 ./...` (Paketserialisierung schützt den Echtzeit-Pacing-Test vor fremder Race-Build-Last; die Race-Erkennung selbst bleibt vollständig aktiv.)
 - wiederholte Media/AEC-/Kalibrierungstests
-- statischer amd64-Go-Releasebuild
+- statische Go-Releasebuilds für amd64 und ARM64
+- Home-Assistant-Container auf amd64 und aarch64 bauen, Gateway-Konfigurationsprüfung im Container ausführen und 100 Audioframes an den nativen WebRTC-AEC-Helfer übergeben
 - UI-Adaptertest: gruppierte `testdata/options.valid.json` → flache `testdata/options.runtime.valid.json`; anschließend `-check-config` gegen die Runtime-Datei
 - YAML-/JSON-Prüfung von App-Konfiguration und Übersetzungen
 - identische sechs Gruppen sowie `call_routes` unmittelbar hinter `call` in `options`, `schema`, DE, EN und Testkonfiguration; `live_image` steht jeweils als vorletzte Gruppe direkt vor `diagnostics`
 - identische SIP-Feldreihenfolge in `options`, `schema`, DE, EN und Fixture: beide Konto-Blöcke vor `sip_registrar_port`, `sip_local_port` und `parallel_local_port`
 - Bash-Syntaxprüfung des s6-Startskripts
-- Versionsprüfung 1.5.0 in App, Gateway, SIP-/RTSP-/Snapshot-/Kanalerkennungs-User-Agent und CI-Buildargument
+- Versionsprüfung in App, Gateway, SIP-/RTSP-/Snapshot-/Kanalerkennungs-User-Agent und CI-Buildargument
 - Prüfung, dass alle 0.4.x-Retired-Options aus dem öffentlichen Schema entfernt sind
 - expliziter Test der nativen Statistikbits 0…7
 

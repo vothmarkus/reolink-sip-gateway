@@ -1,8 +1,12 @@
-# Reolink SIP Gateway 1.5.0
+# Reolink SIP Gateway 1.5.1
 
 Home-Assistant-App für Reolink Video Doorbells: Ein Klingelereignis kann SIP-Anrufe auslösen; optional lassen sich die aktivierten Gateway-Nebenstellen anrufen und direkt mit der Doorbell verbinden.
 
 > Community-Projekt. Nicht offiziell von Reolink oder Home Assistant bereitgestellt oder unterstützt.
+
+## 1.5.1 – ARM64 für Home Assistant
+
+Die App unterstützt `amd64` (x86-64) und `aarch64` (ARM64), etwa einen Raspberry Pi 4 mit 64-Bit-Home-Assistant-OS.
 
 ## 1.5.0: robuste, kanalunabhängige FRITZ!Fon-Kameralinks
 

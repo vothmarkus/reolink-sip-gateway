@@ -3,7 +3,8 @@ WORKDIR /src
 COPY go.mod ./
 COPY cmd ./cmd
 COPY internal ./internal
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+# The Go image and Debian stages all follow Docker's target platform.
+RUN CGO_ENABLED=0 GOOS=linux \
     go build -trimpath -ldflags="-s -w" -o /out/reolink-sip-gateway ./cmd/gateway
 
 # Build a deliberately tiny bridge to Debian's WebRTC AudioProcessing library.
